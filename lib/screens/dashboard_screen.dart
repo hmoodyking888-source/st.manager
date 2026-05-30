@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_gauges/gauges.dart';
 import 'package:st_manager/services/router_service.dart';
-import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 import 'package:st_manager/screens/hotspot_cards_screen.dart';
 import 'package:st_manager/screens/devices_screen.dart';
@@ -10,7 +9,8 @@ import 'package:st_manager/screens/gaming_controls_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class DashboardScreen extends StatefulWidget {
-  const DashboardScreen({super.key});
+  final Map<String, String> routerData;
+  const DashboardScreen({super.key, required this.routerData});
 
   @override
   State<DashboardScreen> createState() => _DashboardScreenState();
@@ -18,7 +18,6 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   RouterService? _routerService;
-  final SecureStorageService _storage = SecureStorageService();
   bool _connected = false;
   double _cpuLoad = 0;
   double _temperature = 0;
@@ -40,19 +39,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _connectToRouter() async {
-    final creds = await _storage.getRouterCredentials();
-    if (creds == null) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('يرجى إعداد الراوتر أولاً عبر البوت')),
-        );
-      }
-      return;
-    }
+    final data = widget.routerData;
     _routerService = RouterService(
-      host: creds['host']!,
-      username: creds['username']!,
-      password: creds['password']!,
+      host: data['ip']!,
+      username: data['username']!,
+      password: data['password']!,
     );
     final ok = await _routerService!.connect();
     setState(() => _connected = ok);
@@ -60,36 +51,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _startMonitoring();
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('فشل الاتصال بالراوتر')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('فشل الاتصال بالراوتر')),
+        );
       }
     }
   }
 
   void _startMonitoring() {
     _fetchStats();
-    _statsTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => _fetchStats(),
-    );
+    _statsTimer =
+        Timer.periodic(const Duration(seconds: 1), (_) => _fetchStats());
 
     if (_selectedInterface != null) {
       _speedSubscription?.cancel();
-      _speedSubscription = _routerService!
-          .monitorTraffic(_selectedInterface!)
-          .listen((speed) {
-            if (mounted) setState(() => _currentSpeed = speed);
-          });
+      _speedSubscription =
+          _routerService!.monitorTraffic(_selectedInterface!).listen((speed) {
+        if (mounted) setState(() => _currentSpeed = speed);
+      });
     }
 
     Timer.periodic(const Duration(seconds: 3), (_) async {
       if (_routerService != null && _routerService!.isConnected) {
         try {
-          final logs = await _routerService!.sendCommand(
-            '/log/print',
-            params: {'limit': '4'},
-          );
+          final logs = await _routerService!
+              .sendCommand('/log/print', params: {'limit': '4'});
           if (mounted) setState(() => _recentLogs = logs);
         } catch (_) {}
       }
@@ -99,26 +85,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Future<void> _fetchStats() async {
     if (_routerService == null || !_routerService!.isConnected) return;
     try {
-      final cpu = await _routerService!.sendCommand(
-        '/system/resource/cpu/print',
-      );
+      final cpu =
+          await _routerService!.sendCommand('/system/resource/cpu/print');
       final health = await _routerService!.sendCommand('/system/health/print');
-      final resource = await _routerService!.sendCommand(
-        '/system/resource/print',
-      );
-      final identity = await _routerService!.sendCommand(
-        '/system/identity/print',
-      );
-      final active = await _routerService!.sendCommand(
-        '/ip/hotspot/active/print',
-      );
+      final resource =
+          await _routerService!.sendCommand('/system/resource/print');
+      final identity =
+          await _routerService!.sendCommand('/system/identity/print');
+      final active =
+          await _routerService!.sendCommand('/ip/hotspot/active/print');
 
       if (mounted) {
         setState(() {
           _cpuLoad = double.tryParse(cpu.first['load']?.toString() ?? '0') ?? 0;
           _temperature =
               double.tryParse(health.first['temperature']?.toString() ?? '0') ??
-              0;
+                  0;
           _voltage =
               double.tryParse(health.first['voltage']?.toString() ?? '0') ?? 0;
           _routerModel = resource.first['board-name']?.toString() ?? 'MikroTik';
@@ -152,17 +134,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: const Text('اختر الواجهة'),
         content: DropdownButtonFormField(
           value: _selectedInterface,
-          items: [
-            'ether1',
-            'ether2',
-            'bridge1',
-          ].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+          items: ['ether1', 'ether2', 'bridge1']
+              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+              .toList(),
           onChanged: (val) {
             setState(() => _selectedInterface = val);
             _speedSubscription?.cancel();
-            _speedSubscription = _routerService!.monitorTraffic(val!).listen((
-              speed,
-            ) {
+            _speedSubscription =
+                _routerService!.monitorTraffic(val!).listen((speed) {
               if (mounted) setState(() => _currentSpeed = speed);
             });
             Navigator.pop(context);
@@ -182,13 +161,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ),
         title: Column(
           children: [
-            const Text('ST_Manager'),
-            Text(
-              'ربطك بالعالم بسرعة وثقة',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(fontSize: 10),
-            ),
+            Text(widget.routerData['name'] ?? 'ST_Manager'),
+            Text('ربطك بالعالم بسرعة وثقة',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(fontSize: 10)),
           ],
         ),
         actions: [
@@ -226,9 +204,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               children: [
                 _buildSmallCard('المعالج', '${_cpuLoad.toStringAsFixed(1)}%'),
                 _buildSmallCard(
-                  'الحرارة',
-                  '${_temperature.toStringAsFixed(1)}°C',
-                ),
+                    'الحرارة', '${_temperature.toStringAsFixed(1)}°C'),
                 _buildSmallCard('الفولت', '${_voltage.toStringAsFixed(1)}V'),
                 _buildSmallCard('النشطاء', '$_activeUsers'),
               ],
@@ -248,28 +224,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           startValue: 0,
                           endValue: 100,
                           color: AppTheme.gold.withOpacity(0.1),
-                        ),
+                        )
                       ],
                       pointers: [
                         NeedlePointer(
                           value: _currentSpeed,
                           needleColor: AppTheme.gold,
-                        ),
+                        )
                       ],
                       annotations: [
                         GaugeAnnotation(
                           widget: Text(
                             '${_currentSpeed.toStringAsFixed(1)} Mbps',
                             style: const TextStyle(
-                              color: AppTheme.gold,
-                              fontSize: 16,
-                            ),
+                                color: AppTheme.gold, fontSize: 16),
                           ),
                           angle: 90,
                           positionFactor: 0.5,
-                        ),
+                        )
                       ],
-                    ),
+                    )
                   ],
                 ),
               ),
@@ -281,28 +255,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      'Router: $_routerModel',
-                      style: const TextStyle(color: Colors.white),
-                    ),
+                    Text('Router: $_routerModel',
+                        style: const TextStyle(color: Colors.white)),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 4,
-                      ),
+                          horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
                         color: AppTheme.greenOnline,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Text(
-                        'Online',
-                        style: TextStyle(color: Colors.black),
-                      ),
+                      child: const Text('Online',
+                          style: TextStyle(color: Colors.black)),
                     ),
-                    Text(
-                      'Uptime: $_uptime',
-                      style: const TextStyle(color: Colors.white70),
-                    ),
+                    Text('Uptime: $_uptime',
+                        style: const TextStyle(color: Colors.white70)),
                   ],
                 ),
               ),
@@ -317,11 +283,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 _buildMenuButton('البرودباند', Icons.router, () {}),
                 _buildMenuButton('هوتسبوت', Icons.wifi_password, () {
                   Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const HotspotCardsScreen(),
-                    ),
-                  );
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => HotspotCardsScreen(
+                              routerService: _routerService)));
                 }),
                 _buildMenuButton('نسخة/استعادة', Icons.backup, () {}),
                 _buildMenuButton('قطع البث', Icons.block, () {}),
@@ -332,47 +297,33 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 }),
                 _buildMenuButton('تحكم الألعاب', Icons.videogame_asset, () {
                   Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const GamingControlsScreen(),
-                    ),
-                  );
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const GamingControlsScreen()));
                 }),
               ],
             ),
             const SizedBox(height: 16),
-            Text(
-              'تنبيهات سريعة',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            ...(_recentLogs.map(
-              (log) => ListTile(
-                dense: true,
-                leading: const Icon(Icons.warning, color: AppTheme.gold),
-                title: Text(
-                  log['message']?.toString() ?? '',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
-                ),
-              ),
-            )),
+            Text('تنبيهات سريعة',
+                style: Theme.of(context).textTheme.titleLarge),
+            ...(_recentLogs.map((log) => ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.warning, color: AppTheme.gold),
+                  title: Text(
+                    log['message']?.toString() ?? '',
+                    style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  ),
+                ))),
             const SizedBox(height: 16),
-            Text(
-              'أعلى المستخدمين',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            ...(_topUsers.map(
-              (user) => ListTile(
-                leading: const Icon(Icons.person, color: AppTheme.gold),
-                title: Text(
-                  user['user']?.toString() ?? '',
-                  style: const TextStyle(color: Colors.white),
-                ),
-                subtitle: Text(
-                  user['bytes-out']?.toString() ?? '',
-                  style: const TextStyle(color: Colors.white54),
-                ),
-              ),
-            )),
+            Text('أعلى المستخدمين',
+                style: Theme.of(context).textTheme.titleLarge),
+            ...(_topUsers.map((user) => ListTile(
+                  leading: const Icon(Icons.person, color: AppTheme.gold),
+                  title: Text(user['user']?.toString() ?? '',
+                      style: const TextStyle(color: Colors.white)),
+                  subtitle: Text(user['bytes-out']?.toString() ?? '',
+                      style: const TextStyle(color: Colors.white54)),
+                ))),
             const SizedBox(height: 20),
             Center(
               child: ElevatedButton.icon(
@@ -389,18 +340,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'الرئيسية'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.people),
-            label: 'المستخدمون',
-          ),
+              icon: Icon(Icons.people), label: 'المستخدمون'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.notifications),
-            label: 'الاشعارات',
-          ),
+              icon: Icon(Icons.notifications), label: 'الاشعارات'),
           BottomNavigationBarItem(icon: Icon(Icons.report), label: 'التقارير'),
           BottomNavigationBarItem(
-            icon: Icon(Icons.settings),
-            label: 'الإعدادات',
-          ),
+              icon: Icon(Icons.settings), label: 'الإعدادات'),
         ],
       ),
     );
@@ -413,19 +358,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              title,
-              style: const TextStyle(color: AppTheme.gold, fontSize: 12),
-            ),
+            Text(title,
+                style: const TextStyle(color: AppTheme.gold, fontSize: 12)),
             const SizedBox(height: 4),
-            Text(
-              value,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            Text(value,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -441,10 +381,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Icon(icon, color: AppTheme.gold, size: 28),
             const SizedBox(height: 6),
-            Text(
-              label,
-              style: const TextStyle(color: Colors.white, fontSize: 12),
-            ),
+            Text(label,
+                style: const TextStyle(color: Colors.white, fontSize: 12)),
           ],
         ),
       ),

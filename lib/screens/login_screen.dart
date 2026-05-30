@@ -13,97 +13,131 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
   final _pinController = TextEditingController();
+  final _pinConfirmController = TextEditingController();
   final SecureStorageService _storage = SecureStorageService();
   bool _loading = false;
-  bool _hasStoredPin = false;
+  bool _isPinSet = false; // هل يوجد PIN مخزن مسبقاً
+  bool _showConfirmPin = false; // هل نعرض حقل تأكيد الرمز
 
   @override
   void initState() {
     super.initState();
-    _checkStoredPin();
+    _checkExistingData();
   }
 
-  Future<void> _checkStoredPin() async {
-    final pin = await _storage.read('app_pin');
-    if (pin != null && pin.isNotEmpty) {
-      setState(() => _hasStoredPin = true);
+  Future<void> _checkExistingData() async {
+    final phone = await _storage.getPhone();
+    final pin = await _storage.getPin();
+    if (phone != null && pin != null) {
+      setState(() {
+        _phoneController.text = phone;
+        _isPinSet = true;
+      });
     }
   }
 
-  Future<void> _login() async {
+  Future<void> _submit() async {
     final phone = _phoneController.text.trim();
     final pin = _pinController.text.trim();
-    if (phone.isEmpty) return;
+
+    if (phone.isEmpty) {
+      _showError('الرجاء إدخال رقم الهاتف');
+      return;
+    }
 
     setState(() => _loading = true);
 
-    // إذا كان هناك PIN مخزّن، تأكد من صحته
-    if (_hasStoredPin) {
-      final storedPin = await _storage.read('app_pin');
+    if (_isPinSet) {
+      // وضع تسجيل الدخول: التحقق من PIN
+      final storedPin = await _storage.getPin();
       if (pin != storedPin) {
         setState(() => _loading = false);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('رمز PIN غير صحيح')),
-          );
-        }
+        _showError('رمز PIN غير صحيح');
         return;
       }
     } else {
-      // أول مرة: خزّن الـ PIN الذي أدخله المستخدم
+      // وضع إنشاء PIN جديد
       if (pin.length < 4) {
         setState(() => _loading = false);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content:
-                    Text('يجب أن يكون رمز PIN مكوناً من 4 خانات على الأقل')),
-          );
-        }
+        _showError('يجب أن يكون رمز PIN 4 خانات على الأقل');
         return;
       }
-      await _storage.write('app_pin', pin);
-      await _storage.write('phone_number', phone);
+      // إذا كان يظهر حقل التأكيد، تأكد من التطابق
+      if (_showConfirmPin) {
+        final confirm = _pinConfirmController.text.trim();
+        if (pin != confirm) {
+          setState(() => _loading = false);
+          _showError('رمز PIN غير متطابق');
+          return;
+        }
+      } else {
+        // أول مرة: اعرض حقل التأكيد
+        setState(() {
+          _showConfirmPin = true;
+          _loading = false;
+        });
+        return;
+      }
+      // حفظ PIN ورقم الهاتف
+      await _storage.setPin(pin);
+      await _storage.setPhone(phone);
     }
 
-    // حفظ رقم الهاتف (للاستخدام لاحقاً)
-    await _storage.write('phone_number', phone);
-
-    // التحقق من الترخيص في Firestore
+    // التحقق من الترخيص (Firestore)
     final licensed = await FirebaseService.checkLicense(phone);
-
     if (licensed) {
-      if (!mounted) return;
-      Navigator.pushReplacementNamed(context, '/dashboard');
+      _navigateTo('/routers');
     } else {
-      // لم يجد ترخيصاً، تحقق من الفترة التجريبية (3 أيام من أول استخدام)
-      final firstLaunchStr = await _storage.read('first_launch');
+      // الفترة التجريبية 3 أيام
+      final firstLaunchStr = await _storage.getFirstLaunch();
       if (firstLaunchStr == null) {
-        // أول تشغيل، ابدأ الفترة التجريبية
-        await _storage.write('first_launch', DateTime.now().toIso8601String());
-        if (!mounted) return;
-        Navigator.pushReplacementNamed(context, '/dashboard');
+        await _storage.setFirstLaunch(DateTime.now().toIso8601String());
+        _navigateTo('/routers');
       } else {
         final firstLaunch = DateTime.parse(firstLaunchStr);
         final trialEnd = firstLaunch.add(const Duration(days: 3));
         if (DateTime.now().isBefore(trialEnd)) {
-          // لا يزال في الفترة التجريبية
-          if (!mounted) return;
-          Navigator.pushReplacementNamed(context, '/dashboard');
+          _navigateTo('/routers');
         } else {
-          // انتهت التجربة وليس لديه ترخيص
           setState(() => _loading = false);
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content:
-                      Text('انتهت الفترة التجريبية. يرجى الحصول على ترخيص.')),
-            );
-          }
+          _showError('انتهت الفترة التجريبية. يرجى الحصول على ترخيص.');
         }
       }
     }
     setState(() => _loading = false);
+  }
+
+  void _forgotPin() async {
+    // إعادة تعيين PIN: نطلب رقم الهاتف المسجل مسبقاً للمقارنة
+    final storedPhone = await _storage.getPhone();
+    if (storedPhone == null) {
+      _showError('لا يوجد رقم هاتف مسجل، أعد تشغيل التطبيق');
+      return;
+    }
+    final phoneInput = _phoneController.text.trim();
+    if (phoneInput != storedPhone) {
+      _showError('رقم الهاتف لا يتطابق مع المسجل');
+      return;
+    }
+    // مسح PIN والسماح بإنشاء جديد
+    await _storage.deletePin();
+    setState(() {
+      _isPinSet = false;
+      _showConfirmPin = false;
+      _pinController.clear();
+      _pinConfirmController.clear();
+    });
+    _showError('تم مسح الرمز، أنشئ رمزاً جديداً');
+  }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  void _navigateTo(String route) {
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, route);
   }
 
   @override
@@ -127,6 +161,7 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
+                enabled: !_isPinSet, // لا يمكن تغيير الرقم بعد التسجيل
                 decoration: const InputDecoration(
                   labelText: 'رقم الهاتف',
                   hintText: 'مثلاً 963XXXXXXXXX',
@@ -139,18 +174,38 @@ class _LoginScreenState extends State<LoginScreen> {
                 obscureText: true,
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
-                  labelText: _hasStoredPin ? 'رمز PIN' : 'أنشئ رمز PIN للتطبيق',
+                  labelText: _isPinSet ? 'رمز PIN' : 'أنشئ رمز PIN',
                   hintText: '4 خانات على الأقل',
                 ),
                 style: const TextStyle(color: AppTheme.gold),
               ),
-              const SizedBox(height: 20),
+              if (_showConfirmPin && !_isPinSet) ...[
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _pinConfirmController,
+                  obscureText: true,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'تأكيد رمز PIN',
+                    hintText: 'أعد إدخال الرمز',
+                  ),
+                  style: const TextStyle(color: AppTheme.gold),
+                ),
+              ],
+              const SizedBox(height: 24),
               ElevatedButton(
-                onPressed: _loading ? null : _login,
+                onPressed: _loading ? null : _submit,
                 child: _loading
                     ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text('دخول'),
+                    : Text(_isPinSet ? 'دخول' : 'متابعة'),
               ),
+              if (_isPinSet) ...[
+                TextButton(
+                  onPressed: _forgotPin,
+                  child: const Text('نسيت الرمز؟',
+                      style: TextStyle(color: AppTheme.gold)),
+                ),
+              ],
             ],
           ),
         ),

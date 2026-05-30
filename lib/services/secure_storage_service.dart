@@ -1,40 +1,62 @@
+import 'dart:convert';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class SecureStorageService {
   final _storage = const FlutterSecureStorage();
 
-  Future<void> write(String key, String value) async {
-    await _storage.write(key: key, value: value);
+  Future<void> write(String key, String value) async =>
+      await _storage.write(key: key, value: value);
+
+  Future<String?> read(String key) async => await _storage.read(key: key);
+
+  Future<void> delete(String key) async => await _storage.delete(key: key);
+
+  // ---- PIN Management ----
+  Future<void> setPin(String pin) async => await write('app_pin', pin);
+  Future<String?> getPin() async => await read('app_pin');
+  Future<void> deletePin() async => await delete('app_pin');
+
+  Future<void> setPhone(String phone) async =>
+      await write('phone_number', phone);
+  Future<String?> getPhone() async => await read('phone_number');
+
+  // ---- Router Credentials (multiple) ----
+  Future<void> saveRouters(List<Map<String, String>> routers) async {
+    final jsonStr = jsonEncode(routers);
+    await write('routers_list', jsonStr);
   }
 
-  Future<String?> read(String key) async {
-    return await _storage.read(key: key);
+  Future<List<Map<String, String>>> getRouters() async {
+    final jsonStr = await read('routers_list');
+    if (jsonStr == null) return [];
+    final List<dynamic> decoded = jsonDecode(jsonStr);
+    return decoded.map((e) => Map<String, String>.from(e)).toList();
   }
 
-  Future<void> delete(String key) async {
-    await _storage.delete(key: key);
+  Future<void> addRouter(Map<String, String> router) async {
+    final routers = await getRouters();
+    routers.add(router);
+    await saveRouters(routers);
   }
 
-  // تخزين بيانات الراوتر مشفرة
-  Future<void> saveRouterCredentials({
-    required String host,
-    required String username,
-    required String password,
-  }) async {
-    await write('router_host', host);
-    await write('router_username', username);
-    await write('router_password', password);
+  Future<void> updateRouter(int index, Map<String, String> router) async {
+    final routers = await getRouters();
+    if (index < routers.length) {
+      routers[index] = router;
+      await saveRouters(routers);
+    }
   }
 
-  Future<Map<String, String?>?> getRouterCredentials() async {
-    final host = await read('router_host');
-    final username = await read('router_username');
-    final password = await read('router_password');
-    if (host == null || username == null || password == null) return null;
-    return {'host': host, 'username': username, 'password': password};
+  Future<void> deleteRouter(int index) async {
+    final routers = await getRouters();
+    if (index < routers.length) {
+      routers.removeAt(index);
+      await saveRouters(routers);
+    }
   }
 
-  Future<void> clearAll() async {
-    await _storage.deleteAll();
-  }
+  // ---- First Launch ----
+  Future<String?> getFirstLaunch() async => await read('first_launch');
+  Future<void> setFirstLaunch(String date) async =>
+      await write('first_launch', date);
 }

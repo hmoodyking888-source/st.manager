@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class FirebaseService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// التحقق من الترخيص برقم الهاتف
+  /// التحقق من وجود ترخيص صالح لرقم الهاتف
   static Future<bool> checkLicense(String phoneNumber) async {
     try {
       final doc =
@@ -17,7 +17,7 @@ class FirebaseService {
     }
   }
 
-  /// جلب بيانات الراوتر المحفوظة للمستخدم (من البوت)
+  /// جلب بيانات الراوتر من Firestore (خاص بالمستخدم)
   static Future<Map<String, dynamic>?> getRouterData(String phoneNumber) async {
     try {
       final doc = await _firestore.collection('routers').doc(phoneNumber).get();

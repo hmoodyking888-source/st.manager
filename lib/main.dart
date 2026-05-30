@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:st_manager/screens/login_screen.dart';
+import 'package:st_manager/screens/routers_screen.dart';
 import 'package:st_manager/screens/dashboard_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
@@ -86,7 +87,12 @@ class MyApp extends StatelessWidget {
       initialRoute: '/login',
       routes: {
         '/login': (_) => const LoginScreen(),
-        '/dashboard': (_) => const DashboardScreen(),
+        '/routers': (_) => const RoutersScreen(),
+        '/dashboard': (_) {
+          final args =
+              ModalRoute.of(_)!.settings.arguments as Map<String, String>;
+          return DashboardScreen(routerData: args);
+        },
       },
     );
   }
