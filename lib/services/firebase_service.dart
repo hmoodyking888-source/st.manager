@@ -26,6 +26,15 @@ class FirebaseService {
     return null;
   }
 
+  static Future<void> saveUserPhone(
+      String phone, Map<String, String> routerData) async {
+    await _firestore.collection('users').doc(phone).set({
+      'phone': phone,
+      'lastLogin': FieldValue.serverTimestamp(),
+      'routers': [routerData], // يمكن توسيعها لاحقاً
+    }, SetOptions(merge: true));
+  }
+
   /// حفظ Chat ID للتلغرام
   static Future<void> saveChatId(String phoneNumber, String chatId) async {
     await _firestore.collection('users').doc(phoneNumber).set({

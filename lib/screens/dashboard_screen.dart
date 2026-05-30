@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_gauges/gauges.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
-import 'package:st_manager/screens/hotspot_cards_screen.dart';
+import 'package:st_manager/screens/hotspot_users_screen.dart';
+import 'package:st_manager/screens/generate_cards_screen.dart';
 import 'package:st_manager/screens/devices_screen.dart';
 import 'package:st_manager/screens/gaming_controls_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -285,7 +286,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => HotspotCardsScreen(
+                          builder: (_) => HotspotUsersScreen(
+                              routerService: _routerService)));
+                }),
+                _buildMenuButton('بطاقات جديدة', Icons.credit_card, () {
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => GenerateCardsScreen(
                               routerService: _routerService)));
                 }),
                 _buildMenuButton('نسخة/استعادة', Icons.backup, () {}),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
+import 'package:st_manager/services/firebase_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 class RoutersScreen extends StatefulWidget {
@@ -47,25 +48,30 @@ class _RoutersScreenState extends State<RoutersScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: 'اسم الراوتر')),
+                controller: nameController,
+                decoration: const InputDecoration(labelText: 'اسم الراوتر'),
+              ),
               TextField(
-                  controller: ipController,
-                  decoration: const InputDecoration(labelText: 'IP')),
+                controller: ipController,
+                decoration: const InputDecoration(labelText: 'IP'),
+              ),
               TextField(
-                  controller: userController,
-                  decoration: const InputDecoration(labelText: 'اسم المستخدم')),
+                controller: userController,
+                decoration: const InputDecoration(labelText: 'اسم المستخدم'),
+              ),
               TextField(
-                  controller: passController,
-                  decoration: const InputDecoration(labelText: 'كلمة المرور'),
-                  obscureText: true),
+                controller: passController,
+                decoration: const InputDecoration(labelText: 'كلمة المرور'),
+                obscureText: true,
+              ),
             ],
           ),
         ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('إلغاء')),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء'),
+          ),
           ElevatedButton(
             onPressed: () async {
               final router = {
@@ -79,6 +85,13 @@ class _RoutersScreenState extends State<RoutersScreen> {
               } else {
                 await _storage.updateRouter(index, router);
               }
+
+              // حفظ في Firestore أيضًا
+              final phone = await _storage.getPhone();
+              if (phone != null) {
+                await FirebaseService.saveUserPhone(phone, router);
+              }
+
               _loadRouters();
               Navigator.pop(context);
             },
@@ -104,8 +117,11 @@ class _RoutersScreenState extends State<RoutersScreen> {
       appBar: AppBar(title: const Text('إدارة الراوترات')),
       body: _routers.isEmpty
           ? const Center(
-              child: Text('لا يوجد راوترات مضافة',
-                  style: TextStyle(color: Colors.white54)))
+              child: Text(
+                'لا يوجد راوترات مضافة',
+                style: TextStyle(color: Colors.white54),
+              ),
+            )
           : ListView.builder(
               itemCount: _routers.length,
               itemBuilder: (_, i) {
@@ -121,11 +137,13 @@ class _RoutersScreenState extends State<RoutersScreen> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.white54),
-                            onPressed: () => _addOrEditRouter(index: i)),
+                          icon: const Icon(Icons.edit, color: Colors.white54),
+                          onPressed: () => _addOrEditRouter(index: i),
+                        ),
                         IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _deleteRouter(i)),
+                          icon: const Icon(Icons.delete, color: Colors.red),
+                          onPressed: () => _deleteRouter(i),
+                        ),
                       ],
                     ),
                     onTap: () => _selectRouter(r),

@@ -18,10 +18,12 @@ class RouterService {
   Future<bool> connect() async {
     _baseUrl = 'http://$host/rest';
     try {
-      final response = await http.get(
-        Uri.parse('$_baseUrl/system/resource'),
-        headers: _authHeaders(),
-      );
+      final response = await http
+          .get(
+            Uri.parse('$_baseUrl/system/resource'),
+            headers: _authHeaders(),
+          )
+          .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         _connected = true;
         return true;
@@ -43,7 +45,9 @@ class RouterService {
   }) async {
     if (!_connected) throw Exception('Not connected');
     final uri = Uri.parse('$_baseUrl$command').replace(queryParameters: params);
-    final response = await http.get(uri, headers: _authHeaders());
+    final response = await http
+        .get(uri, headers: _authHeaders())
+        .timeout(const Duration(seconds: 10));
     if (response.statusCode == 200) {
       final List<dynamic> jsonList = jsonDecode(response.body);
       return jsonList.cast<Map<String, dynamic>>();
