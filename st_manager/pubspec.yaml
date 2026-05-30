@@ -15,7 +15,6 @@ dependencies:
   cloud_firestore: ^5.4.2
   flutter_secure_storage: ^9.2.2
   google_fonts: ^6.2.1
-  routeros_api: ^0.1.4
   http: ^1.2.2
   url_launcher: ^6.3.0
   pdf: ^3.11.0

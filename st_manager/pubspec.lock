@@ -632,14 +632,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.6.0"
-  routeros_api:
-    dependency: "direct main"
-    description:
-      name: routeros_api
-      sha256: "3e2e54270dcb6179b4706df25ce496133993893ff8d13322d1fa29992ca9d897"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.1.4"
   share_plus:
     dependency: "direct main"
     description:

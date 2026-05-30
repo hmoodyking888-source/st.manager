@@ -1,11 +1,13 @@
 import 'dart:async';
-import 'package:routeros_api/routeros_api.dart';
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 
 class RouterService {
-  RouterOsApi? _api; // RouterOsApi هو الاسم الصحيح
   final String host;
   final String username;
   final String password;
+  String? _baseUrl;
+  bool _connected = false;
 
   RouterService({
     required this.host,
@@ -14,47 +16,53 @@ class RouterService {
   });
 
   Future<bool> connect() async {
+    _baseUrl = 'http://$host/rest';
     try {
-      _api = RouterOsApi(
-        host: host,
-        user: username,
-        password: password,
+      final response = await http.get(
+        Uri.parse('$_baseUrl/system/resource'),
+        headers: _authHeaders(),
       );
-      await _api!.connect(timeout: const Duration(seconds: 5));
-      return true;
-    } catch (e) {
-      _api = null;
-      return false;
-    }
+      if (response.statusCode == 200) {
+        _connected = true;
+        return true;
+      }
+    } catch (_) {}
+    _connected = false;
+    return false;
+  }
+
+  Map<String, String> _authHeaders() {
+    final basicAuth =
+        'Basic ${base64Encode(utf8.encode('$username:$password'))}';
+    return {'Authorization': basicAuth};
   }
 
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, String>? params,
   }) async {
-    if (_api == null) throw Exception('Not connected');
-    final cmd = _api!.beginCommand(command);
-    if (params != null) {
-      params.forEach((key, value) {
-        cmd.setArgument(key, value);
-      });
+    if (!_connected) throw Exception('Not connected');
+    final uri = Uri.parse('$_baseUrl$command').replace(queryParameters: params);
+    final response = await http.get(uri, headers: _authHeaders());
+    if (response.statusCode == 200) {
+      final List<dynamic> jsonList = jsonDecode(response.body);
+      return jsonList.cast<Map<String, dynamic>>();
     }
-    final res = await cmd.execute();
-    return res.asMapList();
+    throw Exception('Failed: ${response.statusCode}');
   }
 
   Stream<double> monitorTraffic(String interface) async* {
-    while (_api != null) {
+    while (_connected) {
       try {
         final result = await sendCommand(
           '/interface/monitor-traffic',
           params: {'interface': interface, 'once': ''},
         );
         if (result.isNotEmpty) {
-          final bitsPerSecond = double.tryParse(
+          final bits = double.tryParse(
                   result.first['bits-per-second']?.toString() ?? '0') ??
               0;
-          yield bitsPerSecond / 1000000;
+          yield bits / 1000000; // Mbps
         }
       } catch (_) {
         yield 0;
@@ -64,7 +72,7 @@ class RouterService {
   }
 
   Stream<List<Map<String, dynamic>>> getLogStream() async* {
-    while (_api != null) {
+    while (_connected) {
       try {
         final logs = await sendCommand('/log/print', params: {'limit': '5'});
         yield logs;
@@ -76,9 +84,8 @@ class RouterService {
   }
 
   void disconnect() {
-    _api?.close();
-    _api = null;
+    _connected = false;
   }
 
-  bool get isConnected => _api != null;
+  bool get isConnected => _connected;
 }
