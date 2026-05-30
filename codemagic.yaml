@@ -1,0 +1,13 @@
+workflows:
+  android-workflow:
+    name: Android Build
+    environment:
+      flutter: stable
+      groups:
+        - playstore_credentials
+    scripts:
+      - flutter pub get
+      - flutter test
+      - flutter build apk --release
+    artifacts:
+      - build/app/outputs/flutter-apk/app-release.apk
