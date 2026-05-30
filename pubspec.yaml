@@ -14,14 +14,13 @@ dependencies:
   firebase_auth: ^5.3.0
   cloud_firestore: ^5.4.2
   flutter_secure_storage: ^9.2.2
-  google_fonts: ^6.2.1
   http: ^1.2.2
   url_launcher: ^6.3.0
   pdf: ^3.11.0
   printing: ^5.13.1
-  share_plus: ^12.0.2               # <-- تم التحديث لحل التعارض
+  share_plus: ^12.0.2
   fl_chart: ^0.69.0
-  path_provider: ^2.1.4            # <-- الاسم الصحيح
+  path_provider: ^2.1.4
   intl: ^0.19.0
   shimmer: ^3.0.0
   flutter_animate: ^4.5.0
@@ -34,9 +33,23 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.3
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
     - assets/fonts/
+  fonts:
+    - family: Cairo
+      fonts:
+        - asset: assets/fonts/Cairo-Regular.ttf
+        - asset: assets/fonts/Cairo-Bold.ttf
+          weight: 700
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/icon.png"
+  adaptive_icon_background: "#000000"
+  adaptive_icon_foreground: "assets/images/icon.png"

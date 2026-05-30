@@ -1,13 +1,77 @@
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
+import 'package:firebase_core/firebase_core.dart';
 import 'package:st_manager/screens/login_screen.dart';
 import 'package:st_manager/screens/dashboard_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
+  runApp(const SplashScreen());
+
+  try {
+    await Firebase.initializeApp();
+  } catch (e) {
+    runApp(ErrorApp(error: e.toString()));
+    return;
+  }
+
   runApp(const MyApp());
+}
+
+class SplashScreen extends StatelessWidget {
+  const SplashScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: const Color(0xFF000000),
+        body: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.shield_outlined,
+                  size: 80, color: const Color(0xFFD4AF37)),
+              const SizedBox(height: 16),
+              const Text('ST_Manager',
+                  style: TextStyle(
+                    fontFamily: 'Cairo',
+                    color: Color(0xFFD4AF37),
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                  )),
+              const SizedBox(height: 8),
+              const CircularProgressIndicator(color: Color(0xFFD4AF37)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ErrorApp extends StatelessWidget {
+  final String error;
+  const ErrorApp({super.key, required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text('فشل الاتصال بقاعدة البيانات:\n$error',
+                style: const TextStyle(color: Colors.red, fontSize: 16),
+                textAlign: TextAlign.center),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class MyApp extends StatelessWidget {
