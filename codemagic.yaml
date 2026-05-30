@@ -2,9 +2,12 @@ workflows:
   android-build:
     name: ST_Manager Android
     environment:
-      flutter: stable
+      flutter: 3.41.9               # مطابق لإصدارك
+      groups:
+        - android-signing           # تجاهله إذا لم ترد توقيعاً
     scripts:
       - flutter pub get
+      - flutter pub run flutter_launcher_icons   # توليد الأيقونة تلقائياً
       - flutter build apk --release
     artifacts:
       - build/app/outputs/flutter-apk/app-release.apk
