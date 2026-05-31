@@ -1,12 +1,11 @@
 import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:router_os_client/router_os_client.dart';
 
 class RouterService {
+  RouterOSClient? _api;
   final String host;
   final String username;
   final String password;
-  String? _baseUrl;
   bool _connected = false;
 
   RouterService({
@@ -16,57 +15,54 @@ class RouterService {
   });
 
   Future<bool> connect() async {
-    _baseUrl = 'http://$host/rest';
     try {
-      final response = await http.get(
-        Uri.parse('$_baseUrl/system/resource'),
-        headers: _authHeaders(),
-      ).timeout(const Duration(seconds: 5));
-      if (response.statusCode == 200) {
-        _connected = true;
-        return true;
-      }
-    } catch (_) {}
-    _connected = false;
-    return false;
+      _api = RouterOSClient(
+        address:
+            host, // استخدام 'address' بدلاً من 'host' و 'user' بدلاً من 'username'
+        user: username,
+        password: password,
+        useSsl: false,
+      );
+      _connected = await _api!
+          .login(); // مكتبة 'router_os_client' تستخدم login() للاتصال
+      return _connected;
+    } catch (e) {
+      _connected = false;
+      return false;
+    }
   }
 
-  Map<String, String> _authHeaders() {
-    final basicAuth = 'Basic ${base64Encode(utf8.encode('$username:$password'))}';
-    return {'Authorization': basicAuth};
-  }
-
-  Future<List<Map<String, dynamic>>> sendCommand(
+  Future<List<Map<String, String>>> sendCommand(
     String command, {
     Map<String, String>? params,
   }) async {
-    if (!_connected) throw Exception('Not connected');
-    final uri = Uri.parse('$_baseUrl$command').replace(queryParameters: params);
-    final response = await http.get(uri, headers: _authHeaders()).timeout(const Duration(seconds: 10));
-    if (response.statusCode == 200) {
-      final List<dynamic> jsonList = jsonDecode(response.body);
-      return jsonList.cast<Map<String, dynamic>>();
+    // تم تعديل نوع القيمة المعادة إلى List<Map<String, String>>
+    if (!_connected || _api == null) throw Exception('Not connected');
+    try {
+      // يمكننا تمرير الأوامر والمعاملات مباشرة إلى الدالة talk().
+      final result = await _api!.talk(command, params);
+      return result;
+    } catch (e) {
+      // إعادة طرح الخطأ أو معالجته كما تراه مناسباً.
+      print('خطأ في إرسال الأمر: $e');
+      rethrow;
     }
-    throw Exception('Failed: ${response.statusCode}');
   }
 
-  // --- اختصارات للأوامر الشائعة ---
-  Future<List<Map<String, dynamic>>> getHotspotActive() => sendCommand('/ip/hotspot/active/print');
-  Future<List<Map<String, dynamic>>> getHotspotUsers() => sendCommand('/ip/hotspot/user/print');
-  Future<List<Map<String, dynamic>>> getHotspotProfiles() => sendCommand('/ip/hotspot/user/profile/print');
-  Future<List<Map<String, dynamic>>> getPppActive() => sendCommand('/ppp/active/print');
-  Future<List<Map<String, dynamic>>> getPppSecrets() => sendCommand('/ppp/secret/print');
-  Future<List<Map<String, dynamic>>> getSystemResource() => sendCommand('/system/resource/print');
-  Future<List<Map<String, dynamic>>> getSystemHealth() => sendCommand('/system/health/print');
-
-  /// مراقبة السرعة (مبسطة)
   Stream<double> monitorTrafficStream(String interface) async* {
     while (_connected) {
       try {
-        final res = await sendCommand('/interface/monitor-traffic',
-            params: {'interface': interface, 'once': ''});
-        if (res.isNotEmpty) {
-          final bits = double.tryParse(res.first['bits-per-second']?.toString() ?? '0') ?? 0;
+        final result = await sendCommand(
+          '/interface/monitor-traffic',
+          params: {
+            'interface': interface,
+            'once': 'once'
+          }, // 'once' لا تحتاج لقيمة، لكن تمريرها كـ'once' مناسب
+        );
+        if (result.isNotEmpty) {
+          final bits = double.tryParse(
+                  result.first['bits-per-second']?.toString() ?? '0') ??
+              0;
           yield bits / 1000000;
         }
       } catch (_) {
@@ -76,7 +72,25 @@ class RouterService {
     }
   }
 
+  // ----- أوامر مختصرة -----
+  Future<List<Map<String, String>>> getHotspotActive() =>
+      sendCommand('/ip/hotspot/active/print');
+  Future<List<Map<String, String>>> getHotspotUsers() =>
+      sendCommand('/ip/hotspot/user/print');
+  Future<List<Map<String, String>>> getHotspotProfiles() =>
+      sendCommand('/ip/hotspot/user/profile/print');
+  Future<List<Map<String, String>>> getPppActive() =>
+      sendCommand('/ppp/active/print');
+  Future<List<Map<String, String>>> getPppSecrets() =>
+      sendCommand('/ppp/secret/print');
+  Future<List<Map<String, String>>> getSystemResource() =>
+      sendCommand('/system/resource/print');
+  Future<List<Map<String, String>>> getSystemHealth() =>
+      sendCommand('/system/health/print');
+
   void disconnect() {
+    _api?.close();
+    _api = null;
     _connected = false;
   }
 
