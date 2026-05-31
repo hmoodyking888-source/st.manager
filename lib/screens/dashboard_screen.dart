@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_gauges/gauges.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
-import 'package:st_manager/screens/hotspot_users_screen.dart';
-import 'package:st_manager/screens/generate_cards_screen.dart';
+import 'package:st_manager/screens/hotspot/hotspot_menu_screen.dart';
+import 'package:st_manager/screens/ppp/ppp_menu_screen.dart';
+import 'package:st_manager/screens/applications/applications_screen.dart';
+import 'package:st_manager/screens/cards/cards_screen.dart';
 import 'package:st_manager/screens/devices_screen.dart';
-import 'package:st_manager/screens/gaming_controls_screen.dart';
+import 'package:st_manager/screens/backup_restore_screen.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -19,7 +21,6 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   RouterService? _routerService;
-  bool _connected = false;
   double _cpuLoad = 0;
   double _temperature = 0;
   double _voltage = 0;
@@ -27,8 +28,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _routerModel = '...';
   String _uptime = '...';
   int _activeUsers = 0;
-  List<Map<String, dynamic>> _recentLogs = [];
-  List<Map<String, dynamic>> _topUsers = [];
   String? _selectedInterface = 'ether1';
   StreamSubscription? _speedSubscription;
   Timer? _statsTimer;
@@ -47,7 +46,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       password: data['password']!,
     );
     final ok = await _routerService!.connect();
-    setState(() => _connected = ok);
     if (ok) {
       _startMonitoring();
     } else {
@@ -62,52 +60,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void _startMonitoring() {
     _fetchStats();
     _statsTimer =
-        Timer.periodic(const Duration(seconds: 1), (_) => _fetchStats());
+        Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
 
     if (_selectedInterface != null) {
       _speedSubscription?.cancel();
-      _speedSubscription =
-          _routerService!.monitorTraffic(_selectedInterface!).listen((speed) {
+      _speedSubscription = _routerService!
+          .monitorTrafficStream(_selectedInterface!)
+          .listen((speed) {
         if (mounted) setState(() => _currentSpeed = speed);
       });
     }
-
-    Timer.periodic(const Duration(seconds: 3), (_) async {
-      if (_routerService != null && _routerService!.isConnected) {
-        try {
-          final logs = await _routerService!
-              .sendCommand('/log/print', params: {'limit': '4'});
-          if (mounted) setState(() => _recentLogs = logs);
-        } catch (_) {}
-      }
-    });
   }
 
   Future<void> _fetchStats() async {
     if (_routerService == null || !_routerService!.isConnected) return;
     try {
-      final cpu =
-          await _routerService!.sendCommand('/system/resource/cpu/print');
-      final health = await _routerService!.sendCommand('/system/health/print');
-      final resource =
-          await _routerService!.sendCommand('/system/resource/print');
-      final identity =
-          await _routerService!.sendCommand('/system/identity/print');
-      final active =
-          await _routerService!.sendCommand('/ip/hotspot/active/print');
+      final resource = await _routerService!.getSystemResource();
+      final health = await _routerService!.getSystemHealth();
+      final active = await _routerService!.getHotspotActive();
 
       if (mounted) {
         setState(() {
-          _cpuLoad = double.tryParse(cpu.first['load']?.toString() ?? '0') ?? 0;
-          _temperature =
-              double.tryParse(health.first['temperature']?.toString() ?? '0') ??
-                  0;
-          _voltage =
-              double.tryParse(health.first['voltage']?.toString() ?? '0') ?? 0;
-          _routerModel = resource.first['board-name']?.toString() ?? 'MikroTik';
-          _uptime = resource.first['uptime']?.toString() ?? '...';
+          if (resource.isNotEmpty) {
+            _cpuLoad = double.tryParse(
+                    resource.first['cpu-load']?.toString() ?? '0') ??
+                0;
+            _routerModel =
+                resource.first['board-name']?.toString() ?? 'MikroTik';
+            _uptime = resource.first['uptime']?.toString() ?? '...';
+          }
+          if (health.isNotEmpty) {
+            _temperature = double.tryParse(
+                    health.first['temperature']?.toString() ?? '0') ??
+                0;
+            _voltage =
+                double.tryParse(health.first['voltage']?.toString() ?? '0') ??
+                    0;
+          }
           _activeUsers = active.length;
-          _topUsers = active.take(4).toList();
         });
       }
     } catch (_) {}
@@ -119,13 +109,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _statsTimer?.cancel();
     _routerService?.disconnect();
     super.dispose();
-  }
-
-  void _openTelegramBot() async {
-    final url = Uri.parse('https://t.me/ST_ManagerBot');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    }
   }
 
   void _showInterfacePicker() {
@@ -142,7 +125,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             setState(() => _selectedInterface = val);
             _speedSubscription?.cancel();
             _speedSubscription =
-                _routerService!.monitorTraffic(val!).listen((speed) {
+                _routerService!.monitorTrafficStream(val!).listen((speed) {
               if (mounted) setState(() => _currentSpeed = speed);
             });
             Navigator.pop(context);
@@ -156,10 +139,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.menu),
-          onPressed: () => Scaffold.of(context).openDrawer(),
-        ),
         title: Column(
           children: [
             Text(widget.routerData['name'] ?? 'ST_Manager'),
@@ -171,32 +150,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         actions: [
-          Stack(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined),
-                onPressed: () {},
-              ),
-              Positioned(
-                right: 6,
-                top: 6,
-                child: Container(
-                  width: 12,
-                  height: 12,
-                  decoration: const BoxDecoration(
-                    color: Colors.red,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-            ],
+          IconButton(
+            icon: const Icon(Icons.notifications_outlined),
+            onPressed: () {},
           ),
         ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             GridView.count(
               crossAxisCount: 4,
@@ -222,24 +184,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       maximum: 100,
                       ranges: [
                         GaugeRange(
-                          startValue: 0,
-                          endValue: 100,
-                          color: AppTheme.gold.withOpacity(0.1),
-                        )
+                            startValue: 0,
+                            endValue: 100,
+                            color: AppTheme.gold.withOpacity(0.1))
                       ],
                       pointers: [
                         NeedlePointer(
-                          value: _currentSpeed,
-                          needleColor: AppTheme.gold,
-                        )
+                            value: _currentSpeed, needleColor: AppTheme.gold)
                       ],
                       annotations: [
                         GaugeAnnotation(
                           widget: Text(
-                            '${_currentSpeed.toStringAsFixed(1)} Mbps',
-                            style: const TextStyle(
-                                color: AppTheme.gold, fontSize: 16),
-                          ),
+                              '${_currentSpeed.toStringAsFixed(1)} Mbps',
+                              style: const TextStyle(
+                                  color: AppTheme.gold, fontSize: 16)),
                           angle: 90,
                           positionFactor: 0.5,
                         )
@@ -280,65 +238,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
               shrinkWrap: true,
               physics: const NeverScrollableScrollPhysics(),
               children: [
-                _buildMenuButton('الأكتف', Icons.people, () {}),
-                _buildMenuButton('البرودباند', Icons.router, () {}),
                 _buildMenuButton('هوتسبوت', Icons.wifi_password, () {
                   Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => HotspotUsersScreen(
+                          builder: (_) => HotspotMenuScreen(
                               routerService: _routerService)));
                 }),
-                _buildMenuButton('بطاقات جديدة', Icons.credit_card, () {
+                _buildMenuButton('برودباند', Icons.router, () {
                   Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => GenerateCardsScreen(
+                          builder: (_) =>
+                              PppMenuScreen(routerService: _routerService)));
+                }),
+                _buildMenuButton('التطبيقات', Icons.apps, () {
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => ApplicationsScreen(
                               routerService: _routerService)));
                 }),
-                _buildMenuButton('نسخة/استعادة', Icons.backup, () {}),
-                _buildMenuButton('قطع البث', Icons.block, () {}),
+                _buildMenuButton('بطاقات', Icons.credit_card, () {
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              CardsScreen(routerService: _routerService)));
+                }),
+                _buildMenuButton('نسخ/استعادة', Icons.backup, () {
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => BackupRestoreScreen(
+                              routerService: _routerService)));
+                }),
+                _buildMenuButton('الأجهزة', Icons.cell_tower, () {
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              const DevicesScreen())); // تم تعديله هنا
+                }),
                 _buildMenuButton('الاشعارات', Icons.notifications, () {}),
                 _buildMenuButton('الواجهات', Icons.settings_ethernet, () {}),
-                _buildMenuButton('قياس السرعة', Icons.speed, () {
-                  _showInterfacePicker();
-                }),
-                _buildMenuButton('تحكم الألعاب', Icons.videogame_asset, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => const GamingControlsScreen()));
-                }),
+                _buildMenuButton(
+                    'قياس السرعة', Icons.speed, () => _showInterfacePicker()),
               ],
-            ),
-            const SizedBox(height: 16),
-            Text('تنبيهات سريعة',
-                style: Theme.of(context).textTheme.titleLarge),
-            ...(_recentLogs.map((log) => ListTile(
-                  dense: true,
-                  leading: const Icon(Icons.warning, color: AppTheme.gold),
-                  title: Text(
-                    log['message']?.toString() ?? '',
-                    style: const TextStyle(color: Colors.white70, fontSize: 12),
-                  ),
-                ))),
-            const SizedBox(height: 16),
-            Text('أعلى المستخدمين',
-                style: Theme.of(context).textTheme.titleLarge),
-            ...(_topUsers.map((user) => ListTile(
-                  leading: const Icon(Icons.person, color: AppTheme.gold),
-                  title: Text(user['user']?.toString() ?? '',
-                      style: const TextStyle(color: Colors.white)),
-                  subtitle: Text(user['bytes-out']?.toString() ?? '',
-                      style: const TextStyle(color: Colors.white54)),
-                ))),
-            const SizedBox(height: 20),
-            Center(
-              child: ElevatedButton.icon(
-                icon: const Icon(Icons.telegram),
-                label: const Text('تفعيل بوت ST'),
-                onPressed: _openTelegramBot,
-              ),
             ),
           ],
         ),

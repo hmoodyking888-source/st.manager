@@ -16,8 +16,8 @@ class _LoginScreenState extends State<LoginScreen> {
   final _pinConfirmController = TextEditingController();
   final SecureStorageService _storage = SecureStorageService();
   bool _loading = false;
-  bool _isPinSet = false; // هل يوجد PIN مخزن مسبقاً
-  bool _showConfirmPin = false; // هل نعرض حقل تأكيد الرمز
+  bool _isPinSet = false;
+  bool _showConfirmPin = false;
 
   @override
   void initState() {
@@ -48,7 +48,6 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _loading = true);
 
     if (_isPinSet) {
-      // وضع تسجيل الدخول: التحقق من PIN
       final storedPin = await _storage.getPin();
       if (pin != storedPin) {
         setState(() => _loading = false);
@@ -56,13 +55,11 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
     } else {
-      // وضع إنشاء PIN جديد
       if (pin.length < 4) {
         setState(() => _loading = false);
         _showError('يجب أن يكون رمز PIN 4 خانات على الأقل');
         return;
       }
-      // إذا كان يظهر حقل التأكيد، تأكد من التطابق
       if (_showConfirmPin) {
         final confirm = _pinConfirmController.text.trim();
         if (pin != confirm) {
@@ -71,24 +68,21 @@ class _LoginScreenState extends State<LoginScreen> {
           return;
         }
       } else {
-        // أول مرة: اعرض حقل التأكيد
         setState(() {
           _showConfirmPin = true;
           _loading = false;
         });
         return;
       }
-      // حفظ PIN ورقم الهاتف
       await _storage.setPin(pin);
       await _storage.setPhone(phone);
     }
 
-    // التحقق من الترخيص (Firestore)
+    // التحقق من الترخيص
     final licensed = await FirebaseService.checkLicense(phone);
     if (licensed) {
       _navigateTo('/routers');
     } else {
-      // الفترة التجريبية 3 أيام
       final firstLaunchStr = await _storage.getFirstLaunch();
       if (firstLaunchStr == null) {
         await _storage.setFirstLaunch(DateTime.now().toIso8601String());
@@ -108,18 +102,12 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   void _forgotPin() async {
-    // إعادة تعيين PIN: نطلب رقم الهاتف المسجل مسبقاً للمقارنة
     final storedPhone = await _storage.getPhone();
-    if (storedPhone == null) {
-      _showError('لا يوجد رقم هاتف مسجل، أعد تشغيل التطبيق');
-      return;
-    }
     final phoneInput = _phoneController.text.trim();
-    if (phoneInput != storedPhone) {
+    if (storedPhone == null || phoneInput != storedPhone) {
       _showError('رقم الهاتف لا يتطابق مع المسجل');
       return;
     }
-    // مسح PIN والسماح بإنشاء جديد
     await _storage.deletePin();
     setState(() {
       _isPinSet = false;
@@ -161,7 +149,7 @@ class _LoginScreenState extends State<LoginScreen> {
               TextField(
                 controller: _phoneController,
                 keyboardType: TextInputType.phone,
-                enabled: !_isPinSet, // لا يمكن تغيير الرقم بعد التسجيل
+                enabled: !_isPinSet,
                 decoration: const InputDecoration(
                   labelText: 'رقم الهاتف',
                   hintText: 'مثلاً 963XXXXXXXXX',

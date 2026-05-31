@@ -43,8 +43,7 @@ class AppTheme {
         selectedItemColor: gold,
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
-        selectedLabelStyle:
-            TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.bold),
+        selectedLabelStyle: TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.bold),
       ),
       cardTheme: CardThemeData(
         color: semiBlack,
@@ -99,12 +98,9 @@ class AppTheme {
           fontWeight: FontWeight.w600,
           fontSize: 20,
         ),
-        bodyLarge: TextStyle(
-            fontFamily: _fontFamily, color: Colors.white, fontSize: 16),
-        bodyMedium: TextStyle(
-            fontFamily: _fontFamily, color: Colors.white70, fontSize: 14),
-        labelSmall:
-            TextStyle(fontFamily: _fontFamily, color: gold, fontSize: 12),
+        bodyLarge: TextStyle(fontFamily: _fontFamily, color: Colors.white, fontSize: 16),
+        bodyMedium: TextStyle(fontFamily: _fontFamily, color: Colors.white70, fontSize: 14),
+        labelSmall: TextStyle(fontFamily: _fontFamily, color: gold, fontSize: 12),
       ),
     );
   }
