@@ -32,9 +32,7 @@ class _RoutersScreenState extends State<RoutersScreen> {
     if (phone == null) return;
     final licensed = await FirebaseService.checkLicense(phone);
     if (licensed) {
-      // جلب تاريخ الانتهاء الفعلي من Firestore
-      // (يمكن إضافته لاحقاً)
-      setState(() => _remainingDays = 30); // مثال
+      setState(() => _remainingDays = 30);
     } else {
       final firstLaunch = await _storage.getFirstLaunch();
       if (firstLaunch != null) {
@@ -51,6 +49,8 @@ class _RoutersScreenState extends State<RoutersScreen> {
     final ipController = TextEditingController();
     final userController = TextEditingController();
     final passController = TextEditingController();
+    String protocol = 'https';
+    final portController = TextEditingController(text: '443');
 
     if (index != null) {
       final r = _routers[index];
@@ -58,6 +58,8 @@ class _RoutersScreenState extends State<RoutersScreen> {
       ipController.text = r['ip'] ?? '';
       userController.text = r['username'] ?? '';
       passController.text = r['password'] ?? '';
+      protocol = r['protocol'] ?? 'https';
+      portController.text = r['port'] ?? '443';
     }
 
     await showDialog(
@@ -74,6 +76,31 @@ class _RoutersScreenState extends State<RoutersScreen> {
               TextField(
                   controller: ipController,
                   decoration: const InputDecoration(labelText: 'IP')),
+              Row(
+                children: [
+                  Expanded(
+                    flex: 1,
+                    child: DropdownButtonFormField<String>(
+                      value: protocol,
+                      items: ['http', 'https']
+                          .map(
+                              (p) => DropdownMenuItem(value: p, child: Text(p)))
+                          .toList(),
+                      onChanged: (v) => protocol = v!,
+                      decoration: const InputDecoration(labelText: 'بروتوكول'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    flex: 1,
+                    child: TextField(
+                      controller: portController,
+                      decoration: const InputDecoration(labelText: 'المنفذ'),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ),
+                ],
+              ),
               TextField(
                   controller: userController,
                   decoration: const InputDecoration(labelText: 'اسم المستخدم')),
@@ -95,6 +122,8 @@ class _RoutersScreenState extends State<RoutersScreen> {
                 'ip': ipController.text.trim(),
                 'username': userController.text.trim(),
                 'password': passController.text.trim(),
+                'protocol': protocol,
+                'port': portController.text.trim(),
               };
               if (index == null) {
                 await _storage.addRouter(router);
@@ -153,7 +182,8 @@ class _RoutersScreenState extends State<RoutersScreen> {
                     leading: const Icon(Icons.router, color: AppTheme.gold),
                     title: Text(r['name'] ?? '',
                         style: const TextStyle(color: Colors.white)),
-                    subtitle: Text(r['ip'] ?? '',
+                    subtitle: Text(
+                        '${r['ip']} (${r['protocol'] ?? 'https'}:${r['port'] ?? '443'})',
                         style: const TextStyle(color: Colors.white54)),
                     trailing: Row(
                       mainAxisSize: MainAxisSize.min,

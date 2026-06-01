@@ -32,7 +32,7 @@ class _CardsScreenState extends State<CardsScreen> {
   bool _showNotes = false;
   final _notesCtrl = TextEditingController();
 
-  // مواقع مستقلة لكل عنصر (نسبة من 0 إلى 1)
+  // مواقع نسبية (0..1)
   double _userX = 0.2, _userY = 0.3;
   double _passX = 0.2, _passY = 0.5;
   double _netX = 0.2, _netY = 0.65;
@@ -40,6 +40,20 @@ class _CardsScreenState extends State<CardsScreen> {
   double _notesX = 0.2, _notesY = 0.85;
 
   List<String> _profiles = [];
+
+  // نموذج النص التجريبي
+  String get _previewUser => _generateSample(_userLength);
+  String get _previewPass => _generateSample(_passLength);
+
+  String _generateSample(int length) {
+    if (length <= 0) return '';
+    if (_charType == 'numbers')
+      return List.generate(length, (i) => '${i % 10}').join();
+    if (_charType == 'letters')
+      return List.generate(length, (i) => String.fromCharCode(97 + (i % 26)))
+          .join();
+    return List.generate(length, (i) => '${i % 10}').join() + 'a';
+  }
 
   @override
   void initState() {
@@ -60,6 +74,112 @@ class _CardsScreenState extends State<CardsScreen> {
     if (image != null) setState(() => _templateImage = File(image.path));
   }
 
+  Future<void> _generatePdf() async {
+    final pdf = pw.Document();
+    final fontColor = PdfColor.fromInt(_fontColor.value);
+
+    // صفحة A4 عمودية
+    final pageFormat = PdfPageFormat.a4; // 210 x 297 mm
+    final pageWidth = pageFormat.width;
+    final pageHeight = pageFormat.height;
+
+    // حساب الشبكة: نريد بطاقات بعرض 85mm وارتفاع 55mm (حجم بطاقة هوتسبوت نموذجي)
+    const double cardW = 85.0;
+    const double cardH = 55.0;
+    final cols = (pageWidth / cardW).floor();
+    final rows = (pageHeight / cardH).floor();
+    final maxPerPage = cols * rows;
+
+    // إنشاء صفحات متعددة إذا لزم الأمر
+    int cardIndex = 0;
+    while (cardIndex < _cardCount) {
+      final page = pw.Page(
+        pageFormat: pageFormat,
+        build: (context) {
+          final List<pw.Widget> cards = [];
+          for (int i = 0;
+              i < maxPerPage && cardIndex < _cardCount;
+              i++, cardIndex++) {
+            final user = _generateRandom(
+                lettersOnly: _charType == 'letters',
+                numbersOnly: _charType == 'numbers');
+            final pass = _generateRandom(
+                lettersOnly: _charType == 'letters',
+                numbersOnly: _charType == 'numbers');
+
+            final card = pw.Container(
+              width: cardW,
+              height: cardH,
+              decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey, width: 0.5)),
+              child: pw.Stack(
+                children: [
+                  if (_templateImage != null)
+                    pw.Image(
+                      pw.MemoryImage(
+                          File(_templateImage!.path).readAsBytesSync()),
+                      fit: pw.BoxFit.cover,
+                    ),
+                  pw.Positioned(
+                    left: _userX * cardW,
+                    top: _userY * cardH,
+                    child: pw.Text(user,
+                        style: pw.TextStyle(
+                            color: fontColor, fontSize: _fontSize)),
+                  ),
+                  pw.Positioned(
+                    left: _passX * cardW,
+                    top: _passY * cardH,
+                    child: pw.Text(pass,
+                        style: pw.TextStyle(
+                            color: fontColor, fontSize: _fontSize)),
+                  ),
+                  if (_showNetwork)
+                    pw.Positioned(
+                      left: _netX * cardW,
+                      top: _netY * cardH,
+                      child: pw.Text(_networkCtrl.text,
+                          style: pw.TextStyle(color: fontColor, fontSize: 10)),
+                    ),
+                  if (_showDuration)
+                    pw.Positioned(
+                      left: _durX * cardW,
+                      top: _durY * cardH,
+                      child: pw.Text(_durationCtrl.text,
+                          style: pw.TextStyle(color: fontColor, fontSize: 10)),
+                    ),
+                  if (_showNotes)
+                    pw.Positioned(
+                      left: _notesX * cardW,
+                      top: _notesY * cardH,
+                      child: pw.Text(_notesCtrl.text,
+                          style: pw.TextStyle(color: fontColor, fontSize: 10)),
+                    ),
+                ],
+              ),
+            );
+
+            final col = i % cols;
+            final row = i ~/ cols;
+            cards.add(pw.Positioned(
+              left: col * cardW,
+              top: row * cardH,
+              child: card,
+            ));
+          }
+          return pw.Stack(children: cards);
+        },
+      );
+      pdf.addPage(page);
+    }
+
+    await Printing.layoutPdf(
+      onLayout: (format) => pdf.save(),
+      format: pageFormat,
+      usePrinterSettings: true,
+    );
+  }
+
   String _generateRandom({bool numbersOnly = false, bool lettersOnly = false}) {
     if (numbersOnly) {
       return List.generate(_userLength,
@@ -78,114 +198,6 @@ class _CardsScreenState extends State<CardsScreen> {
         String.fromCharCode(97 + (DateTime.now().microsecondsSinceEpoch % 26));
   }
 
-  Future<void> _generatePdf() async {
-    final pdf = pw.Document();
-    final fontColor = PdfColor.fromInt(_fontColor.value);
-
-    // حساب الشبكة
-    int cols, rows;
-    if (_cardCount >= 40) {
-      cols = 5;
-      rows = 8;
-    } else if (_cardCount >= 20) {
-      cols = 4;
-      rows = 5;
-    } else {
-      cols = 3;
-      rows = (_cardCount / 3).ceil();
-    }
-
-    final pageWidth = 80.0 * PdfPageFormat.mm;
-    final pageHeight = 50.0 * PdfPageFormat.mm;
-    final cardWidth = pageWidth / cols;
-    final cardHeight = pageHeight / rows;
-
-    // إنشاء صفحة واحدة تحتوي على شبكة البطاقات
-    final page = pw.Page(
-      pageFormat:
-          const PdfPageFormat(80 * PdfPageFormat.mm, 50 * PdfPageFormat.mm),
-      build: (context) {
-        final List<pw.Widget> cards = [];
-        for (int i = 0; i < _cardCount; i++) {
-          final user = _generateRandom(
-              lettersOnly: _charType == 'letters',
-              numbersOnly: _charType == 'numbers');
-          final pass = _generateRandom(
-              lettersOnly: _charType == 'letters',
-              numbersOnly: _charType == 'numbers');
-
-          // حاوية بعرض وارتفاع محددين
-          final card = pw.Container(
-            width: cardWidth,
-            height: cardHeight,
-            child: pw.Stack(
-              children: [
-                if (_templateImage != null)
-                  pw.Image(
-                    pw.MemoryImage(
-                        File(_templateImage!.path).readAsBytesSync()),
-                    fit: pw.BoxFit.cover,
-                  ),
-                // النصوص تتحرك حسب المواقع النسبية
-                pw.Positioned(
-                  left: _userX * cardWidth,
-                  top: _userY * cardHeight,
-                  child: pw.Text(user,
-                      style:
-                          pw.TextStyle(color: fontColor, fontSize: _fontSize)),
-                ),
-                pw.Positioned(
-                  left: _passX * cardWidth,
-                  top: _passY * cardHeight,
-                  child: pw.Text(pass,
-                      style:
-                          pw.TextStyle(color: fontColor, fontSize: _fontSize)),
-                ),
-                if (_showNetwork)
-                  pw.Positioned(
-                    left: _netX * cardWidth,
-                    top: _netY * cardHeight,
-                    child: pw.Text(_networkCtrl.text,
-                        style: pw.TextStyle(color: fontColor, fontSize: 10)),
-                  ),
-                if (_showDuration)
-                  pw.Positioned(
-                    left: _durX * cardWidth,
-                    top: _durY * cardHeight,
-                    child: pw.Text(_durationCtrl.text,
-                        style: pw.TextStyle(color: fontColor, fontSize: 10)),
-                  ),
-                if (_showNotes)
-                  pw.Positioned(
-                    left: _notesX * cardWidth,
-                    top: _notesY * cardHeight,
-                    child: pw.Text(_notesCtrl.text,
-                        style: pw.TextStyle(color: fontColor, fontSize: 10)),
-                  ),
-              ],
-            ),
-          );
-
-          cards.add(
-            pw.Positioned(
-              left: (i % cols) * cardWidth,
-              top: (i ~/ cols) * cardHeight,
-              child: card,
-            ),
-          );
-        }
-        return pw.Stack(children: cards);
-      },
-    );
-    pdf.addPage(page);
-
-    await Printing.layoutPdf(
-      onLayout: (format) => pdf.save(),
-      format: const PdfPageFormat(80 * PdfPageFormat.mm, 50 * PdfPageFormat.mm),
-      usePrinterSettings: true,
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -194,12 +206,12 @@ class _CardsScreenState extends State<CardsScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // معاينة القالب مع عناصر قابلة للسحب
+            // المعاينة المباشرة مع النصوص التجريبية
             if (_templateImage != null)
               Stack(
                 children: [
                   Image.file(_templateImage!, height: 250, fit: BoxFit.contain),
-                  // عنصر اليوزر
+                  // User
                   Positioned(
                     left: _userX * 200,
                     top: _userY * 250,
@@ -210,13 +222,13 @@ class _CardsScreenState extends State<CardsScreen> {
                       }),
                       child: Container(
                         color: Colors.red.withOpacity(0.3),
-                        child: const Text('User',
-                            style:
-                                TextStyle(color: Colors.white, fontSize: 12)),
+                        child: Text(_previewUser,
+                            style: TextStyle(
+                                color: _fontColor, fontSize: _fontSize)),
                       ),
                     ),
                   ),
-                  // عنصر الباس
+                  // Pass
                   Positioned(
                     left: _passX * 200,
                     top: _passY * 250,
@@ -227,13 +239,12 @@ class _CardsScreenState extends State<CardsScreen> {
                       }),
                       child: Container(
                         color: Colors.blue.withOpacity(0.3),
-                        child: const Text('Pass',
-                            style:
-                                TextStyle(color: Colors.white, fontSize: 12)),
+                        child: Text(_previewPass,
+                            style: TextStyle(
+                                color: _fontColor, fontSize: _fontSize)),
                       ),
                     ),
                   ),
-                  // الشبكة
                   if (_showNetwork)
                     Positioned(
                       left: _netX * 200,
@@ -245,13 +256,12 @@ class _CardsScreenState extends State<CardsScreen> {
                         }),
                         child: Container(
                           color: Colors.green.withOpacity(0.3),
-                          child: const Text('Net',
+                          child: Text(_networkCtrl.text,
                               style:
-                                  TextStyle(color: Colors.white, fontSize: 10)),
+                                  TextStyle(color: _fontColor, fontSize: 10)),
                         ),
                       ),
                     ),
-                  // المدة
                   if (_showDuration)
                     Positioned(
                       left: _durX * 200,
@@ -263,13 +273,12 @@ class _CardsScreenState extends State<CardsScreen> {
                         }),
                         child: Container(
                           color: Colors.yellow.withOpacity(0.3),
-                          child: const Text('Dur',
+                          child: Text(_durationCtrl.text,
                               style:
-                                  TextStyle(color: Colors.white, fontSize: 10)),
+                                  TextStyle(color: _fontColor, fontSize: 10)),
                         ),
                       ),
                     ),
-                  // ملاحظات
                   if (_showNotes)
                     Positioned(
                       left: _notesX * 200,
@@ -281,9 +290,9 @@ class _CardsScreenState extends State<CardsScreen> {
                         }),
                         child: Container(
                           color: Colors.purple.withOpacity(0.3),
-                          child: const Text('Notes',
+                          child: Text(_notesCtrl.text,
                               style:
-                                  TextStyle(color: Colors.white, fontSize: 10)),
+                                  TextStyle(color: _fontColor, fontSize: 10)),
                         ),
                       ),
                     ),
@@ -308,30 +317,25 @@ class _CardsScreenState extends State<CardsScreen> {
             Row(
               children: [
                 Expanded(
-                  child: TextField(
-                    decoration:
-                        const InputDecoration(labelText: 'عدد البطاقات'),
-                    keyboardType: TextInputType.number,
-                    onChanged: (v) => _cardCount = int.tryParse(v) ?? 10,
-                  ),
-                ),
+                    child: TextField(
+                        decoration:
+                            const InputDecoration(labelText: 'عدد البطاقات'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (v) => _cardCount = int.tryParse(v) ?? 10)),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextField(
-                    decoration: const InputDecoration(labelText: 'طول اليوزر'),
-                    keyboardType: TextInputType.number,
-                    onChanged: (v) => _userLength = int.tryParse(v) ?? 6,
-                  ),
-                ),
+                    child: TextField(
+                        decoration:
+                            const InputDecoration(labelText: 'طول اليوزر'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (v) => _userLength = int.tryParse(v) ?? 6)),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: TextField(
-                    decoration:
-                        const InputDecoration(labelText: 'طول الباسوورد'),
-                    keyboardType: TextInputType.number,
-                    onChanged: (v) => _passLength = int.tryParse(v) ?? 6,
-                  ),
-                ),
+                    child: TextField(
+                        decoration:
+                            const InputDecoration(labelText: 'طول الباسوورد'),
+                        keyboardType: TextInputType.number,
+                        onChanged: (v) => _passLength = int.tryParse(v) ?? 6)),
               ],
             ),
             DropdownButtonFormField(
@@ -343,6 +347,24 @@ class _CardsScreenState extends State<CardsScreen> {
               ],
               onChanged: (v) => setState(() => _charType = v!),
               decoration: const InputDecoration(labelText: 'نوع الأحرف'),
+            ),
+            // حجم الخط
+            Row(
+              children: [
+                const Text('حجم الخط: ', style: TextStyle(color: Colors.white)),
+                Expanded(
+                  child: Slider(
+                    value: _fontSize,
+                    min: 8,
+                    max: 30,
+                    divisions: 22,
+                    label: _fontSize.round().toString(),
+                    onChanged: (v) => setState(() => _fontSize = v),
+                  ),
+                ),
+                Text(_fontSize.round().toString(),
+                    style: const TextStyle(color: Colors.white)),
+              ],
             ),
             // اختيار اللون
             Row(

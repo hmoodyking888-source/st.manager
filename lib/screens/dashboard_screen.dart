@@ -8,6 +8,7 @@ import 'package:st_manager/screens/ppp/ppp_active_screen.dart';
 import 'package:st_manager/screens/cards/cards_screen.dart';
 import 'package:st_manager/screens/devices_screen.dart';
 import 'package:st_manager/screens/backup_restore_screen.dart';
+import 'package:st_manager/screens/interface_screen.dart';
 import 'package:st_manager/widgets/side_drawer.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -41,8 +42,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final data = widget.routerData;
     _routerService = RouterService(
       host: data['ip']!,
+      port: int.tryParse(data['port'] ?? '443') ?? 443,
       username: data['username']!,
       password: data['password']!,
+      useHttps: (data['protocol'] ?? 'https') == 'https',
     );
     final ok = await _routerService!.connect();
     if (ok) {
@@ -269,6 +272,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       MaterialPageRoute(
                           builder: (_) =>
                               DevicesScreen(routerService: _routerService)));
+                }),
+                _buildMenuButton('الواجهات', Icons.settings_ethernet, () {
+                  Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) =>
+                              InterfaceScreen(routerService: _routerService)));
                 }),
                 _buildMenuButton(
                     'قياس السرعة', Icons.speed, () => _showInterfacePicker()),

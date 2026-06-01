@@ -1,34 +1,40 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart'; // <-- تمت الإضافة
 
 class RouterService {
   final String host;
+  final int port;
   final String username;
   final String password;
+  final bool useHttps;
   bool _connected = false;
+  late http.Client _client;
 
   RouterService({
     required this.host,
+    this.port = 443,
     required this.username,
     required this.password,
-  });
-
-  Map<String, String> _authHeaders() {
-    final basicAuth =
-        'Basic ${base64Encode(utf8.encode('$username:$password'))}';
-    return {
-      'Authorization': basicAuth,
-      'Content-Type': 'application/json',
-    };
+    this.useHttps = true,
+  }) {
+    final ioClient = HttpClient()
+      ..badCertificateCallback =
+          (X509Certificate cert, String host, int port) => true;
+    _client = IOClient(ioClient);
   }
+
+  String get _scheme => useHttps ? 'https' : 'http';
+  String get _baseUrl => '$_scheme://$host:$port/rest';
 
   Future<bool> connect() async {
     for (int i = 0; i < 3; i++) {
       try {
-        final response = await http
+        final response = await _client
             .get(
-              Uri.parse('https://$host/rest/system/resource'),
+              Uri.parse('$_baseUrl/system/resource'),
               headers: _authHeaders(),
             )
             .timeout(const Duration(seconds: 3));
@@ -44,25 +50,27 @@ class RouterService {
     return false;
   }
 
+  Map<String, String> _authHeaders() {
+    final basicAuth =
+        'Basic ${base64Encode(utf8.encode('$username:$password'))}';
+    return {'Authorization': basicAuth};
+  }
+
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, dynamic>? params,
     bool usePost = false,
   }) async {
     if (!_connected) throw Exception('Not connected');
-    final url = Uri.https(host, '/rest/$command');
+    final url = Uri.parse('$_baseUrl$command');
     http.Response response;
     for (int i = 0; i < 3; i++) {
       try {
         if (usePost) {
-          response = await http
-              .post(url,
-                  headers: _authHeaders(), body: jsonEncode(params ?? {}))
-              .timeout(const Duration(seconds: 3));
+          response = await _client.post(url,
+              headers: _authHeaders(), body: jsonEncode(params ?? {}));
         } else {
-          response = await http
-              .get(url, headers: _authHeaders())
-              .timeout(const Duration(seconds: 3));
+          response = await _client.get(url, headers: _authHeaders());
         }
         if (response.statusCode == 200) {
           final List<dynamic> jsonList = jsonDecode(response.body);
@@ -91,8 +99,8 @@ class RouterService {
   }
 
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
-    final url = Uri.https(host, '/rest/interface/monitor-traffic');
-    final response = await http.post(
+    final url = Uri.parse('$_baseUrl/interface/monitor-traffic');
+    final response = await _client.post(
       url,
       headers: _authHeaders(),
       body: jsonEncode({'interface': interfaceName, 'duration': '1s'}),
@@ -148,6 +156,9 @@ class RouterService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> getInterfaceList() =>
+      sendCommand('interface/print');
+
   Future<List<Map<String, dynamic>>> getHotspotActive() =>
       sendCommand('ip/hotspot/active/print');
   Future<List<Map<String, dynamic>>> getHotspotUsers() =>
@@ -160,11 +171,10 @@ class RouterService {
       sendCommand('ppp/secret/print');
   Future<List<Map<String, dynamic>>> getSystemResource() =>
       sendCommand('system/resource/print');
-  Future<List<Map<String, dynamic>>> getInterfaceList() =>
-      sendCommand('interface/print');
 
   void disconnect() {
     _connected = false;
+    _client.close();
   }
 
   bool get isConnected => _connected;
