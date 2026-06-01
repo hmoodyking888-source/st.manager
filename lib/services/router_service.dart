@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart'; // <-- تمت الإضافة
+import 'package:http/io_client.dart';
 
 class RouterService {
   final String host;
@@ -15,10 +15,10 @@ class RouterService {
 
   RouterService({
     required this.host,
-    this.port = 443,
+    this.port = 80, // تم تغيير الافتراضي إلى 80
     required this.username,
     required this.password,
-    this.useHttps = true,
+    this.useHttps = false, // تم تغيير الافتراضي إلى HTTP
   }) {
     final ioClient = HttpClient()
       ..badCertificateCallback =
@@ -40,9 +40,11 @@ class RouterService {
             .timeout(const Duration(seconds: 3));
         if (response.statusCode == 200) {
           _connected = true;
+          print('✅ Connected successfully');
           return true;
         }
-      } catch (_) {
+      } catch (e) {
+        print('❌ Connection attempt ${i + 1} failed: $e');
         await Future.delayed(Duration(seconds: i + 1));
       }
     }
@@ -121,37 +123,42 @@ class RouterService {
     return {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
   }
 
+  // ---------- دوال جلب البيانات (مصححة) ----------
   Future<Map<String, String>> getSystemHealth() async {
     try {
-      final List<Map<String, String>> response =
-          await sendCommand('system/health/print')
-              .then((data) => data.cast<Map<String, String>>());
+      final List<Map<String, dynamic>> response =
+          await sendCommand('system/health/print');
       final healthData = <String, String>{};
       for (var item in response) {
+        // معالجة البيانات بصيغتي v6 و v7 بأمان
         if (item.containsKey('name') && item.containsKey('value')) {
-          final name = item['name']!.toLowerCase();
-          final value = item['value']!;
+          final name = item['name'].toString().toLowerCase();
+          final value = item['value'].toString();
           if (name.contains('temp')) {
-            double temp = double.tryParse(value) ?? 0;
-            if (temp > 100) temp = temp / 10;
-            healthData['temperature'] = temp.toStringAsFixed(1);
+            double? temp = double.tryParse(value);
+            if (temp != null) {
+              if (temp > 100) temp = temp / 10;
+              healthData['temperature'] = temp.toStringAsFixed(1);
+            }
           } else if (name.contains('volt')) {
             healthData['voltage'] = value;
-          } else {
-            healthData[name] = value;
           }
         } else {
           if (item.containsKey('temperature')) {
-            double temp = double.tryParse(item['temperature']!) ?? 0;
-            if (temp > 100) temp = temp / 10;
-            healthData['temperature'] = temp.toStringAsFixed(1);
+            double? temp = double.tryParse(item['temperature'].toString());
+            if (temp != null) {
+              if (temp > 100) temp = temp / 10;
+              healthData['temperature'] = temp.toStringAsFixed(1);
+            }
           }
-          if (item.containsKey('voltage'))
-            healthData['voltage'] = item['voltage']!;
+          if (item.containsKey('voltage')) {
+            healthData['voltage'] = item['voltage'].toString();
+          }
         }
       }
       return healthData;
-    } catch (_) {
+    } catch (e) {
+      print('❌ getSystemHealth error: $e');
       return {};
     }
   }
