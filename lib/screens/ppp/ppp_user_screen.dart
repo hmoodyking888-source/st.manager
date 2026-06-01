@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
-class HotspotUserScreen extends StatefulWidget {
+class PppUserScreen extends StatefulWidget {
   final RouterService? routerService;
   final bool isEdit;
   final Map<String, dynamic>? initialData;
-  const HotspotUserScreen({
+  const PppUserScreen({
     super.key,
     required this.routerService,
     required this.isEdit,
@@ -14,15 +14,13 @@ class HotspotUserScreen extends StatefulWidget {
   });
 
   @override
-  State<HotspotUserScreen> createState() => _HotspotUserScreenState();
+  State<PppUserScreen> createState() => _PppUserScreenState();
 }
 
-class _HotspotUserScreenState extends State<HotspotUserScreen> {
+class _PppUserScreenState extends State<PppUserScreen> {
   final _nameController = TextEditingController();
   final _passController = TextEditingController();
-  final _emailController = TextEditingController();
-  String? _selectedProfile;
-  List<String> _profiles = [];
+  final _profileController = TextEditingController();
   bool _loading = false;
 
   @override
@@ -31,54 +29,35 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
     if (widget.initialData != null) {
       _nameController.text = widget.initialData!['name']?.toString() ?? '';
       _passController.text = widget.initialData!['password']?.toString() ?? '';
-      _emailController.text = widget.initialData!['email']?.toString() ?? '';
-      _selectedProfile = widget.initialData!['profile']?.toString();
+      _profileController.text =
+          widget.initialData!['profile']?.toString() ?? '';
     }
-    _loadProfiles();
-  }
-
-  Future<void> _loadProfiles() async {
-    if (widget.routerService == null) return;
-    try {
-      final profiles = await widget.routerService!.getHotspotProfiles();
-      setState(() {
-        _profiles = profiles.map((p) => p['name'].toString()).toList();
-        if (_selectedProfile == null && _profiles.isNotEmpty) {
-          _selectedProfile = _profiles.first;
-        }
-      });
-    } catch (_) {}
   }
 
   Future<void> _save() async {
     if (widget.routerService == null) return;
     final name = _nameController.text.trim();
-    final pass = _passController.text.trim();
     if (name.isEmpty) return;
-
     setState(() => _loading = true);
     try {
       final params = {
         'name': name,
-        'password': pass,
-        'profile': _selectedProfile ?? '',
-        'email': _emailController.text.trim(),
+        'password': _passController.text.trim(),
+        'profile': _profileController.text.trim(),
       };
       if (widget.isEdit && widget.initialData != null) {
         params['numbers'] = widget.initialData!['.id']?.toString() ?? '';
         await widget.routerService!
-            .sendCommand('ip/hotspot/user/set', params: params);
+            .sendCommand('ppp/secret/set', params: params);
       } else {
         await widget.routerService!
-            .sendCommand('ip/hotspot/user/add', params: params);
+            .sendCommand('ppp/secret/add', params: params);
       }
       if (mounted) Navigator.pop(context, true);
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('فشل حفظ المستخدم')),
-        );
-      }
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('فشل الحفظ')));
     } finally {
       setState(() => _loading = false);
     }
@@ -88,8 +67,7 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(
-              widget.isEdit ? 'تعديل حساب هوتسبوت' : 'إضافة حساب هوتسبوت')),
+          title: Text(widget.isEdit ? 'تعديل حساب PPP' : 'إضافة حساب PPP')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -108,19 +86,10 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
             ),
             const SizedBox(height: 12),
             TextField(
-              controller: _emailController,
-              decoration: const InputDecoration(
-                  labelText: 'البريد الإلكتروني / ملاحظات'),
+              controller: _profileController,
+              decoration:
+                  const InputDecoration(labelText: 'البروفايل (اختياري)'),
               style: const TextStyle(color: Colors.white),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: _selectedProfile,
-              items: _profiles
-                  .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                  .toList(),
-              onChanged: (v) => setState(() => _selectedProfile = v),
-              decoration: const InputDecoration(labelText: 'البروفايل'),
             ),
             const SizedBox(height: 24),
             ElevatedButton(

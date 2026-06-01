@@ -32,7 +32,8 @@ class SplashScreen extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.shield_outlined, size: 80, color: const Color(0xFFD4AF37)),
+              Icon(Icons.shield_outlined,
+                  size: 80, color: const Color(0xFFD4AF37)),
               const SizedBox(height: 16),
               const Text('ST_Manager',
                   style: TextStyle(
@@ -88,7 +89,8 @@ class MyApp extends StatelessWidget {
         '/login': (_) => const LoginScreen(),
         '/routers': (_) => const RoutersScreen(),
         '/dashboard': (_) {
-          final args = ModalRoute.of(_)!.settings.arguments as Map<String, String>;
+          final args =
+              ModalRoute.of(_)!.settings.arguments as Map<String, String>;
           return DashboardScreen(routerData: args);
         },
       },

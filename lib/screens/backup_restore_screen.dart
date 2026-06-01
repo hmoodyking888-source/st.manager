@@ -18,16 +18,14 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     setState(() => _loading = true);
     try {
       await widget.routerService!
-          .sendCommand('/system/backup/save', params: {'name': 'st_backup'});
-      if (mounted) {
+          .sendCommand('system/backup/save', params: {'name': 'st_backup'});
+      if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('تم إنشاء النسخة الاحتياطية')));
-      }
     } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('فشل إنشاء النسخة الاحتياطية')));
-      }
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('فشل')));
     } finally {
       setState(() => _loading = false);
     }
@@ -38,16 +36,14 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     setState(() => _loading = true);
     try {
       await widget.routerService!
-          .sendCommand('/system/backup/load', params: {'name': 'st_backup'});
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تمت الاستعادة، سيتم إعادة التشغيل')));
-      }
+          .sendCommand('system/backup/load', params: {'name': 'st_backup'});
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('تمت الاستعادة')));
     } catch (_) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('فشل الاستعادة')));
-      }
     } finally {
       setState(() => _loading = false);
     }

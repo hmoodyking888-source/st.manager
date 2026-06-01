@@ -3,7 +3,7 @@ name: Build ST_Manager APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:   # يسمح بالتشغيل اليدوي من GitHub
+  workflow_dispatch:
 
 jobs:
   build:
@@ -36,6 +36,11 @@ jobs:
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
+
+      - name: Decode Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: echo "$KEYSTORE_BASE64" | base64 --decode > keystore.jks
 
       - name: Build APK
         run: flutter build apk --release

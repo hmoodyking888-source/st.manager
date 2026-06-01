@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/services/firebase_service.dart';
+import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 class RoutersScreen extends StatefulWidget {
@@ -13,16 +13,37 @@ class RoutersScreen extends StatefulWidget {
 class _RoutersScreenState extends State<RoutersScreen> {
   final SecureStorageService _storage = SecureStorageService();
   List<Map<String, String>> _routers = [];
+  int _remainingDays = 0;
 
   @override
   void initState() {
     super.initState();
     _loadRouters();
+    _checkRemainingDays();
   }
 
   Future<void> _loadRouters() async {
     final routers = await _storage.getRouters();
     setState(() => _routers = routers);
+  }
+
+  Future<void> _checkRemainingDays() async {
+    final phone = await _storage.getPhone();
+    if (phone == null) return;
+    final licensed = await FirebaseService.checkLicense(phone);
+    if (licensed) {
+      // جلب تاريخ الانتهاء الفعلي من Firestore
+      // (يمكن إضافته لاحقاً)
+      setState(() => _remainingDays = 30); // مثال
+    } else {
+      final firstLaunch = await _storage.getFirstLaunch();
+      if (firstLaunch != null) {
+        final trialEnd =
+            DateTime.parse(firstLaunch).add(const Duration(days: 3));
+        final diff = trialEnd.difference(DateTime.now()).inDays;
+        setState(() => _remainingDays = diff > 0 ? diff : 0);
+      }
+    }
   }
 
   void _addOrEditRouter({int? index}) async {
@@ -80,7 +101,6 @@ class _RoutersScreenState extends State<RoutersScreen> {
               } else {
                 await _storage.updateRouter(index, router);
               }
-              // حفظ في Firestore
               final phone = await _storage.getPhone();
               if (phone != null) {
                 await FirebaseService.saveUserPhone(phone, router);
@@ -107,7 +127,19 @@ class _RoutersScreenState extends State<RoutersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('إدارة الراوترات')),
+      appBar: AppBar(
+        title: const Text('إدارة الراوترات'),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(30),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: Text(
+              'المدة المتبقية: $_remainingDays يوم',
+              style: const TextStyle(color: AppTheme.gold, fontSize: 14),
+            ),
+          ),
+        ),
+      ),
       body: _routers.isEmpty
           ? const Center(
               child: Text('لا يوجد راوترات مضافة',

@@ -14,13 +14,13 @@ class _ScriptsScreenState extends State<ScriptsScreen> {
   final List<Map<String, String>> _scripts = [
     {
       'name': 'تسريع واتساب',
-      'command': '/tool fetch url="https://api.telegram.org" keep-result=no'
+      'command': 'ip dns static add name=whatsapp.com address=157.240.1.35'
     },
     {
       'name': 'تسريع فيسبوك',
-      'command': '/ip dns static add name=facebook.com address=157.240.1.35'
+      'command': 'ip dns static add name=facebook.com address=157.240.1.35'
     },
-    {'name': 'استعادة نسخة', 'command': '/system backup load name=st_backup'},
+    {'name': 'استعادة نسخة', 'command': 'system backup load name=st_backup'},
   ];
 
   Future<void> _execute(String command) async {
@@ -34,15 +34,13 @@ class _ScriptsScreenState extends State<ScriptsScreen> {
         if (eq.length == 2) params[eq[0]] = eq[1];
       }
       await widget.routerService!.sendCommand(cmd, params: params);
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(const SnackBar(content: Text('تم التنفيذ')));
-      }
     } catch (e) {
-      if (mounted) {
+      if (mounted)
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('فشل: $e')));
-      }
     }
   }
 
@@ -102,9 +100,7 @@ class _ScriptsScreenState extends State<ScriptsScreen> {
               icon: const Icon(Icons.play_arrow, color: AppTheme.greenOnline),
               onPressed: () => _execute(s['command']!),
             ),
-            onLongPress: () {
-              setState(() => _scripts.removeAt(i));
-            },
+            onLongPress: () => setState(() => _scripts.removeAt(i)),
           );
         },
       ),

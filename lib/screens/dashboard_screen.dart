@@ -3,13 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:syncfusion_flutter_gauges/gauges.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
-import 'package:st_manager/screens/hotspot/hotspot_menu_screen.dart';
-import 'package:st_manager/screens/ppp/ppp_menu_screen.dart';
-import 'package:st_manager/screens/applications/applications_screen.dart';
+import 'package:st_manager/screens/hotspot/hotspot_active_users_screen.dart';
+import 'package:st_manager/screens/ppp/ppp_active_screen.dart';
 import 'package:st_manager/screens/cards/cards_screen.dart';
 import 'package:st_manager/screens/devices_screen.dart';
 import 'package:st_manager/screens/backup_restore_screen.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:st_manager/widgets/side_drawer.dart';
 
 class DashboardScreen extends StatefulWidget {
   final Map<String, String> routerData;
@@ -28,7 +27,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _routerModel = '...';
   String _uptime = '...';
   int _activeUsers = 0;
-  String? _selectedInterface = 'ether1';
+  String? _selectedInterface = 'bridge1';
   StreamSubscription? _speedSubscription;
   Timer? _statsTimer;
 
@@ -53,6 +52,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('فشل الاتصال بالراوتر')),
         );
+        Navigator.pop(context);
       }
     }
   }
@@ -89,14 +89,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 resource.first['board-name']?.toString() ?? 'MikroTik';
             _uptime = resource.first['uptime']?.toString() ?? '...';
           }
-          if (health.isNotEmpty) {
-            _temperature = double.tryParse(
-                    health.first['temperature']?.toString() ?? '0') ??
-                0;
-            _voltage =
-                double.tryParse(health.first['voltage']?.toString() ?? '0') ??
-                    0;
-          }
+          _temperature = double.tryParse(health['temperature'] ?? '0') ?? 0;
+          _voltage = double.tryParse(health['voltage'] ?? '0') ?? 0;
           _activeUsers = active.length;
         });
       }
@@ -150,12 +144,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ],
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.notifications_outlined),
-            onPressed: () {},
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
           ),
         ],
       ),
+      drawer: SideDrawer(routerService: _routerService),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -242,7 +239,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) => HotspotMenuScreen(
+                          builder: (_) => HotspotActiveUsersScreen(
                               routerService: _routerService)));
                 }),
                 _buildMenuButton('برودباند', Icons.router, () {
@@ -250,14 +247,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       context,
                       MaterialPageRoute(
                           builder: (_) =>
-                              PppMenuScreen(routerService: _routerService)));
-                }),
-                _buildMenuButton('التطبيقات', Icons.apps, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => ApplicationsScreen(
-                              routerService: _routerService)));
+                              PppActiveScreen(routerService: _routerService)));
                 }),
                 _buildMenuButton('بطاقات', Icons.credit_card, () {
                   Navigator.push(
@@ -278,10 +268,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       context,
                       MaterialPageRoute(
                           builder: (_) =>
-                              const DevicesScreen())); // تم تعديله هنا
+                              DevicesScreen(routerService: _routerService)));
                 }),
-                _buildMenuButton('الاشعارات', Icons.notifications, () {}),
-                _buildMenuButton('الواجهات', Icons.settings_ethernet, () {}),
                 _buildMenuButton(
                     'قياس السرعة', Icons.speed, () => _showInterfacePicker()),
               ],

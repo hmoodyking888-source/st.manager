@@ -3,10 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class FirebaseService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  /// التحقق من الترخيص
   static Future<bool> checkLicense(String phoneNumber) async {
     try {
-      final doc = await _firestore.collection('licenses').doc(phoneNumber).get();
+      final doc =
+          await _firestore.collection('licenses').doc(phoneNumber).get();
       if (!doc.exists) return false;
       final expiry = doc.data()?['expiryDate'] as Timestamp?;
       if (expiry == null) return false;
@@ -16,8 +16,8 @@ class FirebaseService {
     }
   }
 
-  /// حفظ بيانات المستخدم (رقم الهاتف وراوتراته)
-  static Future<void> saveUserPhone(String phone, Map<String, String> routerData) async {
+  static Future<void> saveUserPhone(
+      String phone, Map<String, String> routerData) async {
     await _firestore.collection('users').doc(phone).set({
       'phone': phone,
       'lastLogin': FieldValue.serverTimestamp(),
@@ -25,7 +25,6 @@ class FirebaseService {
     }, SetOptions(merge: true));
   }
 
-  /// حفظ Chat ID للبوت
   static Future<void> saveChatId(String phoneNumber, String chatId) async {
     await _firestore.collection('users').doc(phoneNumber).set({
       'chatId': chatId,

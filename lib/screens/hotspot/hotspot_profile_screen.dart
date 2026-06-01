@@ -5,8 +5,13 @@ import 'package:st_manager/theme/app_theme.dart';
 class HotspotProfileScreen extends StatefulWidget {
   final RouterService? routerService;
   final bool isEdit;
-  const HotspotProfileScreen(
-      {super.key, required this.routerService, required this.isEdit});
+  final Map<String, dynamic>? initialData;
+  const HotspotProfileScreen({
+    super.key,
+    required this.routerService,
+    required this.isEdit,
+    this.initialData,
+  });
 
   @override
   State<HotspotProfileScreen> createState() => _HotspotProfileScreenState();
@@ -16,6 +21,42 @@ class _HotspotProfileScreenState extends State<HotspotProfileScreen> {
   final _nameController = TextEditingController();
   final _rateLimitController = TextEditingController();
   bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialData != null) {
+      _nameController.text = widget.initialData!['name']?.toString() ?? '';
+      _rateLimitController.text =
+          widget.initialData!['rate-limit']?.toString() ?? '';
+    }
+  }
+
+  Future<void> _save() async {
+    if (widget.routerService == null) return;
+    setState(() => _loading = true);
+    try {
+      final params = {
+        'name': _nameController.text.trim(),
+        'rate-limit': _rateLimitController.text.trim(),
+      };
+      if (widget.isEdit && widget.initialData != null) {
+        params['numbers'] = widget.initialData!['.id']?.toString() ?? '';
+        await widget.routerService!
+            .sendCommand('ip/hotspot/user/profile/set', params: params);
+      } else {
+        await widget.routerService!
+            .sendCommand('ip/hotspot/user/profile/add', params: params);
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('فشل الحفظ')));
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -49,31 +90,5 @@ class _HotspotProfileScreenState extends State<HotspotProfileScreen> {
         ),
       ),
     );
-  }
-
-  Future<void> _save() async {
-    if (widget.routerService == null) return;
-    setState(() => _loading = true);
-    try {
-      if (widget.isEdit) {
-        await widget.routerService!
-            .sendCommand('/ip/hotspot/user/profile/set', params: {
-          'name': _nameController.text.trim(),
-          'rate-limit': _rateLimitController.text.trim(),
-        });
-      } else {
-        await widget.routerService!
-            .sendCommand('/ip/hotspot/user/profile/add', params: {
-          'name': _nameController.text.trim(),
-          'rate-limit': _rateLimitController.text.trim(),
-        });
-      }
-      if (mounted) Navigator.pop(context);
-    } catch (_) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('فشل الحفظ')));
-    } finally {
-      setState(() => _loading = false);
-    }
   }
 }

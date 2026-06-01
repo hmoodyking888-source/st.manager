@@ -3,7 +3,7 @@ class NetworkDevice {
   final String ip;
   final String? username;
   final String? password;
-  final String type; // 'Access Point' أو 'قطع بث'
+  final String type;
   bool isOnline;
 
   NetworkDevice({

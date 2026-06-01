@@ -4,20 +4,19 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class SecureStorageService {
   final _storage = const FlutterSecureStorage();
 
-  Future<void> write(String key, String value) async => await _storage.write(key: key, value: value);
+  Future<void> write(String key, String value) async =>
+      await _storage.write(key: key, value: value);
   Future<String?> read(String key) async => await _storage.read(key: key);
   Future<void> delete(String key) async => await _storage.delete(key: key);
 
-  // PIN
   Future<void> setPin(String pin) async => await write('app_pin', pin);
   Future<String?> getPin() async => await read('app_pin');
   Future<void> deletePin() async => await delete('app_pin');
 
-  // Phone
-  Future<void> setPhone(String phone) async => await write('phone_number', phone);
+  Future<void> setPhone(String phone) async =>
+      await write('phone_number', phone);
   Future<String?> getPhone() async => await read('phone_number');
 
-  // Routers
   Future<List<Map<String, String>>> getRouters() async {
     final jsonStr = await read('routers_list');
     if (jsonStr == null) return [];
@@ -52,7 +51,7 @@ class SecureStorageService {
     }
   }
 
-  // First launch
   Future<String?> getFirstLaunch() async => await read('first_launch');
-  Future<void> setFirstLaunch(String date) async => await write('first_launch', date);
+  Future<void> setFirstLaunch(String date) async =>
+      await write('first_launch', date);
 }

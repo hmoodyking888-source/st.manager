@@ -35,17 +35,4 @@ class ActiveUser {
       active: isActive,
     );
   }
-
-  Map<String, dynamic> toMap() {
-    return {
-      '.id': id,
-      'name': name,
-      'password': password,
-      'profile': profile,
-      'uptime': uptime,
-      'bytes-in': bytesIn,
-      'bytes-out': bytesOut,
-      'disabled': disabled.toString(),
-    };
-  }
 }

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
-import 'package:st_manager/screens/hotspot/hotspot_user_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 class HotspotActiveUsersScreen extends StatefulWidget {
@@ -15,6 +14,8 @@ class HotspotActiveUsersScreen extends StatefulWidget {
 class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   List<Map<String, dynamic>> _users = [];
   String _filter = 'all';
+  String _searchQuery = '';
+  String _sortBy = 'name'; // name, uptime, expires, usage, profile
   bool _loading = false;
 
   @override
@@ -42,25 +43,38 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   }
 
   List<Map<String, dynamic>> get filtered {
-    switch (_filter) {
-      case 'active':
-        return _users.where((u) => u['active'] == true).toList();
-      case 'disabled':
-        return _users.where((u) => u['disabled'] == 'true').toList();
-      case 'expired':
-        return _users.where((u) => u['disabled'] == 'true').toList();
-      default:
-        return _users;
-    }
-  }
+    var list = _users.where((u) {
+      if (_filter == 'active') return u['active'] == true;
+      if (_filter == 'disabled') return u['disabled'] == 'true';
+      if (_filter == 'expired') return u['disabled'] == 'true'; // يمكن تحسينها
+      return true;
+    }).toList();
 
-  Future<void> _executeCommand(
-      String command, Map<String, String> params) async {
-    if (widget.routerService == null) return;
-    try {
-      await widget.routerService!.sendCommand(command, params: params);
-      _loadUsers();
-    } catch (_) {}
+    if (_searchQuery.isNotEmpty) {
+      list = list.where((u) {
+        final name = (u['name'] ?? '').toString().toLowerCase();
+        return name.contains(_searchQuery.toLowerCase());
+      }).toList();
+    }
+
+    switch (_sortBy) {
+      case 'uptime':
+        list.sort((a, b) => (a['uptime'] ?? '').compareTo(b['uptime'] ?? ''));
+        break;
+      case 'usage':
+        list.sort((a, b) {
+          final aOut = int.tryParse(a['bytes-out']?.toString() ?? '0') ?? 0;
+          final bOut = int.tryParse(b['bytes-out']?.toString() ?? '0') ?? 0;
+          return bOut.compareTo(aOut);
+        });
+        break;
+      case 'profile':
+        list.sort((a, b) => (a['profile'] ?? '').compareTo(b['profile'] ?? ''));
+        break;
+      default:
+        list.sort((a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''));
+    }
+    return list;
   }
 
   void _showUserActions(Map<String, dynamic> user) {
@@ -76,16 +90,7 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               title: const Text('تعديل', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => HotspotUserScreen(
-                      routerService: widget.routerService,
-                      isEdit: true,
-                      initialData: user,
-                    ),
-                  ),
-                );
+                // يمكن الانتقال إلى شاشة تعديل
               },
             ),
             ListTile(
@@ -93,42 +98,27 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               title: const Text('حذف', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
-                _executeCommand('/ip/hotspot/user/remove',
-                    {'numbers': user['.id']?.toString() ?? ''});
+                widget.routerService?.sendCommand('ip/hotspot/user/remove',
+                    params: {'numbers': user['.id']?.toString() ?? ''});
+                _loadUsers();
               },
             ),
             ListTile(
-              leading: const Icon(Icons.block, color: Colors.orange),
-              title: Text(
-                user['disabled'] == 'true' ? 'تفعيل' : 'تعطيل',
-                style: const TextStyle(color: Colors.white),
-              ),
+              leading: Icon(Icons.block,
+                  color: user['disabled'] == 'true'
+                      ? Colors.green
+                      : Colors.orange),
+              title: Text(user['disabled'] == 'true' ? 'تفعيل' : 'تعطيل',
+                  style: const TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 final disable = user['disabled'] == 'true' ? 'no' : 'yes';
-                _executeCommand('/ip/hotspot/user/set', {
-                  'numbers': user['.id']?.toString() ?? '',
-                  'disabled': disable
-                });
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.speed, color: AppTheme.gold),
-              title: const Text('فتح السرعة',
-                  style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _executeCommand('/queue/simple/remove', {'target': name});
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.refresh, color: AppTheme.greenOnline),
-              title: const Text('تجديد الصلاحية',
-                  style: TextStyle(color: Colors.white)),
-              onTap: () {
-                Navigator.pop(context);
-                _executeCommand('/ip/hotspot/user/reset-counters',
-                    {'numbers': user['.id']?.toString() ?? ''});
+                widget.routerService?.sendCommand('ip/hotspot/user/set',
+                    params: {
+                      'numbers': user['.id']?.toString() ?? '',
+                      'disabled': disable
+                    });
+                _loadUsers();
               },
             ),
           ],
@@ -140,10 +130,11 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('مستخدمي الهوتسبوت')),
+      appBar: AppBar(title: const Text('جميع حسابات الهوتسبوت')),
       body: Column(
         children: [
           if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
+          // شريط الفلتر الأول
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
@@ -156,19 +147,53 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                   'expired': 'منتهي'
                 }.entries)
                   ChoiceChip(
-                    label: Text(entry.value),
+                    label:
+                        Text(entry.value, style: const TextStyle(fontSize: 11)),
                     selected: _filter == entry.key,
                     onSelected: (v) => setState(() => _filter = entry.key),
                     selectedColor: AppTheme.gold,
                     backgroundColor: AppTheme.darkGrey,
                     labelStyle: TextStyle(
-                      color:
-                          _filter == entry.key ? Colors.black : AppTheme.gold,
-                      fontWeight: _filter == entry.key
-                          ? FontWeight.bold
-                          : FontWeight.normal,
-                    ),
+                        color: _filter == entry.key
+                            ? Colors.black
+                            : AppTheme.gold),
                   ),
+              ],
+            ),
+          ),
+          // شريط البحث والفرز
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    decoration: const InputDecoration(
+                      hintText: 'بحث...',
+                      prefixIcon: Icon(Icons.search, color: AppTheme.gold),
+                      contentPadding: EdgeInsets.symmetric(vertical: 8),
+                    ),
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    onChanged: (v) => setState(() => _searchQuery = v),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                DropdownButton<String>(
+                  value: _sortBy,
+                  dropdownColor: AppTheme.semiBlack,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                  underline: const SizedBox(),
+                  items: [
+                    ['name', 'الاسم'],
+                    ['uptime', 'وقت التشغيل'],
+                    ['usage', 'الأعلى سحب'],
+                    ['profile', 'البروفايل'],
+                  ]
+                      .map((e) =>
+                          DropdownMenuItem(value: e[0], child: Text(e[1])))
+                      .toList(),
+                  onChanged: (v) => setState(() => _sortBy = v!),
+                ),
               ],
             ),
           ),
@@ -192,14 +217,14 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                           style: const TextStyle(color: Colors.white)),
                       subtitle: Text(
                         '${u['profile'] ?? ''} | ${u['uptime'] ?? ''}',
-                        style: const TextStyle(color: Colors.white54),
+                        style: const TextStyle(
+                            color: Colors.white54, fontSize: 11),
                       ),
                       trailing: Text(
-                        isActive ? 'متصل' : 'غير متصل',
+                        '${(int.tryParse(u['bytes-out']?.toString() ?? '0') ?? 0) ~/ 1024} KB/s',
                         style: TextStyle(
-                            color:
-                                isActive ? AppTheme.greenOnline : Colors.grey,
-                            fontSize: 12),
+                            color: isActive ? AppTheme.gold : Colors.grey,
+                            fontSize: 10),
                       ),
                       onTap: () => _showUserActions(u),
                     ),

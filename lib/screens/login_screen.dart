@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:st_manager/services/firebase_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -78,7 +79,6 @@ class _LoginScreenState extends State<LoginScreen> {
       await _storage.setPhone(phone);
     }
 
-    // التحقق من الترخيص
     final licensed = await FirebaseService.checkLicense(phone);
     if (licensed) {
       _navigateTo('/routers');
@@ -94,7 +94,49 @@ class _LoginScreenState extends State<LoginScreen> {
           _navigateTo('/routers');
         } else {
           setState(() => _loading = false);
-          _showError('انتهت الفترة التجريبية. يرجى الحصول على ترخيص.');
+          if (mounted) {
+            showDialog(
+              context: context,
+              builder: (_) => AlertDialog(
+                title: const Text('انتهت مدة الجلسة'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('يرجى التواصل مع الإدارة لتجديد اشتراكك'),
+                    const SizedBox(height: 12),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.chat, color: Colors.green), // أيقونة بديلة
+                        SizedBox(width: 8),
+                        Text('+963995870655',
+                            style: TextStyle(color: Colors.white)),
+                      ],
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('إغلاق'),
+                  ),
+                  ElevatedButton.icon(
+                    icon: const Icon(Icons.chat), // أيقونة بديلة
+                    label: const Text('واتساب'),
+                    onPressed: () async {
+                      final url = Uri.parse('https://wa.me/963995870655');
+                      if (await canLaunchUrl(url)) {
+                        await launchUrl(url,
+                            mode: LaunchMode.externalApplication);
+                      }
+                      Navigator.pop(context);
+                    },
+                  ),
+                ],
+              ),
+            );
+          }
+          return;
         }
       }
     }
