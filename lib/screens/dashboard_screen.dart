@@ -42,10 +42,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final data = widget.routerData;
     _routerService = RouterService(
       host: data['ip']!,
-      port: int.tryParse(data['port'] ?? '443') ?? 443,
+      port: int.tryParse(data['port'] ?? '8728') ?? 8728,
       username: data['username']!,
       password: data['password']!,
-      useHttps: (data['protocol'] ?? 'https') == 'https',
     );
     final ok = await _routerService!.connect();
     if (ok) {
@@ -92,12 +91,38 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 resource.first['board-name']?.toString() ?? 'MikroTik';
             _uptime = resource.first['uptime']?.toString() ?? '...';
           }
-          _temperature = double.tryParse(health['temperature'] ?? '0') ?? 0;
-          _voltage = double.tryParse(health['voltage'] ?? '0') ?? 0;
+          if (health.isNotEmpty) {
+            // معالجة الحرارة والفولت كما في السابق
+            _temperature = _parseTemperature(health);
+            _voltage =
+                double.tryParse(health.first['voltage']?.toString() ?? '0') ??
+                    0;
+          }
           _activeUsers = active.length;
         });
       }
     } catch (_) {}
+  }
+
+  double _parseTemperature(List<Map<String, dynamic>> health) {
+    for (var item in health) {
+      if (item.containsKey('name') &&
+          item['name'].toString().toLowerCase().contains('temp')) {
+        double? temp = double.tryParse(item['value']?.toString() ?? '');
+        if (temp != null) {
+          if (temp > 100) temp = temp / 10;
+          return temp;
+        }
+      }
+      if (item.containsKey('temperature')) {
+        double? temp = double.tryParse(item['temperature'].toString());
+        if (temp != null) {
+          if (temp > 100) temp = temp / 10;
+          return temp;
+        }
+      }
+    }
+    return 0;
   }
 
   @override

@@ -1,48 +1,34 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
+import 'package:router_os_client/router_os_client.dart';
 
 class RouterService {
   final String host;
   final int port;
   final String username;
   final String password;
-  final bool useHttps;
   bool _connected = false;
-  late http.Client _client;
+  RouterOsClient? _client;
 
   RouterService({
     required this.host,
-    this.port = 80, // تم تغيير الافتراضي إلى 80
+    this.port = 8728,
     required this.username,
     required this.password,
-    this.useHttps = false, // تم تغيير الافتراضي إلى HTTP
-  }) {
-    final ioClient = HttpClient()
-      ..badCertificateCallback =
-          (X509Certificate cert, String host, int port) => true;
-    _client = IOClient(ioClient);
-  }
-
-  String get _scheme => useHttps ? 'https' : 'http';
-  String get _baseUrl => '$_scheme://$host:$port/rest';
+  });
 
   Future<bool> connect() async {
     for (int i = 0; i < 3; i++) {
       try {
-        final response = await _client
-            .get(
-              Uri.parse('$_baseUrl/system/resource'),
-              headers: _authHeaders(),
-            )
-            .timeout(const Duration(seconds: 3));
-        if (response.statusCode == 200) {
-          _connected = true;
-          print('✅ Connected successfully');
-          return true;
-        }
+        _client = RouterOsClient(
+          host: host,
+          port: port,
+          username: username,
+          password: password,
+        );
+        await _client!.connect();
+        _connected = true;
+        print('✅ Connected successfully');
+        return true;
       } catch (e) {
         print('❌ Connection attempt ${i + 1} failed: $e');
         await Future.delayed(Duration(seconds: i + 1));
@@ -52,32 +38,19 @@ class RouterService {
     return false;
   }
 
-  Map<String, String> _authHeaders() {
-    final basicAuth =
-        'Basic ${base64Encode(utf8.encode('$username:$password'))}';
-    return {'Authorization': basicAuth};
-  }
-
+  // محاكاة sendCommand القديمة
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, dynamic>? params,
     bool usePost = false,
   }) async {
-    if (!_connected) throw Exception('Not connected');
-    final url = Uri.parse('$_baseUrl$command');
-    http.Response response;
+    if (!_connected || _client == null) throw Exception('Not connected');
     for (int i = 0; i < 3; i++) {
       try {
-        if (usePost) {
-          response = await _client.post(url,
-              headers: _authHeaders(), body: jsonEncode(params ?? {}));
-        } else {
-          response = await _client.get(url, headers: _authHeaders());
-        }
-        if (response.statusCode == 200) {
-          final List<dynamic> jsonList = jsonDecode(response.body);
-          return jsonList.cast<Map<String, dynamic>>();
-        }
+        final Map<String, String>? args =
+            params?.map((key, value) => MapEntry(key, value.toString()));
+        final result = await _client!.execute(command, args: args);
+        return result ?? [];
       } catch (_) {
         await Future.delayed(Duration(seconds: i + 1));
       }
@@ -101,36 +74,28 @@ class RouterService {
   }
 
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
-    final url = Uri.parse('$_baseUrl/interface/monitor-traffic');
-    final response = await _client.post(
-      url,
-      headers: _authHeaders(),
-      body: jsonEncode({'interface': interfaceName, 'duration': '1s'}),
+    final result = await sendCommand(
+      '/interface/monitor-traffic',
+      params: {'interface': interfaceName, 'once': ''},
     );
-    if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
-      if (data.isNotEmpty) {
-        return {
-          'rx-bits-per-second': double.tryParse(
-                  data[0]['rx-bits-per-second']?.toString() ?? '0') ??
-              0,
-          'tx-bits-per-second': double.tryParse(
-                  data[0]['tx-bits-per-second']?.toString() ?? '0') ??
-              0,
-        };
-      }
+    if (result.isNotEmpty) {
+      final bits =
+          double.tryParse(result.first['bits-per-second']?.toString() ?? '0') ??
+              0;
+      return {
+        'rx-bits-per-second': bits / 2,
+        'tx-bits-per-second': bits / 2,
+      };
     }
     return {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
   }
 
-  // ---------- دوال جلب البيانات (مصححة) ----------
   Future<Map<String, String>> getSystemHealth() async {
     try {
       final List<Map<String, dynamic>> response =
-          await sendCommand('system/health/print');
+          await sendCommand('/system/health/print');
       final healthData = <String, String>{};
       for (var item in response) {
-        // معالجة البيانات بصيغتي v6 و v7 بأمان
         if (item.containsKey('name') && item.containsKey('value')) {
           final name = item['name'].toString().toLowerCase();
           final value = item['value'].toString();
@@ -164,24 +129,25 @@ class RouterService {
   }
 
   Future<List<Map<String, dynamic>>> getInterfaceList() =>
-      sendCommand('interface/print');
+      sendCommand('/interface/print');
 
   Future<List<Map<String, dynamic>>> getHotspotActive() =>
-      sendCommand('ip/hotspot/active/print');
+      sendCommand('/ip/hotspot/active/print');
   Future<List<Map<String, dynamic>>> getHotspotUsers() =>
-      sendCommand('ip/hotspot/user/print');
+      sendCommand('/ip/hotspot/user/print');
   Future<List<Map<String, dynamic>>> getHotspotProfiles() =>
-      sendCommand('ip/hotspot/user/profile/print');
+      sendCommand('/ip/hotspot/user/profile/print');
   Future<List<Map<String, dynamic>>> getPppActive() =>
-      sendCommand('ppp/active/print');
+      sendCommand('/ppp/active/print');
   Future<List<Map<String, dynamic>>> getPppSecrets() =>
-      sendCommand('ppp/secret/print');
+      sendCommand('/ppp/secret/print');
   Future<List<Map<String, dynamic>>> getSystemResource() =>
-      sendCommand('system/resource/print');
+      sendCommand('/system/resource/print');
 
   void disconnect() {
+    _client?.close();
+    _client = null;
     _connected = false;
-    _client.close();
   }
 
   bool get isConnected => _connected;
