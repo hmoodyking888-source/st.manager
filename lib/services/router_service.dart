@@ -1,38 +1,27 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart';
 
 class RouterService {
   final String host;
   final int port;
   final String username;
   final String password;
-  final bool useHttps;
   bool _connected = false;
-  late http.Client _client;
 
   RouterService({
     required this.host,
-    this.port = 80, // تم تغيير الافتراضي إلى 80
+    this.port = 80,
     required this.username,
     required this.password,
-    this.useHttps = false, // تم تغيير الافتراضي إلى HTTP
-  }) {
-    final ioClient = HttpClient()
-      ..badCertificateCallback =
-          (X509Certificate cert, String host, int port) => true;
-    _client = IOClient(ioClient);
-  }
+  });
 
-  String get _scheme => useHttps ? 'https' : 'http';
-  String get _baseUrl => '$_scheme://$host:$port/rest';
+  String get _baseUrl => 'http://$host:$port/rest';
 
   Future<bool> connect() async {
     for (int i = 0; i < 3; i++) {
       try {
-        final response = await _client
+        final response = await http
             .get(
               Uri.parse('$_baseUrl/system/resource'),
               headers: _authHeaders(),
@@ -40,11 +29,9 @@ class RouterService {
             .timeout(const Duration(seconds: 3));
         if (response.statusCode == 200) {
           _connected = true;
-          print('✅ Connected successfully');
           return true;
         }
-      } catch (e) {
-        print('❌ Connection attempt ${i + 1} failed: $e');
+      } catch (_) {
         await Future.delayed(Duration(seconds: i + 1));
       }
     }
@@ -69,10 +56,10 @@ class RouterService {
     for (int i = 0; i < 3; i++) {
       try {
         if (usePost) {
-          response = await _client.post(url,
+          response = await http.post(url,
               headers: _authHeaders(), body: jsonEncode(params ?? {}));
         } else {
-          response = await _client.get(url, headers: _authHeaders());
+          response = await http.get(url, headers: _authHeaders());
         }
         if (response.statusCode == 200) {
           final List<dynamic> jsonList = jsonDecode(response.body);
@@ -102,7 +89,7 @@ class RouterService {
 
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
     final url = Uri.parse('$_baseUrl/interface/monitor-traffic');
-    final response = await _client.post(
+    final response = await http.post(
       url,
       headers: _authHeaders(),
       body: jsonEncode({'interface': interfaceName, 'duration': '1s'}),
@@ -123,14 +110,12 @@ class RouterService {
     return {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
   }
 
-  // ---------- دوال جلب البيانات (مصححة) ----------
   Future<Map<String, String>> getSystemHealth() async {
     try {
       final List<Map<String, dynamic>> response =
           await sendCommand('system/health/print');
       final healthData = <String, String>{};
       for (var item in response) {
-        // معالجة البيانات بصيغتي v6 و v7 بأمان
         if (item.containsKey('name') && item.containsKey('value')) {
           final name = item['name'].toString().toLowerCase();
           final value = item['value'].toString();
@@ -157,15 +142,13 @@ class RouterService {
         }
       }
       return healthData;
-    } catch (e) {
-      print('❌ getSystemHealth error: $e');
+    } catch (_) {
       return {};
     }
   }
 
   Future<List<Map<String, dynamic>>> getInterfaceList() =>
       sendCommand('interface/print');
-
   Future<List<Map<String, dynamic>>> getHotspotActive() =>
       sendCommand('ip/hotspot/active/print');
   Future<List<Map<String, dynamic>>> getHotspotUsers() =>
@@ -181,7 +164,6 @@ class RouterService {
 
   void disconnect() {
     _connected = false;
-    _client.close();
   }
 
   bool get isConnected => _connected;

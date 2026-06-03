@@ -42,10 +42,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final data = widget.routerData;
     _routerService = RouterService(
       host: data['ip']!,
-      port: int.tryParse(data['port'] ?? '443') ?? 443,
+      port: int.tryParse(data['port'] ?? '80') ?? 80,
       username: data['username']!,
       password: data['password']!,
-      useHttps: (data['protocol'] ?? 'https') == 'https',
     );
     final ok = await _routerService!.connect();
     if (ok) {
@@ -79,7 +78,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_routerService == null || !_routerService!.isConnected) return;
     try {
       final resource = await _routerService!.getSystemResource();
-      final health = await _routerService!.getSystemHealth();
+      final health =
+          await _routerService!.getSystemHealth(); // Map<String, String>
       final active = await _routerService!.getHotspotActive();
 
       if (mounted) {
@@ -92,6 +92,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 resource.first['board-name']?.toString() ?? 'MikroTik';
             _uptime = resource.first['uptime']?.toString() ?? '...';
           }
+          // معالجة الحرارة والفولت من Map
           _temperature = double.tryParse(health['temperature'] ?? '0') ?? 0;
           _voltage = double.tryParse(health['voltage'] ?? '0') ?? 0;
           _activeUsers = active.length;
