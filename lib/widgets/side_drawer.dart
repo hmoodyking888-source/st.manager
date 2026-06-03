@@ -82,7 +82,7 @@ class _SideDrawerState extends State<SideDrawer> {
             title: const Text('تفعيل البوت',
                 style: TextStyle(color: Colors.white)),
             onTap: () async {
-              await launchUrl(Uri.parse('https://t.me/ST_ManagerBot'));
+              await launchUrl(Uri.parse('https://t.me/st_mekro_bot'));
             },
           ),
           const Divider(color: AppTheme.gold),

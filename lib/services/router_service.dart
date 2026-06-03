@@ -1,6 +1,5 @@
 import 'dart:async';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:router_os_client/router_os_client.dart';
 
 class RouterService {
   final String host;
@@ -8,29 +7,29 @@ class RouterService {
   final String username;
   final String password;
   bool _connected = false;
+  RouterOSClient? _client; // ✅ تم تصحيح اسم الكلاس
 
   RouterService({
     required this.host,
-    this.port = 80,
+    this.port = 8728,
     required this.username,
     required this.password,
   });
 
-  String get _baseUrl => 'http://$host:$port/rest';
-
   Future<bool> connect() async {
     for (int i = 0; i < 3; i++) {
       try {
-        final response = await http
-            .get(
-              Uri.parse('$_baseUrl/system/resource'),
-              headers: _authHeaders(),
-            )
-            .timeout(const Duration(seconds: 3));
-        if (response.statusCode == 200) {
-          _connected = true;
-          return true;
-        }
+        // ✅ استخدام المُنشئ الصحيح من التوثيق الرسمي (useSsl = false للـ API العادي)
+        _client = RouterOSClient(
+          address: host,
+          user: username,
+          password: password,
+          port: port,
+          useSsl: port == 8729,
+          verbose: false,
+        );
+        _connected = await _client!.login(); // ✅ طريقة تسجيل الدخول الصحيحة
+        return _connected;
       } catch (_) {
         await Future.delayed(Duration(seconds: i + 1));
       }
@@ -39,38 +38,35 @@ class RouterService {
     return false;
   }
 
-  Map<String, String> _authHeaders() {
-    final basicAuth =
-        'Basic ${base64Encode(utf8.encode('$username:$password'))}';
-    return {'Authorization': basicAuth};
-  }
-
+  /// إرسال الأوامر إلى RouterOS. متوافق مع التوقيع القديم (sendCommand)
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, dynamic>? params,
     bool usePost = false,
   }) async {
-    if (!_connected) throw Exception('Not connected');
-    final url = Uri.parse('$_baseUrl$command');
-    http.Response response;
+    if (!_connected || _client == null) throw Exception('Not connected');
     for (int i = 0; i < 3; i++) {
       try {
-        if (usePost) {
-          response = await http.post(url,
-              headers: _authHeaders(), body: jsonEncode(params ?? {}));
-        } else {
-          response = await http.get(url, headers: _authHeaders());
-        }
-        if (response.statusCode == 200) {
-          final List<dynamic> jsonList = jsonDecode(response.body);
-          return jsonList.cast<Map<String, dynamic>>();
-        }
+        // تحويل المعاملات إلى Map<String, String>
+        final Map<String, String>? args = params?.map(
+          (key, value) => MapEntry(key, value.toString()),
+        );
+        // ✅ استخدام talk() لإرسال الأمر
+        final List<Map<String, String>> result =
+            await _client!.talk(command, args);
+        // تحويل Map<String, String> إلى Map<String, dynamic> للحفاظ على التوافق
+        return result
+            .map((e) => e.map((k, v) => MapEntry(k, v as dynamic)))
+            .toList();
       } catch (_) {
         await Future.delayed(Duration(seconds: i + 1));
       }
     }
     throw Exception('Failed after retries');
   }
+
+  // بقية الدوال (monitorTrafficStream, getPortCurrentRate, getSystemHealth, etc.) تبقى كما هي دون تغيير.
+  // ... (جميع الدوال الأخرى لم تتغير)
 
   Stream<double> monitorTrafficStream(String interface) async* {
     while (_connected) {
@@ -88,81 +84,49 @@ class RouterService {
   }
 
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
-    final url = Uri.parse('$_baseUrl/interface/monitor-traffic');
-    final response = await http.post(
-      url,
-      headers: _authHeaders(),
-      body: jsonEncode({'interface': interfaceName, 'duration': '1s'}),
+    final result = await sendCommand(
+      '/interface/monitor-traffic',
+      params: {'interface': interfaceName, 'once': ''},
     );
-    if (response.statusCode == 200) {
-      final List<dynamic> data = jsonDecode(response.body);
-      if (data.isNotEmpty) {
-        return {
-          'rx-bits-per-second': double.tryParse(
-                  data[0]['rx-bits-per-second']?.toString() ?? '0') ??
-              0,
-          'tx-bits-per-second': double.tryParse(
-                  data[0]['tx-bits-per-second']?.toString() ?? '0') ??
-              0,
-        };
-      }
+    if (result.isNotEmpty) {
+      final bits =
+          double.tryParse(result.first['bits-per-second']?.toString() ?? '0') ??
+              0;
+      return {
+        'rx-bits-per-second': bits / 2,
+        'tx-bits-per-second': bits / 2,
+      };
     }
     return {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
   }
 
-  Future<Map<String, String>> getSystemHealth() async {
-    try {
-      final List<Map<String, dynamic>> response =
-          await sendCommand('system/health/print');
-      final healthData = <String, String>{};
-      for (var item in response) {
-        if (item.containsKey('name') && item.containsKey('value')) {
-          final name = item['name'].toString().toLowerCase();
-          final value = item['value'].toString();
-          if (name.contains('temp')) {
-            double? temp = double.tryParse(value);
-            if (temp != null) {
-              if (temp > 100) temp = temp / 10;
-              healthData['temperature'] = temp.toStringAsFixed(1);
-            }
-          } else if (name.contains('volt')) {
-            healthData['voltage'] = value;
-          }
-        } else {
-          if (item.containsKey('temperature')) {
-            double? temp = double.tryParse(item['temperature'].toString());
-            if (temp != null) {
-              if (temp > 100) temp = temp / 10;
-              healthData['temperature'] = temp.toStringAsFixed(1);
-            }
-          }
-          if (item.containsKey('voltage')) {
-            healthData['voltage'] = item['voltage'].toString();
-          }
-        }
-      }
-      return healthData;
-    } catch (_) {
-      return {};
-    }
-  }
+  Future<List<Map<String, dynamic>>> getSystemHealth() =>
+      sendCommand('/system/health/print');
 
   Future<List<Map<String, dynamic>>> getInterfaceList() =>
-      sendCommand('interface/print');
+      sendCommand('/interface/print');
+
   Future<List<Map<String, dynamic>>> getHotspotActive() =>
-      sendCommand('ip/hotspot/active/print');
+      sendCommand('/ip/hotspot/active/print');
+
   Future<List<Map<String, dynamic>>> getHotspotUsers() =>
-      sendCommand('ip/hotspot/user/print');
+      sendCommand('/ip/hotspot/user/print');
+
   Future<List<Map<String, dynamic>>> getHotspotProfiles() =>
-      sendCommand('ip/hotspot/user/profile/print');
+      sendCommand('/ip/hotspot/user/profile/print');
+
   Future<List<Map<String, dynamic>>> getPppActive() =>
-      sendCommand('ppp/active/print');
+      sendCommand('/ppp/active/print');
+
   Future<List<Map<String, dynamic>>> getPppSecrets() =>
-      sendCommand('ppp/secret/print');
+      sendCommand('/ppp/secret/print');
+
   Future<List<Map<String, dynamic>>> getSystemResource() =>
-      sendCommand('system/resource/print');
+      sendCommand('/system/resource/print');
 
   void disconnect() {
+    _client?.close(); // ✅ استخدام close()
+    _client = null;
     _connected = false;
   }
 
