@@ -25,12 +25,57 @@ class _CardsScreenState extends State<CardsScreen> {
   String _charType = 'mixed';
   Color _fontColor = Colors.white;
   double _fontSize = 14;
+  double _networkFontSize = 12; // حجم خط اسم الشبكة
+  double _durationFontSize = 10; // حجم خط المدة
+  double _notesFontSize = 10; // حجم خط الملاحظات
   bool _showNetwork = true;
   final _networkCtrl = TextEditingController(text: 'ST_Manager');
   bool _showDuration = true;
   final _durationCtrl = TextEditingController(text: '1 يوم');
   bool _showNotes = false;
   final _notesCtrl = TextEditingController();
+
+  // القوالب الافتراضية
+  final List<Map<String, dynamic>> _defaultTemplates = [
+    {
+      'name': 'أسود وذهبي',
+      'bgColor': const Color(0xFF000000),
+      'borderColor': const Color(0xFFD4AF37),
+      'textColor': Colors.white,
+    },
+    {
+      'name': 'أزرق داكن',
+      'bgColor': const Color(0xFF1A237E),
+      'borderColor': const Color(0xFF42A5F5),
+      'textColor': Colors.white,
+    },
+    {
+      'name': 'أحمر أنيق',
+      'bgColor': const Color(0xFFB71C1C),
+      'borderColor': const Color(0xFFFFCDD2),
+      'textColor': Colors.white,
+    },
+    {
+      'name': 'أخضر طبيعي',
+      'bgColor': const Color(0xFF1B5E20),
+      'borderColor': const Color(0xFFA5D6A7),
+      'textColor': Colors.white,
+    },
+    {
+      'name': 'بنفسجي فاخر',
+      'bgColor': const Color(0xFF4A148C),
+      'borderColor': const Color(0xFFCE93D8),
+      'textColor': Colors.white,
+    },
+    {
+      'name': 'رمادي محايد',
+      'bgColor': const Color(0xFF424242),
+      'borderColor': const Color(0xFFBDBDBD),
+      'textColor': Colors.white,
+    },
+  ];
+  int _selectedTemplateIndex = 0;
+  bool _useCustomImage = false; // هل نستخدم صورة مخصصة أم قالب افتراضي
 
   // مواقع نسبية (0..1)
   double _userX = 0.2, _userY = 0.3;
@@ -71,26 +116,36 @@ class _CardsScreenState extends State<CardsScreen> {
 
   Future<void> _pickImage() async {
     final XFile? image = await _picker.pickImage(source: ImageSource.gallery);
-    if (image != null) setState(() => _templateImage = File(image.path));
+    if (image != null) {
+      setState(() {
+        _templateImage = File(image.path);
+        _useCustomImage = true;
+      });
+    }
+  }
+
+  void _selectTemplate(int index) {
+    setState(() {
+      _selectedTemplateIndex = index;
+      _useCustomImage = false;
+      _templateImage = null;
+    });
   }
 
   Future<void> _generatePdf() async {
     final pdf = pw.Document();
     final fontColor = PdfColor.fromInt(_fontColor.value);
 
-    // صفحة A4 عمودية
-    final pageFormat = PdfPageFormat.a4; // 210 x 297 mm
+    final pageFormat = PdfPageFormat.a4;
     final pageWidth = pageFormat.width;
     final pageHeight = pageFormat.height;
 
-    // حساب الشبكة: نريد بطاقات بعرض 85mm وارتفاع 55mm (حجم بطاقة هوتسبوت نموذجي)
     const double cardW = 85.0;
     const double cardH = 55.0;
     final cols = (pageWidth / cardW).floor();
     final rows = (pageHeight / cardH).floor();
     final maxPerPage = cols * rows;
 
-    // إنشاء صفحات متعددة إذا لزم الأمر
     int cardIndex = 0;
     while (cardIndex < _cardCount) {
       final page = pw.Page(
@@ -107,6 +162,20 @@ class _CardsScreenState extends State<CardsScreen> {
                 lettersOnly: _charType == 'letters',
                 numbersOnly: _charType == 'numbers');
 
+            // خلفية القالب
+            pw.Widget background;
+            if (_useCustomImage && _templateImage != null) {
+              background = pw.Image(
+                pw.MemoryImage(File(_templateImage!.path).readAsBytesSync()),
+                fit: pw.BoxFit.cover,
+              );
+            } else {
+              final template = _defaultTemplates[_selectedTemplateIndex];
+              background = pw.Container(
+                color: PdfColor.fromInt(template['bgColor'].value),
+              );
+            }
+
             final card = pw.Container(
               width: cardW,
               height: cardH,
@@ -114,12 +183,7 @@ class _CardsScreenState extends State<CardsScreen> {
                   border: pw.Border.all(color: PdfColors.grey, width: 0.5)),
               child: pw.Stack(
                 children: [
-                  if (_templateImage != null)
-                    pw.Image(
-                      pw.MemoryImage(
-                          File(_templateImage!.path).readAsBytesSync()),
-                      fit: pw.BoxFit.cover,
-                    ),
+                  background,
                   pw.Positioned(
                     left: _userX * cardW,
                     top: _userY * cardH,
@@ -139,21 +203,24 @@ class _CardsScreenState extends State<CardsScreen> {
                       left: _netX * cardW,
                       top: _netY * cardH,
                       child: pw.Text(_networkCtrl.text,
-                          style: pw.TextStyle(color: fontColor, fontSize: 10)),
+                          style: pw.TextStyle(
+                              color: fontColor, fontSize: _networkFontSize)),
                     ),
                   if (_showDuration)
                     pw.Positioned(
                       left: _durX * cardW,
                       top: _durY * cardH,
                       child: pw.Text(_durationCtrl.text,
-                          style: pw.TextStyle(color: fontColor, fontSize: 10)),
+                          style: pw.TextStyle(
+                              color: fontColor, fontSize: _durationFontSize)),
                     ),
                   if (_showNotes)
                     pw.Positioned(
                       left: _notesX * cardW,
                       top: _notesY * cardH,
                       child: pw.Text(_notesCtrl.text,
-                          style: pw.TextStyle(color: fontColor, fontSize: 10)),
+                          style: pw.TextStyle(
+                              color: fontColor, fontSize: _notesFontSize)),
                     ),
                 ],
               ),
@@ -206,105 +273,101 @@ class _CardsScreenState extends State<CardsScreen> {
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            // المعاينة المباشرة مع النصوص التجريبية
-            if (_templateImage != null)
-              Stack(
-                children: [
-                  Image.file(_templateImage!, height: 250, fit: BoxFit.contain),
-                  // User
-                  Positioned(
-                    left: _userX * 200,
-                    top: _userY * 250,
-                    child: GestureDetector(
-                      onPanUpdate: (d) => setState(() {
-                        _userX += d.delta.dx / 200;
-                        _userY += d.delta.dy / 250;
-                      }),
+            // اختيار القالب
+            const Text('اختر قالب البطاقة:',
+                style: TextStyle(color: Colors.white, fontSize: 14)),
+            const SizedBox(height: 8),
+            SizedBox(
+              height: 80,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                itemCount: _defaultTemplates.length + 1, // +1 لخيار رفع صورة
+                itemBuilder: (_, i) {
+                  if (i < _defaultTemplates.length) {
+                    final t = _defaultTemplates[i];
+                    final isSelected =
+                        !_useCustomImage && _selectedTemplateIndex == i;
+                    return GestureDetector(
+                      onTap: () => _selectTemplate(i),
                       child: Container(
-                        color: Colors.red.withOpacity(0.3),
-                        child: Text(_previewUser,
-                            style: TextStyle(
-                                color: _fontColor, fontSize: _fontSize)),
+                        width: 70,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        decoration: BoxDecoration(
+                          color: t['bgColor'],
+                          border: Border.all(
+                            color:
+                                isSelected ? AppTheme.gold : t['borderColor'],
+                            width: isSelected ? 3 : 1,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Center(
+                          child: Text(t['name'],
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                  color: t['textColor'], fontSize: 10)),
+                        ),
                       ),
-                    ),
-                  ),
-                  // Pass
-                  Positioned(
-                    left: _passX * 200,
-                    top: _passY * 250,
-                    child: GestureDetector(
-                      onPanUpdate: (d) => setState(() {
-                        _passX += d.delta.dx / 200;
-                        _passY += d.delta.dy / 250;
-                      }),
+                    );
+                  } else {
+                    // زر رفع صورة مخصصة
+                    final isSelected = _useCustomImage;
+                    return GestureDetector(
+                      onTap: _pickImage,
                       child: Container(
-                        color: Colors.blue.withOpacity(0.3),
-                        child: Text(_previewPass,
-                            style: TextStyle(
-                                color: _fontColor, fontSize: _fontSize)),
-                      ),
-                    ),
-                  ),
-                  if (_showNetwork)
-                    Positioned(
-                      left: _netX * 200,
-                      top: _netY * 250,
-                      child: GestureDetector(
-                        onPanUpdate: (d) => setState(() {
-                          _netX += d.delta.dx / 200;
-                          _netY += d.delta.dy / 250;
-                        }),
-                        child: Container(
-                          color: Colors.green.withOpacity(0.3),
-                          child: Text(_networkCtrl.text,
-                              style:
-                                  TextStyle(color: _fontColor, fontSize: 10)),
+                        width: 70,
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.darkGrey,
+                          border: Border.all(
+                            color: isSelected ? AppTheme.gold : Colors.grey,
+                            width: isSelected ? 3 : 1,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.add_photo_alternate,
+                                color: Colors.white54, size: 24),
+                            Text('رفع صورة',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                    color: Colors.white54, fontSize: 9)),
+                          ],
                         ),
                       ),
-                    ),
-                  if (_showDuration)
-                    Positioned(
-                      left: _durX * 200,
-                      top: _durY * 250,
-                      child: GestureDetector(
-                        onPanUpdate: (d) => setState(() {
-                          _durX += d.delta.dx / 200;
-                          _durY += d.delta.dy / 250;
-                        }),
-                        child: Container(
-                          color: Colors.yellow.withOpacity(0.3),
-                          child: Text(_durationCtrl.text,
-                              style:
-                                  TextStyle(color: _fontColor, fontSize: 10)),
-                        ),
-                      ),
-                    ),
-                  if (_showNotes)
-                    Positioned(
-                      left: _notesX * 200,
-                      top: _notesY * 250,
-                      child: GestureDetector(
-                        onPanUpdate: (d) => setState(() {
-                          _notesX += d.delta.dx / 200;
-                          _notesY += d.delta.dy / 250;
-                        }),
-                        child: Container(
-                          color: Colors.purple.withOpacity(0.3),
-                          child: Text(_notesCtrl.text,
-                              style:
-                                  TextStyle(color: _fontColor, fontSize: 10)),
-                        ),
-                      ),
-                    ),
-                ],
-              )
-            else
-              ElevatedButton.icon(
-                icon: const Icon(Icons.upload),
-                label: const Text('رفع صورة قالب'),
-                onPressed: _pickImage,
+                    );
+                  }
+                },
               ),
+            ),
             const SizedBox(height: 16),
+
+            // المعاينة المباشرة مع النصوص التجريبية
+            Container(
+              height: 250,
+              width: double.infinity,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey, width: 1),
+                color: _useCustomImage
+                    ? null
+                    : _defaultTemplates[_selectedTemplateIndex]['bgColor'],
+              ),
+              child: _useCustomImage && _templateImage != null
+                  ? Stack(
+                      children: [
+                        Image.file(_templateImage!,
+                            height: 250,
+                            width: double.infinity,
+                            fit: BoxFit.contain),
+                        _buildDraggablePreview(),
+                      ],
+                    )
+                  : _buildDraggablePreview(),
+            ),
+            const SizedBox(height: 16),
+
             // إعدادات
             DropdownButtonFormField(
               value: _profile,
@@ -348,10 +411,11 @@ class _CardsScreenState extends State<CardsScreen> {
               onChanged: (v) => setState(() => _charType = v!),
               decoration: const InputDecoration(labelText: 'نوع الأحرف'),
             ),
-            // حجم الخط
+            // حجم الخط لليوزر والباس
             Row(
               children: [
-                const Text('حجم الخط: ', style: TextStyle(color: Colors.white)),
+                const Text('حجم خط اليوزر/الباس: ',
+                    style: TextStyle(color: Colors.white, fontSize: 12)),
                 Expanded(
                   child: Slider(
                     value: _fontSize,
@@ -363,6 +427,25 @@ class _CardsScreenState extends State<CardsScreen> {
                   ),
                 ),
                 Text(_fontSize.round().toString(),
+                    style: const TextStyle(color: Colors.white)),
+              ],
+            ),
+            // حجم خط اسم الشبكة
+            Row(
+              children: [
+                const Text('حجم خط اسم الشبكة: ',
+                    style: TextStyle(color: Colors.white, fontSize: 12)),
+                Expanded(
+                  child: Slider(
+                    value: _networkFontSize,
+                    min: 6,
+                    max: 20,
+                    divisions: 14,
+                    label: _networkFontSize.round().toString(),
+                    onChanged: (v) => setState(() => _networkFontSize = v),
+                  ),
+                ),
+                Text(_networkFontSize.round().toString(),
                     style: const TextStyle(color: Colors.white)),
               ],
             ),
@@ -422,6 +505,96 @@ class _CardsScreenState extends State<CardsScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildDraggablePreview() {
+    return Stack(
+      children: [
+        // User
+        Positioned(
+          left: _userX * 200,
+          top: _userY * 250,
+          child: GestureDetector(
+            onPanUpdate: (d) => setState(() {
+              _userX += d.delta.dx / 200;
+              _userY += d.delta.dy / 250;
+            }),
+            child: Container(
+              color: Colors.red.withOpacity(0.3),
+              child: Text(_previewUser,
+                  style: TextStyle(color: _fontColor, fontSize: _fontSize)),
+            ),
+          ),
+        ),
+        // Pass
+        Positioned(
+          left: _passX * 200,
+          top: _passY * 250,
+          child: GestureDetector(
+            onPanUpdate: (d) => setState(() {
+              _passX += d.delta.dx / 200;
+              _passY += d.delta.dy / 250;
+            }),
+            child: Container(
+              color: Colors.blue.withOpacity(0.3),
+              child: Text(_previewPass,
+                  style: TextStyle(color: _fontColor, fontSize: _fontSize)),
+            ),
+          ),
+        ),
+        if (_showNetwork)
+          Positioned(
+            left: _netX * 200,
+            top: _netY * 250,
+            child: GestureDetector(
+              onPanUpdate: (d) => setState(() {
+                _netX += d.delta.dx / 200;
+                _netY += d.delta.dy / 250;
+              }),
+              child: Container(
+                color: Colors.green.withOpacity(0.3),
+                child: Text(_networkCtrl.text,
+                    style: TextStyle(
+                        color: _fontColor, fontSize: _networkFontSize)),
+              ),
+            ),
+          ),
+        if (_showDuration)
+          Positioned(
+            left: _durX * 200,
+            top: _durY * 250,
+            child: GestureDetector(
+              onPanUpdate: (d) => setState(() {
+                _durX += d.delta.dx / 200;
+                _durY += d.delta.dy / 250;
+              }),
+              child: Container(
+                color: Colors.yellow.withOpacity(0.3),
+                child: Text(_durationCtrl.text,
+                    style: TextStyle(
+                        color: _fontColor, fontSize: _durationFontSize)),
+              ),
+            ),
+          ),
+        if (_showNotes)
+          Positioned(
+            left: _notesX * 200,
+            top: _notesY * 250,
+            child: GestureDetector(
+              onPanUpdate: (d) => setState(() {
+                _notesX += d.delta.dx / 200;
+                _notesY += d.delta.dy / 250;
+              }),
+              child: Container(
+                color: Colors.purple.withOpacity(0.3),
+                child: Text(_notesCtrl.text,
+                    style:
+                        TextStyle(color: _fontColor, fontSize: _notesFontSize)),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }

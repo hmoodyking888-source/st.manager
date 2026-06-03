@@ -7,7 +7,13 @@ class RouterService {
   final String username;
   final String password;
   bool _connected = false;
-  RouterOSClient? _client; // ✅ تم تصحيح اسم الكلاس
+  RouterOSClient? _client;
+
+  // ---------- التخزين المؤقت ----------
+  final Map<String, dynamic> _cache = {};
+  final Map<String, DateTime> _cacheTimestamps = {};
+  static const Duration _cacheDuration =
+      Duration(seconds: 30); // مدة صلاحية الكاش
 
   RouterService({
     required this.host,
@@ -19,7 +25,6 @@ class RouterService {
   Future<bool> connect() async {
     for (int i = 0; i < 3; i++) {
       try {
-        // ✅ استخدام المُنشئ الصحيح من التوثيق الرسمي (useSsl = false للـ API العادي)
         _client = RouterOSClient(
           address: host,
           user: username,
@@ -28,7 +33,7 @@ class RouterService {
           useSsl: port == 8729,
           verbose: false,
         );
-        _connected = await _client!.login(); // ✅ طريقة تسجيل الدخول الصحيحة
+        _connected = await _client!.login();
         return _connected;
       } catch (_) {
         await Future.delayed(Duration(seconds: i + 1));
@@ -38,26 +43,43 @@ class RouterService {
     return false;
   }
 
-  /// إرسال الأوامر إلى RouterOS. متوافق مع التوقيع القديم (sendCommand)
+  /// إرسال الأوامر إلى RouterOS مع دعم التخزين المؤقت
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, dynamic>? params,
     bool usePost = false,
+    bool useCache = false, // <-- معامل جديد لتفعيل الكاش
   }) async {
+    // إذا طلب استخدام الكاش والبيانات موجودة ولم تنته صلاحيتها
+    final cacheKey = '$command${params?.toString() ?? ''}';
+    if (useCache &&
+        _cache.containsKey(cacheKey) &&
+        _cacheTimestamps.containsKey(cacheKey)) {
+      final age = DateTime.now().difference(_cacheTimestamps[cacheKey]!);
+      if (age < _cacheDuration) {
+        return _cache[cacheKey] as List<Map<String, dynamic>>;
+      }
+    }
+
     if (!_connected || _client == null) throw Exception('Not connected');
     for (int i = 0; i < 3; i++) {
       try {
-        // تحويل المعاملات إلى Map<String, String>
         final Map<String, String>? args = params?.map(
           (key, value) => MapEntry(key, value.toString()),
         );
-        // ✅ استخدام talk() لإرسال الأمر
         final List<Map<String, String>> result =
             await _client!.talk(command, args);
-        // تحويل Map<String, String> إلى Map<String, dynamic> للحفاظ على التوافق
-        return result
+        final converted = result
             .map((e) => e.map((k, v) => MapEntry(k, v as dynamic)))
             .toList();
+
+        // حفظ في الكاش
+        if (useCache) {
+          _cache[cacheKey] = converted;
+          _cacheTimestamps[cacheKey] = DateTime.now();
+        }
+
+        return converted;
       } catch (_) {
         await Future.delayed(Duration(seconds: i + 1));
       }
@@ -65,9 +87,13 @@ class RouterService {
     throw Exception('Failed after retries');
   }
 
-  // بقية الدوال (monitorTrafficStream, getPortCurrentRate, getSystemHealth, etc.) تبقى كما هي دون تغيير.
-  // ... (جميع الدوال الأخرى لم تتغير)
+  /// مسح الكاش بالكامل (يُستدعى عند الحاجة لتحديث فوري)
+  void clearCache() {
+    _cache.clear();
+    _cacheTimestamps.clear();
+  }
 
+  // ---------- دوال المراقبة وجلب البيانات ----------
   Stream<double> monitorTrafficStream(String interface) async* {
     while (_connected) {
       try {
@@ -106,28 +132,30 @@ class RouterService {
   Future<List<Map<String, dynamic>>> getInterfaceList() =>
       sendCommand('/interface/print');
 
+  // ---------- دوال مع كاش ----------
   Future<List<Map<String, dynamic>>> getHotspotActive() =>
-      sendCommand('/ip/hotspot/active/print');
+      sendCommand('/ip/hotspot/active/print', useCache: true);
 
   Future<List<Map<String, dynamic>>> getHotspotUsers() =>
-      sendCommand('/ip/hotspot/user/print');
+      sendCommand('/ip/hotspot/user/print', useCache: true);
 
   Future<List<Map<String, dynamic>>> getHotspotProfiles() =>
-      sendCommand('/ip/hotspot/user/profile/print');
+      sendCommand('/ip/hotspot/user/profile/print', useCache: true);
 
   Future<List<Map<String, dynamic>>> getPppActive() =>
-      sendCommand('/ppp/active/print');
+      sendCommand('/ppp/active/print', useCache: true);
 
   Future<List<Map<String, dynamic>>> getPppSecrets() =>
-      sendCommand('/ppp/secret/print');
+      sendCommand('/ppp/secret/print', useCache: true);
 
   Future<List<Map<String, dynamic>>> getSystemResource() =>
       sendCommand('/system/resource/print');
 
   void disconnect() {
-    _client?.close(); // ✅ استخدام close()
+    _client?.close();
     _client = null;
     _connected = false;
+    clearCache();
   }
 
   bool get isConnected => _connected;

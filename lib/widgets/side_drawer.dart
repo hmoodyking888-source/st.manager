@@ -31,11 +31,134 @@ class _SideDrawerState extends State<SideDrawer> {
     if (mounted) setState(() => _remainingDays = diff > 0 ? diff : 0);
   }
 
+  // ---------- فتح السرعات الشامل المؤقت ----------
+  Future<void> _showSpeedBoostDialog() async {
+    TimeOfDay fromTime = const TimeOfDay(hour: 0, minute: 0);
+    TimeOfDay toTime = const TimeOfDay(hour: 1, minute: 0);
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('فتح السرعات الشامل المؤقت'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('حدد وقت البداية والنهاية لفتح السرعات:'),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  Column(
+                    children: [
+                      const Text('من الساعة:'),
+                      TextButton(
+                        onPressed: () async {
+                          final t = await showTimePicker(
+                            context: ctx,
+                            initialTime: fromTime,
+                          );
+                          if (t != null) setDialogState(() => fromTime = t);
+                        },
+                        child: Text(fromTime.format(ctx)),
+                      ),
+                    ],
+                  ),
+                  Column(
+                    children: [
+                      const Text('إلى الساعة:'),
+                      TextButton(
+                        onPressed: () async {
+                          final t = await showTimePicker(
+                            context: ctx,
+                            initialTime: toTime,
+                          );
+                          if (t != null) setDialogState(() => toTime = t);
+                        },
+                        child: Text(toTime.format(ctx)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                _applySpeedBoost(fromTime, toTime);
+              },
+              child: const Text('تطبيق'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _applySpeedBoost(TimeOfDay from, TimeOfDay to) async {
+    if (widget.routerService == null) return;
+    try {
+      // 1. حذف جميع rate-limit من بروفايلات الهوتسبوت
+      final profiles = await widget.routerService!.getHotspotProfiles();
+      for (var profile in profiles) {
+        final profileId = profile['.id']?.toString() ?? '';
+        if (profileId.isNotEmpty) {
+          await widget.routerService!.sendCommand(
+            '/ip/hotspot/user/profile/set',
+            params: {
+              'numbers': profileId,
+              'rate-limit': '',
+            },
+          );
+        }
+      }
+
+      // 2. طرد جميع المستخدمين النشطين
+      final activeUsers = await widget.routerService!.getHotspotActive();
+      for (var user in activeUsers) {
+        final userId = user['.id']?.toString() ?? '';
+        if (userId.isNotEmpty) {
+          await widget.routerService!.sendCommand(
+            '/ip/hotspot/active/remove',
+            params: {'numbers': userId},
+          );
+        }
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'تم فتح السرعات من ${from.format(context)} إلى ${to.format(context)}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('فشل فتح السرعات: $e')),
+        );
+      }
+    }
+  }
+
+  // ---------- تغيير الثيم ----------
+  void _openSettings() {
+    Navigator.pushNamed(context, '/settings');
+  }
+
   @override
   Widget build(BuildContext context) {
     return Drawer(
       backgroundColor: AppTheme.black,
-      width: MediaQuery.of(context).size.width * 0.4, // العرض هنا صحيح
+      width: MediaQuery.of(context).size.width * 0.4,
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
@@ -64,9 +187,15 @@ class _SideDrawerState extends State<SideDrawer> {
           ),
           ListTile(
             leading: const Icon(Icons.speed, color: AppTheme.gold),
-            title:
-                const Text('فتح السرعة', style: TextStyle(color: Colors.white)),
+            title: const Text('فتح سرعة مستخدم',
+                style: TextStyle(color: Colors.white)),
             onTap: () {},
+          ),
+          ListTile(
+            leading: const Icon(Icons.rocket_launch, color: AppTheme.gold),
+            title: const Text('فتح سرعات شامل مؤقت',
+                style: TextStyle(color: Colors.white)),
+            onTap: _showSpeedBoostDialog,
           ),
           ListTile(
             leading: const Icon(Icons.restart_alt, color: AppTheme.gold),
@@ -74,7 +203,7 @@ class _SideDrawerState extends State<SideDrawer> {
                 style: TextStyle(color: Colors.white)),
             onTap: () async {
               await widget.routerService
-                  ?.sendCommand('system/reboot', usePost: true);
+                  ?.sendCommand('/system/reboot', usePost: true);
             },
           ),
           ListTile(
@@ -84,6 +213,12 @@ class _SideDrawerState extends State<SideDrawer> {
             onTap: () async {
               await launchUrl(Uri.parse('https://t.me/st_mekro_bot'));
             },
+          ),
+          ListTile(
+            leading: const Icon(Icons.palette, color: AppTheme.gold),
+            title: const Text('تغيير الثيم',
+                style: TextStyle(color: Colors.white)),
+            onTap: _openSettings,
           ),
           const Divider(color: AppTheme.gold),
           Padding(

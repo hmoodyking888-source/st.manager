@@ -31,6 +31,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _selectedInterface = 'bridge1';
   StreamSubscription? _speedSubscription;
   Timer? _statsTimer;
+  int _currentIndex = 0; // للشريط السفلي
 
   @override
   void initState() {
@@ -91,12 +92,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 resource.first['board-name']?.toString() ?? 'MikroTik';
             _uptime = resource.first['uptime']?.toString() ?? '...';
           }
-          // معالجة الحرارة والفولت من List<Map>
           if (health.isNotEmpty) {
             _temperature = _parseTemperature(health);
-            _voltage =
-                double.tryParse(health.first['voltage']?.toString() ?? '0') ??
-                    0;
+            _voltage = _parseVoltage(health);
           }
           _activeUsers = active.length;
         });
@@ -120,6 +118,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
           if (temp > 100) temp = temp / 10;
           return temp;
         }
+      }
+    }
+    return 0;
+  }
+
+  double _parseVoltage(List<Map<String, dynamic>> health) {
+    final direct = double.tryParse(health.first['voltage']?.toString() ?? '');
+    if (direct != null && direct > 0) return direct;
+    for (var item in health) {
+      if (item.containsKey('name') &&
+          item['name'].toString().toLowerCase().contains('volt')) {
+        final v = double.tryParse(item['value']?.toString() ?? '');
+        if (v != null && v > 0) return v;
       }
     }
     return 0;
@@ -181,139 +192,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
         ],
       ),
       drawer: SideDrawer(routerService: _routerService),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            GridView.count(
-              crossAxisCount: 4,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _buildSmallCard('المعالج', '${_cpuLoad.toStringAsFixed(1)}%'),
-                _buildSmallCard(
-                    'الحرارة', '${_temperature.toStringAsFixed(1)}°C'),
-                _buildSmallCard('الفولت', '${_voltage.toStringAsFixed(1)}V'),
-                _buildSmallCard('النشطاء', '$_activeUsers'),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Center(
-              child: SizedBox(
-                height: 180,
-                width: 180,
-                child: SfRadialGauge(
-                  axes: [
-                    RadialAxis(
-                      minimum: 0,
-                      maximum: 100,
-                      ranges: [
-                        GaugeRange(
-                            startValue: 0,
-                            endValue: 100,
-                            color: AppTheme.gold.withOpacity(0.1))
-                      ],
-                      pointers: [
-                        NeedlePointer(
-                            value: _currentSpeed, needleColor: AppTheme.gold)
-                      ],
-                      annotations: [
-                        GaugeAnnotation(
-                          widget: Text(
-                              '${_currentSpeed.toStringAsFixed(1)} Mbps',
-                              style: const TextStyle(
-                                  color: AppTheme.gold, fontSize: 16)),
-                          angle: 90,
-                          positionFactor: 0.5,
-                        )
-                      ],
-                    )
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text('Router: $_routerModel',
-                        style: const TextStyle(color: Colors.white)),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.greenOnline,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const Text('Online',
-                          style: TextStyle(color: Colors.black)),
-                    ),
-                    Text('Uptime: $_uptime',
-                        style: const TextStyle(color: Colors.white70)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 16),
-            GridView.count(
-              crossAxisCount: 3,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              children: [
-                _buildMenuButton('هوتسبوت', Icons.wifi_password, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => HotspotActiveUsersScreen(
-                              routerService: _routerService)));
-                }),
-                _buildMenuButton('برودباند', Icons.router, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) =>
-                              PppActiveScreen(routerService: _routerService)));
-                }),
-                _buildMenuButton('بطاقات', Icons.credit_card, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) =>
-                              CardsScreen(routerService: _routerService)));
-                }),
-                _buildMenuButton('نسخ/استعادة', Icons.backup, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) => BackupRestoreScreen(
-                              routerService: _routerService)));
-                }),
-                _buildMenuButton('الأجهزة', Icons.cell_tower, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) =>
-                              DevicesScreen(routerService: _routerService)));
-                }),
-                _buildMenuButton('الواجهات', Icons.settings_ethernet, () {
-                  Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                          builder: (_) =>
-                              InterfaceScreen(routerService: _routerService)));
-                }),
-                _buildMenuButton(
-                    'قياس السرعة', Icons.speed, () => _showInterfacePicker()),
-              ],
-            ),
-          ],
-        ),
-      ),
+      body: _buildBody(),
       bottomNavigationBar: BottomNavigationBar(
-        onTap: (index) {},
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() => _currentIndex = index);
+        },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'الرئيسية'),
           BottomNavigationBarItem(
@@ -323,6 +207,170 @@ class _DashboardScreenState extends State<DashboardScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.report), label: 'التقارير'),
           BottomNavigationBarItem(
               icon: Icon(Icons.settings), label: 'الإعدادات'),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody() {
+    // المحتوى حسب التبويب المختار
+    switch (_currentIndex) {
+      case 0:
+        return _buildDashboardContent();
+      case 1:
+        // المستخدمون - يمكن عرض قائمة مستخدمين عامة أو الانتقال إلى Hotspot
+        return const Center(
+            child:
+                Text('قسم المستخدمون', style: TextStyle(color: Colors.white)));
+      case 2:
+        // الإشعارات
+        return const Center(
+            child: Text('الإشعارات', style: TextStyle(color: Colors.white)));
+      case 3:
+        // التقارير
+        return const Center(
+            child: Text('التقارير', style: TextStyle(color: Colors.white)));
+      case 4:
+        // الإعدادات - ننتقل إلى شاشة الإعدادات مباشرة
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          Navigator.pushNamed(context, '/settings');
+        });
+        // نعيد الجسم الفارغ مؤقتاً حتى لا يظهر خطأ
+        return const SizedBox();
+      default:
+        return _buildDashboardContent();
+    }
+  }
+
+  Widget _buildDashboardContent() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildSmallCard('المعالج', '${_cpuLoad.toStringAsFixed(1)}%'),
+              _buildSmallCard(
+                  'الحرارة', '${_temperature.toStringAsFixed(1)}°C'),
+              _buildSmallCard('الفولت', '${_voltage.toStringAsFixed(1)}V'),
+              _buildSmallCard('النشطاء', '$_activeUsers'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Center(
+            child: SizedBox(
+              height: 180,
+              width: 180,
+              child: SfRadialGauge(
+                axes: [
+                  RadialAxis(
+                    minimum: 0,
+                    maximum: 100,
+                    ranges: [
+                      GaugeRange(
+                          startValue: 0,
+                          endValue: 100,
+                          color: AppTheme.gold.withOpacity(0.1))
+                    ],
+                    pointers: [
+                      NeedlePointer(
+                          value: _currentSpeed, needleColor: AppTheme.gold)
+                    ],
+                    annotations: [
+                      GaugeAnnotation(
+                        widget: Text('${_currentSpeed.toStringAsFixed(1)} Mbps',
+                            style: const TextStyle(
+                                color: AppTheme.gold, fontSize: 16)),
+                        angle: 90,
+                        positionFactor: 0.5,
+                      )
+                    ],
+                  )
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    _routerModel,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Uptime: $_uptime',
+                    style: const TextStyle(color: Colors.white54, fontSize: 13),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildMenuButton('هوتسبوت', Icons.wifi_password, () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => HotspotActiveUsersScreen(
+                            routerService: _routerService)));
+              }),
+              _buildMenuButton('برودباند', Icons.router, () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            PppActiveScreen(routerService: _routerService)));
+              }),
+              _buildMenuButton('بطاقات', Icons.credit_card, () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            CardsScreen(routerService: _routerService)));
+              }),
+              _buildMenuButton('نسخ/استعادة', Icons.backup, () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => BackupRestoreScreen(
+                            routerService: _routerService)));
+              }),
+              _buildMenuButton('الأجهزة', Icons.cell_tower, () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            DevicesScreen(routerService: _routerService)));
+              }),
+              _buildMenuButton('الواجهات', Icons.settings_ethernet, () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            InterfaceScreen(routerService: _routerService)));
+              }),
+              _buildMenuButton(
+                  'قياس السرعة', Icons.speed, () => _showInterfacePicker()),
+              _buildMenuButton('Simple Queue', Icons.queue, () {
+                // TODO: فتح شاشة Simple Queue
+              }),
+            ],
+          ),
         ],
       ),
     );

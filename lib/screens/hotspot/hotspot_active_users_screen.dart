@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
+import 'package:st_manager/screens/hotspot/hotspot_user_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 class HotspotActiveUsersScreen extends StatefulWidget {
@@ -15,7 +16,7 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   List<Map<String, dynamic>> _users = [];
   String _filter = 'all';
   String _searchQuery = '';
-  String _sortBy = 'name'; // name, uptime, expires, usage, profile
+  String _sortBy = 'name';
   bool _loading = false;
 
   @override
@@ -46,7 +47,7 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     var list = _users.where((u) {
       if (_filter == 'active') return u['active'] == true;
       if (_filter == 'disabled') return u['disabled'] == 'true';
-      if (_filter == 'expired') return u['disabled'] == 'true'; // يمكن تحسينها
+      if (_filter == 'expired') return u['disabled'] == 'true';
       return true;
     }).toList();
 
@@ -77,8 +78,33 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     return list;
   }
 
+  // ---------- دوال فتح السرعة ----------
+  Future<void> _ensureSpeedProfile() async {
+    try {
+      await widget.routerService!
+          .sendCommand('/ip/hotspot/user/profile/add', params: {
+        'name': 'Speed',
+        'rate-limit': '',
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _boostUserSpeed(Map<String, dynamic> user) async {
+    await _ensureSpeedProfile();
+    await widget.routerService?.sendCommand('/ip/hotspot/user/set', params: {
+      'numbers': user['.id']?.toString() ?? '',
+      'profile': 'Speed',
+    });
+    if (user['active'] == true) {
+      await widget.routerService
+          ?.sendCommand('/ip/hotspot/active/remove', params: {
+        'numbers': user['.id']?.toString() ?? '',
+      });
+    }
+    _loadUsers();
+  }
+
   void _showUserActions(Map<String, dynamic> user) {
-    final name = user['name']?.toString() ?? '';
     showModalBottomSheet(
       context: context,
       backgroundColor: AppTheme.semiBlack,
@@ -90,7 +116,13 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               title: const Text('تعديل', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
-                // يمكن الانتقال إلى شاشة تعديل
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => HotspotUserScreen(
+                            routerService: widget.routerService,
+                            isEdit: true,
+                            initialData: user)));
               },
             ),
             ListTile(
@@ -121,20 +153,43 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                 _loadUsers();
               },
             ),
+            ListTile(
+              leading: const Icon(Icons.speed, color: AppTheme.gold),
+              title: const Text('فتح السرعة',
+                  style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _boostUserSpeed(user);
+              },
+            ),
           ],
         ),
       ),
     );
   }
 
+  void _addNewAccount() {
+    Navigator.push(
+        context,
+        MaterialPageRoute(
+            builder: (_) => HotspotUserScreen(
+                  routerService: widget.routerService,
+                  isEdit: false,
+                ))).then((_) => _loadUsers());
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('جميع حسابات الهوتسبوت')),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: AppTheme.gold,
+        onPressed: _addNewAccount,
+        child: const Icon(Icons.person_add),
+      ),
       body: Column(
         children: [
           if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
-          // شريط الفلتر الأول
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
@@ -161,7 +216,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               ],
             ),
           ),
-          // شريط البحث والفرز
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
