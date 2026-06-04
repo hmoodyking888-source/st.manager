@@ -29,12 +29,24 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     if (widget.routerService == null) return;
     setState(() => _loading = true);
     try {
+      // نجبر تحديث الكاش لنجلب بيانات حديثة
+      widget.routerService!.clearCache();
       final active = await widget.routerService!.getHotspotActive();
       final all = await widget.routerService!.getHotspotUsers();
       setState(() {
         _users = all.map((u) {
           final isActive = active.any((a) => a['user'] == u['name']);
-          return {...u, 'active': isActive};
+          // جلب السحب الحالي من المستخدم النشط
+          final activeData = active.firstWhere(
+            (a) => a['user'] == u['name'],
+            orElse: () => {},
+          );
+          return {
+            ...u,
+            'active': isActive,
+            'bytes-out': activeData['bytes-out'] ?? u['bytes-out'] ?? '0',
+            'uptime': activeData['uptime'] ?? u['uptime'] ?? '',
+          };
         }).toList();
         _loading = false;
       });
@@ -76,6 +88,40 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
         list.sort((a, b) => (a['name'] ?? '').compareTo(b['name'] ?? ''));
     }
     return list;
+  }
+
+  /// تنسيق السحب (Bytes → KB/MB/GB)
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+  }
+
+  /// استخراج التعليق النظيف (بدون رقم الهاتف)
+  String _cleanComment(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    if (raw.startsWith('phone:')) {
+      final parts = raw.split('|');
+      if (parts.length > 1) {
+        return parts.sublist(1).join('|').trim();
+      }
+      return '';
+    }
+    return raw;
+  }
+
+  /// استخراج رقم الهاتف من التعليق
+  String _extractPhone(String? raw) {
+    if (raw == null || raw.isEmpty) return '';
+    if (raw.startsWith('phone:')) {
+      final parts = raw.split('|');
+      if (parts.isNotEmpty) {
+        return parts[0].replaceFirst('phone:', '').trim();
+      }
+    }
+    return '';
   }
 
   // ---------- دوال فتح السرعة ----------
@@ -130,7 +176,7 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               title: const Text('حذف', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
-                widget.routerService?.sendCommand('ip/hotspot/user/remove',
+                widget.routerService?.sendCommand('/ip/hotspot/user/remove',
                     params: {'numbers': user['.id']?.toString() ?? ''});
                 _loadUsers();
               },
@@ -145,7 +191,7 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               onTap: () {
                 Navigator.pop(context);
                 final disable = user['disabled'] == 'true' ? 'no' : 'yes';
-                widget.routerService?.sendCommand('ip/hotspot/user/set',
+                widget.routerService?.sendCommand('/ip/hotspot/user/set',
                     params: {
                       'numbers': user['.id']?.toString() ?? '',
                       'disabled': disable
@@ -259,6 +305,11 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                 itemBuilder: (_, i) {
                   final u = filtered[i];
                   final isActive = u['active'] == true;
+                  final comment = _cleanComment(u['comment']);
+                  final phone = _extractPhone(u['comment']);
+                  final bytesOut =
+                      int.tryParse(u['bytes-out']?.toString() ?? '0') ?? 0;
+
                   return Card(
                     margin:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -270,12 +321,18 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                       title: Text(u['name'] ?? '',
                           style: const TextStyle(color: Colors.white)),
                       subtitle: Text(
-                        '${u['profile'] ?? ''} | ${u['uptime'] ?? ''}',
+                        [
+                          if (u['profile']?.toString().isNotEmpty ?? false)
+                            u['profile'],
+                          if (isActive) 'متصل | ${u['uptime']}',
+                          if (!isActive && comment.isNotEmpty) comment,
+                          if (phone.isNotEmpty) '📞 $phone',
+                        ].join(' | '),
                         style: const TextStyle(
                             color: Colors.white54, fontSize: 11),
                       ),
                       trailing: Text(
-                        '${(int.tryParse(u['bytes-out']?.toString() ?? '0') ?? 0) ~/ 1024} KB/s',
+                        _formatBytes(bytesOut),
                         style: TextStyle(
                             color: isActive ? AppTheme.gold : Colors.grey,
                             fontSize: 10),

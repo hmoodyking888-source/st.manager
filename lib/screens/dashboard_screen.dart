@@ -9,6 +9,8 @@ import 'package:st_manager/screens/cards/cards_screen.dart';
 import 'package:st_manager/screens/devices_screen.dart';
 import 'package:st_manager/screens/backup_restore_screen.dart';
 import 'package:st_manager/screens/interface_screen.dart';
+import 'package:st_manager/screens/simple_queue_screen.dart';
+import 'package:st_manager/screens/user_manager_screen.dart';
 import 'package:st_manager/widgets/side_drawer.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -28,10 +30,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _routerModel = '...';
   String _uptime = '...';
   int _activeUsers = 0;
+  int _totalUsers = 0;
+  int _pppActive = 0;
+  int _pppTotal = 0;
   String? _selectedInterface = 'bridge1';
   StreamSubscription? _speedSubscription;
   Timer? _statsTimer;
-  int _currentIndex = 0; // للشريط السفلي
+  int _currentIndex = 0;
 
   @override
   void initState() {
@@ -64,7 +69,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _fetchStats();
     _statsTimer =
         Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
-
     if (_selectedInterface != null) {
       _speedSubscription?.cancel();
       _speedSubscription = _routerService!
@@ -79,8 +83,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (_routerService == null || !_routerService!.isConnected) return;
     try {
       final resource = await _routerService!.getSystemResource();
-      final health = await _routerService!.getSystemHealth(); // List<Map>
+      final health = await _routerService!.getSystemHealth();
       final active = await _routerService!.getHotspotActive();
+      final allUsers = await _routerService!.getHotspotUsers();
+      final pppActive = await _routerService!.getPppActive();
+      final pppSecrets = await _routerService!.getPppSecrets();
 
       if (mounted) {
         setState(() {
@@ -97,6 +104,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _voltage = _parseVoltage(health);
           }
           _activeUsers = active.length;
+          _totalUsers = allUsers.length;
+          _pppActive = pppActive.length;
+          _pppTotal = pppSecrets.length;
         });
       }
     } catch (_) {}
@@ -134,6 +144,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
     return 0;
+  }
+
+  String _formatBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   @override
@@ -195,9 +213,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: _buildBody(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() => _currentIndex = index);
-        },
+        onTap: (index) => setState(() => _currentIndex = index),
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'الرئيسية'),
           BottomNavigationBarItem(
@@ -213,29 +229,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildBody() {
-    // المحتوى حسب التبويب المختار
     switch (_currentIndex) {
       case 0:
         return _buildDashboardContent();
       case 1:
-        // المستخدمون - يمكن عرض قائمة مستخدمين عامة أو الانتقال إلى Hotspot
         return const Center(
             child:
                 Text('قسم المستخدمون', style: TextStyle(color: Colors.white)));
       case 2:
-        // الإشعارات
         return const Center(
             child: Text('الإشعارات', style: TextStyle(color: Colors.white)));
       case 3:
-        // التقارير
         return const Center(
             child: Text('التقارير', style: TextStyle(color: Colors.white)));
       case 4:
-        // الإعدادات - ننتقل إلى شاشة الإعدادات مباشرة
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          Navigator.pushNamed(context, '/settings');
-        });
-        // نعيد الجسم الفارغ مؤقتاً حتى لا يظهر خطأ
+        WidgetsBinding.instance.addPostFrameCallback(
+            (_) => Navigator.pushNamed(context, '/settings'));
         return const SizedBox();
       default:
         return _buildDashboardContent();
@@ -300,18 +309,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(
-                    _routerModel,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold),
-                  ),
+                  Text(_routerModel,
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold)),
                   const SizedBox(height: 4),
-                  Text(
-                    'Uptime: $_uptime',
-                    style: const TextStyle(color: Colors.white54, fontSize: 13),
-                  ),
+                  Text('Uptime: $_uptime',
+                      style:
+                          const TextStyle(color: Colors.white54, fontSize: 13)),
                 ],
               ),
             ),
@@ -322,20 +328,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             children: [
-              _buildMenuButton('هوتسبوت', Icons.wifi_password, () {
-                Navigator.push(
+              _buildMenuButtonWithCounter(
+                'هوتسبوت',
+                Icons.wifi_password,
+                '$_totalUsers/$_activeUsers',
+                () => Navigator.push(
                     context,
                     MaterialPageRoute(
                         builder: (_) => HotspotActiveUsersScreen(
-                            routerService: _routerService)));
-              }),
-              _buildMenuButton('برودباند', Icons.router, () {
-                Navigator.push(
+                            routerService: _routerService))),
+              ),
+              _buildMenuButtonWithCounter(
+                'برودباند',
+                Icons.router,
+                '$_pppTotal/$_pppActive',
+                () => Navigator.push(
                     context,
                     MaterialPageRoute(
                         builder: (_) =>
-                            PppActiveScreen(routerService: _routerService)));
-              }),
+                            PppActiveScreen(routerService: _routerService))),
+              ),
               _buildMenuButton('بطاقات', Icons.credit_card, () {
                 Navigator.push(
                     context,
@@ -365,9 +377,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             InterfaceScreen(routerService: _routerService)));
               }),
               _buildMenuButton(
-                  'قياس السرعة', Icons.speed, () => _showInterfacePicker()),
+                  'قياس السرعة', Icons.speed, _showInterfacePicker),
               _buildMenuButton('Simple Queue', Icons.queue, () {
-                // TODO: فتح شاشة Simple Queue
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            SimpleQueueScreen(routerService: _routerService)));
+              }),
+              _buildMenuButton('User Manager', Icons.manage_accounts, () {
+                Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                            UserManagerScreen(routerService: _routerService)));
               }),
             ],
           ),
@@ -408,6 +431,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 6),
             Text(label,
                 style: const TextStyle(color: Colors.white, fontSize: 12)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMenuButtonWithCounter(
+      String label, IconData icon, String counter, VoidCallback onTap) {
+    return InkWell(
+      onTap: onTap,
+      child: Card(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: AppTheme.gold, size: 28),
+            const SizedBox(height: 2),
+            Text(label,
+                style: const TextStyle(color: Colors.white, fontSize: 12)),
+            const SizedBox(height: 2),
+            Text(
+              counter,
+              style: const TextStyle(
+                color: AppTheme.greenOnline,
+                fontSize: 10,
+              ),
+            ),
           ],
         ),
       ),

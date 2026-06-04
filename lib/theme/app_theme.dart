@@ -7,8 +7,12 @@ class AppTheme {
   static const Color semiBlack = Color(0xFF0D0D0D);
   static const Color greenOnline = Color(0xFF4CAF50);
   static const Color redOffline = Color(0xFFF44336);
-  static const Color navyBlue = Color(0xFF1A237E); // كحلي للثيم الفاتح
-  static const Color lightBackground = Color(0xFFF5F5F5); // رمادي فاتح للخلفية
+  static const Color navyBlue = Color(0xFF1A237E);
+  static const Color lightBackground =
+      Color(0xFFF8F9FA); // أبيض مائل للرمادي الناعم
+  static const Color darkText = Color(0xFF212121); // أسود غامق للنصوص
+  static const Color mediumText = Color(0xFF616161); // رمادي متوسط
+  static const Color lightCard = Color(0xFFFFFFFF); // أبيض نقي للكروت
 
   static const String _fontFamily = 'Cairo';
 
@@ -112,20 +116,20 @@ class AppTheme {
     );
   }
 
-  // ---------- الثيم الفاتح ----------
+  // ---------- الثيم الفاتح (مُعاد تصميمه) ----------
   static ThemeData get lightTheme {
     return ThemeData(
       brightness: Brightness.light,
       scaffoldBackgroundColor: lightBackground,
-      primaryColor: gold,
+      primaryColor: navyBlue,
       colorScheme: const ColorScheme.light(
-        primary: gold,
-        secondary: navyBlue,
-        surface: Colors.white,
+        primary: navyBlue,
+        secondary: gold,
+        surface: lightCard,
         error: redOffline,
         onPrimary: Colors.white,
         onSecondary: Colors.white,
-        onSurface: Colors.black,
+        onSurface: darkText,
         onError: Colors.white,
       ),
       fontFamily: _fontFamily,
@@ -144,13 +148,13 @@ class AppTheme {
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: Colors.white,
         selectedItemColor: navyBlue,
-        unselectedItemColor: Colors.grey,
+        unselectedItemColor: mediumText,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle:
             TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.bold),
       ),
       cardTheme: CardThemeData(
-        color: Colors.white,
+        color: lightCard,
         shape: RoundedRectangleBorder(
           side: const BorderSide(color: navyBlue, width: 1.2),
           borderRadius: BorderRadius.circular(16),
@@ -173,7 +177,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: Colors.white,
+        fillColor: lightCard,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: navyBlue),
@@ -187,7 +191,7 @@ class AppTheme {
           borderSide: const BorderSide(color: navyBlue, width: 2),
         ),
         labelStyle: const TextStyle(fontFamily: _fontFamily, color: navyBlue),
-        hintStyle: const TextStyle(fontFamily: _fontFamily, color: Colors.grey),
+        hintStyle: const TextStyle(fontFamily: _fontFamily, color: mediumText),
       ),
       textTheme: const TextTheme(
         headlineMedium: TextStyle(
@@ -202,10 +206,10 @@ class AppTheme {
           fontWeight: FontWeight.w600,
           fontSize: 20,
         ),
-        bodyLarge: TextStyle(
-            fontFamily: _fontFamily, color: Colors.black87, fontSize: 16),
-        bodyMedium: TextStyle(
-            fontFamily: _fontFamily, color: Colors.black54, fontSize: 14),
+        bodyLarge:
+            TextStyle(fontFamily: _fontFamily, color: darkText, fontSize: 16),
+        bodyMedium:
+            TextStyle(fontFamily: _fontFamily, color: mediumText, fontSize: 14),
         labelSmall:
             TextStyle(fontFamily: _fontFamily, color: gold, fontSize: 12),
       ),
