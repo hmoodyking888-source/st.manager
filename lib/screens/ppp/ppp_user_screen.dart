@@ -21,45 +21,99 @@ class _PppUserScreenState extends State<PppUserScreen> {
   final _nameController = TextEditingController();
   final _passController = TextEditingController();
   final _profileController = TextEditingController();
-  final _phoneController = TextEditingController(); // رقم هاتف الزبون
-  final _commentController = TextEditingController(); // تعليق عام
+  final _phoneController = TextEditingController();
+  final _commentController = TextEditingController();
+
   bool _loading = false;
+  bool _loadingProfiles = false;
+
+  List<String> _profiles = [];
+  String? _selectedProfile;
 
   @override
   void initState() {
     super.initState();
+
     if (widget.initialData != null) {
       _nameController.text = widget.initialData!['name']?.toString() ?? '';
       _passController.text = widget.initialData!['password']?.toString() ?? '';
       _profileController.text =
           widget.initialData!['profile']?.toString() ?? '';
 
-      // استخراج رقم الهاتف والتعليق من التعليق المخزّن
       final rawComment = widget.initialData!['comment']?.toString() ?? '';
       _parseComment(rawComment);
     }
+
+    _loadProfiles();
   }
 
-  /// يفصل رقم الهاتف عن التعليق إن وُجد
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _passController.dispose();
+    _profileController.dispose();
+    _phoneController.dispose();
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadProfiles() async {
+    if (widget.routerService == null) return;
+
+    setState(() => _loadingProfiles = true);
+
+    try {
+      final result = await widget.routerService!.getPppProfiles();
+      final names = result
+          .map((e) => e['name']?.toString().trim() ?? '')
+          .where((name) => name.isNotEmpty)
+          .toList();
+
+      final currentProfile = widget.initialData?['profile']?.toString().trim();
+
+      if (currentProfile != null &&
+          currentProfile.isNotEmpty &&
+          !names.contains(currentProfile)) {
+        names.insert(0, currentProfile);
+      }
+
+      if (mounted) {
+        setState(() {
+          _profiles = names;
+          _selectedProfile = currentProfile?.isNotEmpty == true
+              ? currentProfile
+              : (names.isNotEmpty ? names.first : null);
+
+          if (_selectedProfile != null) {
+            _profileController.text = _selectedProfile!;
+          }
+
+          _loadingProfiles = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loadingProfiles = false);
+      }
+    }
+  }
+
   void _parseComment(String raw) {
     if (raw.startsWith('phone:')) {
       final parts = raw.split('|');
       if (parts.isNotEmpty) {
-        // الجزء الأول هو phone:xxxxxxxx
         final phonePart = parts[0].replaceFirst('phone:', '').trim();
         _phoneController.text = phonePart;
-        // باقي الأجزاء هي التعليق
+
         if (parts.length > 1) {
           _commentController.text = parts.sublist(1).join('|').trim();
         }
       }
     } else {
-      // لا يوجد رقم هاتف، التعليق كامل
       _commentController.text = raw;
     }
   }
 
-  /// يدمج رقم الهاتف مع التعليق بالتنسيق المطلوب
   String _buildComment() {
     final phone = _phoneController.text.trim();
     final comment = _commentController.text.trim();
@@ -71,16 +125,27 @@ class _PppUserScreenState extends State<PppUserScreen> {
 
   Future<void> _save() async {
     if (widget.routerService == null) return;
+
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
+
     setState(() => _loading = true);
+
     try {
-      final params = {
+      final profile = (_selectedProfile?.trim().isNotEmpty == true)
+          ? _selectedProfile!.trim()
+          : _profileController.text.trim();
+
+      final params = <String, dynamic>{
         'name': name,
         'password': _passController.text.trim(),
-        'profile': _profileController.text.trim(),
         'comment': _buildComment(),
       };
+
+      if (profile.isNotEmpty) {
+        params['profile'] = profile;
+      }
+
       if (widget.isEdit && widget.initialData != null) {
         params['numbers'] = widget.initialData!['.id']?.toString() ?? '';
         await widget.routerService!
@@ -89,21 +154,78 @@ class _PppUserScreenState extends State<PppUserScreen> {
         await widget.routerService!
             .sendCommand('/ppp/secret/add', params: params);
       }
+
       if (mounted) Navigator.pop(context, true);
     } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('فشل الحفظ')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('فشل الحفظ')),
+        );
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
+  }
+
+  Widget _buildProfileField() {
+    if (_loadingProfiles) {
+      return const LinearProgressIndicator(color: AppTheme.gold);
+    }
+
+    if (_profiles.isNotEmpty) {
+      return DropdownButtonFormField<String>(
+        value: _selectedProfile,
+        isExpanded: true,
+        decoration: const InputDecoration(
+          labelText: 'البروفايل',
+          hintText: 'اختر بروفايل من الراوتر',
+        ),
+        dropdownColor: AppTheme.semiBlack,
+        style: const TextStyle(color: Colors.white),
+        items: _profiles
+            .map(
+              (profile) => DropdownMenuItem<String>(
+                value: profile,
+                child: Text(profile),
+              ),
+            )
+            .toList(),
+        onChanged: (value) {
+          setState(() {
+            _selectedProfile = value;
+            if (value != null) {
+              _profileController.text = value;
+            }
+          });
+        },
+      );
+    }
+
+    return TextField(
+      controller: _profileController,
+      decoration: const InputDecoration(
+        labelText: 'البروفايل (يدوي)',
+        hintText: 'إذا لم يتم جلب البروفايلات',
+      ),
+      style: const TextStyle(color: Colors.white),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(widget.isEdit ? 'تعديل حساب PPP' : 'إضافة حساب PPP')),
+        title: Text(widget.isEdit ? 'تعديل حساب PPP' : 'إضافة حساب PPP'),
+        actions: [
+          IconButton(
+            onPressed: _loadProfiles,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'تحديث البروفايلات',
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: SingleChildScrollView(
@@ -122,7 +244,6 @@ class _PppUserScreenState extends State<PppUserScreen> {
                 obscureText: true,
               ),
               const SizedBox(height: 12),
-              // حقل رقم هاتف الزبون
               TextField(
                 controller: _phoneController,
                 decoration: const InputDecoration(
@@ -133,7 +254,6 @@ class _PppUserScreenState extends State<PppUserScreen> {
                 style: const TextStyle(color: Colors.white),
               ),
               const SizedBox(height: 12),
-              // حقل التعليق
               TextField(
                 controller: _commentController,
                 decoration: const InputDecoration(
@@ -143,12 +263,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
                 style: const TextStyle(color: Colors.white),
               ),
               const SizedBox(height: 12),
-              TextField(
-                controller: _profileController,
-                decoration:
-                    const InputDecoration(labelText: 'البروفايل (اختياري)'),
-                style: const TextStyle(color: Colors.white),
-              ),
+              _buildProfileField(),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _loading ? null : _save,

@@ -8,11 +8,18 @@ class AppTheme {
   static const Color greenOnline = Color(0xFF4CAF50);
   static const Color redOffline = Color(0xFFF44336);
   static const Color navyBlue = Color(0xFF1A237E);
-  static const Color lightBackground =
-      Color(0xFFF8F9FA); // أبيض مائل للرمادي الناعم
-  static const Color darkText = Color(0xFF212121); // أسود غامق للنصوص
-  static const Color mediumText = Color(0xFF616161); // رمادي متوسط
-  static const Color lightCard = Color(0xFFFFFFFF); // أبيض نقي للكروت
+
+  static const Color lightBackground = Color(0xFFF4F8F4);
+  static const Color lightSurface = Color(0xFFFFFFFF);
+  static const Color lightSurfaceAlt = Color(0xFFF0F6F0);
+  static const Color lightBorder = Color(0xFFCFE0D0);
+  static const Color lightPrimaryGreen = Color(0xFF2E7D32);
+  static const Color lightSecondaryGreen = Color(0xFF66BB6A);
+  static const Color lightAccentGreen = Color(0xFFA5D6A7);
+  static const Color lightGold = Color(0xFFC8A43A);
+  static const Color darkText = Color(0xFF1F2A1F);
+  static const Color mediumText = Color(0xFF5E6B5E);
+  static const Color softText = Color(0xFF7B887B);
 
   static const String _fontFamily = 'Cairo';
 
@@ -116,16 +123,16 @@ class AppTheme {
     );
   }
 
-  // ---------- الثيم الفاتح (مُعاد تصميمه) ----------
+  // ---------- الثيم الفاتح الجديد ----------
   static ThemeData get lightTheme {
     return ThemeData(
       brightness: Brightness.light,
       scaffoldBackgroundColor: lightBackground,
-      primaryColor: navyBlue,
+      primaryColor: lightPrimaryGreen,
       colorScheme: const ColorScheme.light(
-        primary: navyBlue,
-        secondary: gold,
-        surface: lightCard,
+        primary: lightPrimaryGreen,
+        secondary: lightSecondaryGreen,
+        surface: lightSurface,
         error: redOffline,
         onPrimary: Colors.white,
         onSecondary: Colors.white,
@@ -134,10 +141,11 @@ class AppTheme {
       ),
       fontFamily: _fontFamily,
       appBarTheme: const AppBarTheme(
-        backgroundColor: navyBlue,
+        backgroundColor: lightPrimaryGreen,
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
+        iconTheme: IconThemeData(color: Colors.white),
         titleTextStyle: TextStyle(
           fontFamily: _fontFamily,
           fontSize: 20,
@@ -146,27 +154,27 @@ class AppTheme {
         ),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
-        backgroundColor: Colors.white,
-        selectedItemColor: navyBlue,
-        unselectedItemColor: mediumText,
+        backgroundColor: lightSurface,
+        selectedItemColor: lightPrimaryGreen,
+        unselectedItemColor: softText,
         type: BottomNavigationBarType.fixed,
         selectedLabelStyle:
             TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.bold),
       ),
       cardTheme: CardThemeData(
-        color: lightCard,
+        color: lightSurface,
         shape: RoundedRectangleBorder(
-          side: const BorderSide(color: navyBlue, width: 1.2),
-          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: lightBorder, width: 1),
+          borderRadius: BorderRadius.circular(18),
         ),
-        elevation: 2,
+        elevation: 1.5,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
-          backgroundColor: navyBlue,
+          backgroundColor: lightPrimaryGreen,
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(14),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
           textStyle: const TextStyle(
@@ -175,43 +183,101 @@ class AppTheme {
           ),
         ),
       ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          foregroundColor: lightPrimaryGreen,
+          textStyle: const TextStyle(
+            fontFamily: _fontFamily,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+      floatingActionButtonTheme: const FloatingActionButtonThemeData(
+        backgroundColor: lightPrimaryGreen,
+        foregroundColor: Colors.white,
+      ),
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? lightPrimaryGreen
+              : Colors.white,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? lightSecondaryGreen.withOpacity(0.45)
+              : Colors.grey.shade300,
+        ),
+      ),
+      checkboxTheme: CheckboxThemeData(
+        fillColor: WidgetStateProperty.resolveWith(
+          (states) => states.contains(WidgetState.selected)
+              ? lightPrimaryGreen
+              : Colors.grey.shade300,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(4),
+        ),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: lightCard,
+        fillColor: lightSurfaceAlt,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: navyBlue),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: lightBorder),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: navyBlue),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: lightBorder),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: navyBlue, width: 2),
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: lightPrimaryGreen, width: 1.8),
         ),
-        labelStyle: const TextStyle(fontFamily: _fontFamily, color: navyBlue),
-        hintStyle: const TextStyle(fontFamily: _fontFamily, color: mediumText),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: redOffline, width: 1.2),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: redOffline, width: 1.6),
+        ),
+        labelStyle: const TextStyle(
+          fontFamily: _fontFamily,
+          color: lightPrimaryGreen,
+        ),
+        hintStyle: const TextStyle(
+          fontFamily: _fontFamily,
+          color: mediumText,
+        ),
       ),
       textTheme: const TextTheme(
         headlineMedium: TextStyle(
           fontFamily: _fontFamily,
-          color: navyBlue,
+          color: lightPrimaryGreen,
           fontWeight: FontWeight.bold,
           fontSize: 24,
         ),
         titleLarge: TextStyle(
           fontFamily: _fontFamily,
-          color: navyBlue,
+          color: darkText,
           fontWeight: FontWeight.w600,
           fontSize: 20,
         ),
-        bodyLarge:
-            TextStyle(fontFamily: _fontFamily, color: darkText, fontSize: 16),
-        bodyMedium:
-            TextStyle(fontFamily: _fontFamily, color: mediumText, fontSize: 14),
-        labelSmall:
-            TextStyle(fontFamily: _fontFamily, color: gold, fontSize: 12),
+        bodyLarge: TextStyle(
+          fontFamily: _fontFamily,
+          color: darkText,
+          fontSize: 16,
+        ),
+        bodyMedium: TextStyle(
+          fontFamily: _fontFamily,
+          color: mediumText,
+          fontSize: 14,
+        ),
+        labelSmall: TextStyle(
+          fontFamily: _fontFamily,
+          color: lightPrimaryGreen,
+          fontSize: 12,
+        ),
       ),
     );
   }

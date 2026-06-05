@@ -32,29 +32,48 @@ class _HotspotProfileScreenState extends State<HotspotProfileScreen> {
     }
   }
 
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _rateLimitController.dispose();
+    super.dispose();
+  }
+
   Future<void> _save() async {
     if (widget.routerService == null) return;
+
+    final name = _nameController.text.trim();
+    if (name.isEmpty) return;
+
+    if (!mounted) return;
     setState(() => _loading = true);
+
     try {
-      final params = {
-        'name': _nameController.text.trim(),
+      final params = <String, dynamic>{
+        'name': name,
         'rate-limit': _rateLimitController.text.trim(),
       };
+
       if (widget.isEdit && widget.initialData != null) {
         params['numbers'] = widget.initialData!['.id']?.toString() ?? '';
         await widget.routerService!
-            .sendCommand('ip/hotspot/user/profile/set', params: params);
+            .sendCommand('/ip/hotspot/user/profile/set', params: params);
       } else {
         await widget.routerService!
-            .sendCommand('ip/hotspot/user/profile/add', params: params);
+            .sendCommand('/ip/hotspot/user/profile/add', params: params);
       }
-      if (mounted) Navigator.pop(context);
+
+      if (mounted) Navigator.pop(context, true);
     } catch (_) {
-      if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('فشل الحفظ')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('فشل الحفظ')),
+        );
+      }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -62,7 +81,8 @@ class _HotspotProfileScreenState extends State<HotspotProfileScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(widget.isEdit ? 'تعديل بروفايل' : 'إضافة بروفايل')),
+        title: Text(widget.isEdit ? 'تعديل بروفايل' : 'إضافة بروفايل'),
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -75,8 +95,9 @@ class _HotspotProfileScreenState extends State<HotspotProfileScreen> {
             const SizedBox(height: 12),
             TextField(
               controller: _rateLimitController,
-              decoration:
-                  const InputDecoration(labelText: 'محدد السرعة (مثلاً 2M/2M)'),
+              decoration: const InputDecoration(
+                labelText: 'محدد السرعة (مثلاً 2M/2M)',
+              ),
               style: const TextStyle(color: Colors.white),
             ),
             const SizedBox(height: 24),

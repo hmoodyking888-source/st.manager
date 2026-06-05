@@ -20,8 +20,10 @@ class HotspotUserScreen extends StatefulWidget {
 class _HotspotUserScreenState extends State<HotspotUserScreen> {
   final _nameController = TextEditingController();
   final _passController = TextEditingController();
-  final _phoneController = TextEditingController(); // رقم هاتف الزبون
-  final _commentController = TextEditingController(); // تعليق عام
+  final _phoneController = TextEditingController();
+  final _commentController = TextEditingController();
+  final _manualProfileController = TextEditingController();
+
   String? _selectedProfile;
   List<String> _profiles = [];
   bool _loading = false;
@@ -29,38 +31,49 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
   @override
   void initState() {
     super.initState();
+
     if (widget.initialData != null) {
       _nameController.text = widget.initialData!['name']?.toString() ?? '';
       _passController.text = widget.initialData!['password']?.toString() ?? '';
-      _selectedProfile = widget.initialData!['profile']?.toString();
 
-      // استخراج رقم الهاتف والتعليق من التعليق المخزّن
+      final profile = widget.initialData!['profile']?.toString().trim();
+      if (profile != null && profile.isNotEmpty) {
+        _selectedProfile = profile;
+        _manualProfileController.text = profile;
+      }
+
       final rawComment = widget.initialData!['comment']?.toString() ?? '';
       _parseComment(rawComment);
     }
+
     _loadProfiles();
   }
 
-  /// يفصل رقم الهاتف عن التعليق إن وُجد
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _passController.dispose();
+    _phoneController.dispose();
+    _commentController.dispose();
+    _manualProfileController.dispose();
+    super.dispose();
+  }
+
   void _parseComment(String raw) {
     if (raw.startsWith('phone:')) {
       final parts = raw.split('|');
       if (parts.isNotEmpty) {
-        // الجزء الأول هو phone:xxxxxxxx
         final phonePart = parts[0].replaceFirst('phone:', '').trim();
         _phoneController.text = phonePart;
-        // باقي الأجزاء هي التعليق
         if (parts.length > 1) {
           _commentController.text = parts.sublist(1).join('|').trim();
         }
       }
     } else {
-      // لا يوجد رقم هاتف، التعليق كامل
       _commentController.text = raw;
     }
   }
 
-  /// يدمج رقم الهاتف مع التعليق بالتنسيق المطلوب
   String _buildComment() {
     final phone = _phoneController.text.trim();
     final comment = _commentController.text.trim();
@@ -72,12 +85,27 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
 
   Future<void> _loadProfiles() async {
     if (widget.routerService == null) return;
+
     try {
       final profiles = await widget.routerService!.getHotspotProfiles();
+      final names = profiles
+          .map((p) => p['name']?.toString().trim() ?? '')
+          .where((name) => name.isNotEmpty)
+          .toList();
+
+      final currentProfile = widget.initialData?['profile']?.toString().trim();
+      if (currentProfile != null &&
+          currentProfile.isNotEmpty &&
+          !names.contains(currentProfile)) {
+        names.insert(0, currentProfile);
+      }
+
+      if (!mounted) return;
       setState(() {
-        _profiles = profiles.map((p) => p['name'].toString()).toList();
-        if (_selectedProfile == null && _profiles.isNotEmpty) {
-          _selectedProfile = _profiles.first;
+        _profiles = names;
+        if (_selectedProfile == null && names.isNotEmpty) {
+          _selectedProfile = names.first;
+          _manualProfileController.text = names.first;
         }
       });
     } catch (_) {}
@@ -85,18 +113,30 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
 
   Future<void> _save() async {
     if (widget.routerService == null) return;
+
     final name = _nameController.text.trim();
     final pass = _passController.text.trim();
+
     if (name.isEmpty) return;
 
+    if (!mounted) return;
     setState(() => _loading = true);
+
     try {
-      final params = {
+      final profile = (_selectedProfile?.trim().isNotEmpty == true)
+          ? _selectedProfile!.trim()
+          : _manualProfileController.text.trim();
+
+      final params = <String, dynamic>{
         'name': name,
         'password': pass,
-        'profile': _selectedProfile ?? '',
         'comment': _buildComment(),
       };
+
+      if (profile.isNotEmpty) {
+        params['profile'] = profile;
+      }
+
       if (widget.isEdit && widget.initialData != null) {
         params['numbers'] = widget.initialData!['.id']?.toString() ?? '';
         await widget.routerService!
@@ -105,6 +145,7 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
         await widget.routerService!
             .sendCommand('/ip/hotspot/user/add', params: params);
       }
+
       if (mounted) Navigator.pop(context, true);
     } catch (_) {
       if (mounted) {
@@ -113,16 +154,63 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
         );
       }
     } finally {
-      setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
+  }
+
+  Widget _buildProfileField() {
+    if (_profiles.isNotEmpty) {
+      return DropdownButtonFormField<String>(
+        value: _selectedProfile,
+        isExpanded: true,
+        decoration: const InputDecoration(labelText: 'البروفايل'),
+        dropdownColor: AppTheme.semiBlack,
+        style: const TextStyle(color: Colors.white),
+        items: _profiles
+            .map(
+              (p) => DropdownMenuItem(
+                value: p,
+                child: Text(p),
+              ),
+            )
+            .toList(),
+        onChanged: (v) {
+          setState(() {
+            _selectedProfile = v;
+            if (v != null) {
+              _manualProfileController.text = v;
+            }
+          });
+        },
+      );
+    }
+
+    return TextField(
+      controller: _manualProfileController,
+      decoration: const InputDecoration(
+        labelText: 'البروفايل',
+        hintText: 'إن لم يتم جلب البروفايلات',
+      ),
+      style: const TextStyle(color: Colors.white),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-          title: Text(
-              widget.isEdit ? 'تعديل حساب هوتسبوت' : 'إضافة حساب هوتسبوت')),
+        title:
+            Text(widget.isEdit ? 'تعديل حساب هوتسبوت' : 'إضافة حساب هوتسبوت'),
+        actions: [
+          IconButton(
+            onPressed: _loadProfiles,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'تحديث البروفايلات',
+          ),
+        ],
+      ),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: SingleChildScrollView(
@@ -141,7 +229,6 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
                 obscureText: true,
               ),
               const SizedBox(height: 12),
-              // حقل رقم هاتف الزبون
               TextField(
                 controller: _phoneController,
                 decoration: const InputDecoration(
@@ -152,7 +239,6 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
                 style: const TextStyle(color: Colors.white),
               ),
               const SizedBox(height: 12),
-              // حقل التعليق
               TextField(
                 controller: _commentController,
                 decoration: const InputDecoration(
@@ -162,14 +248,7 @@ class _HotspotUserScreenState extends State<HotspotUserScreen> {
                 style: const TextStyle(color: Colors.white),
               ),
               const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _selectedProfile,
-                items: _profiles
-                    .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                    .toList(),
-                onChanged: (v) => setState(() => _selectedProfile = v),
-                decoration: const InputDecoration(labelText: 'البروفايل'),
-              ),
+              _buildProfileField(),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: _loading ? null : _save,

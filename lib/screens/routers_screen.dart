@@ -12,45 +12,93 @@ class RoutersScreen extends StatefulWidget {
 
 class _RoutersScreenState extends State<RoutersScreen> {
   final SecureStorageService _storage = SecureStorageService();
+
   List<Map<String, String>> _routers = [];
   int _remainingDays = 0;
+  bool _loading = false;
 
   @override
   void initState() {
     super.initState();
-    _loadRouters();
-    _checkRemainingDays();
+    _refreshData();
+  }
+
+  Future<void> _refreshData() async {
+    await Future.wait([
+      _loadRouters(),
+      _checkRemainingDays(),
+    ]);
   }
 
   Future<void> _loadRouters() async {
     final routers = await _storage.getRouters();
+    if (!mounted) return;
     setState(() => _routers = routers);
   }
 
   Future<void> _checkRemainingDays() async {
     final phone = await _storage.getPhone();
-    if (phone == null) return;
+    if (!mounted) return;
+
+    if (phone == null) {
+      setState(() => _remainingDays = 0);
+      return;
+    }
+
     final licensed = await FirebaseService.checkLicense(phone);
+    if (!mounted) return;
+
     if (licensed) {
       setState(() => _remainingDays = 30);
+      return;
+    }
+
+    final firstLaunch = await _storage.getFirstLaunch();
+    if (!mounted) return;
+
+    if (firstLaunch != null) {
+      final trialEnd = DateTime.parse(firstLaunch).add(const Duration(days: 3));
+      final diff = trialEnd.difference(DateTime.now()).inDays;
+      setState(() => _remainingDays = diff > 0 ? diff : 0);
     } else {
-      final firstLaunch = await _storage.getFirstLaunch();
-      if (firstLaunch != null) {
-        final trialEnd =
-            DateTime.parse(firstLaunch).add(const Duration(days: 3));
-        final diff = trialEnd.difference(DateTime.now()).inDays;
-        setState(() => _remainingDays = diff > 0 ? diff : 0);
-      }
+      setState(() => _remainingDays = 3);
     }
   }
 
-  void _addOrEditRouter({int? index}) async {
+  Future<void> _saveRouter({
+    required int? index,
+    required String name,
+    required String ip,
+    required String username,
+    required String password,
+    required String port,
+  }) async {
+    final router = <String, String>{
+      'name': name.trim(),
+      'ip': ip.trim(),
+      'username': username.trim(),
+      'password': password.trim(),
+      'port': port.trim(),
+    };
+
+    if (index == null) {
+      await _storage.addRouter(router);
+    } else {
+      await _storage.updateRouter(index, router);
+    }
+
+    final phone = await _storage.getPhone();
+    if (phone != null && phone.isNotEmpty) {
+      await FirebaseService.saveUserPhone(phone, router);
+    }
+  }
+
+  Future<void> _addOrEditRouter({int? index}) async {
     final nameController = TextEditingController();
     final ipController = TextEditingController();
     final userController = TextEditingController();
     final passController = TextEditingController();
-    String protocol = 'https';
-    final portController = TextEditingController(text: '443');
+    final portController = TextEditingController(text: '8728');
 
     if (index != null) {
       final r = _routers[index];
@@ -58,99 +106,211 @@ class _RoutersScreenState extends State<RoutersScreen> {
       ipController.text = r['ip'] ?? '';
       userController.text = r['username'] ?? '';
       passController.text = r['password'] ?? '';
-      protocol = r['protocol'] ?? 'https';
-      portController.text = r['port'] ?? '443';
+      portController.text = r['port'] ?? '8728';
     }
 
-    await showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: Text(index == null ? 'إضافة راوتر' : 'تعديل راوتر'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                  controller: nameController,
-                  decoration: const InputDecoration(labelText: 'اسم الراوتر')),
-              TextField(
-                  controller: ipController,
-                  decoration: const InputDecoration(labelText: 'IP')),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 1,
-                    child: DropdownButtonFormField<String>(
-                      value: protocol,
-                      items: ['http', 'https']
-                          .map(
-                              (p) => DropdownMenuItem(value: p, child: Text(p)))
-                          .toList(),
-                      onChanged: (v) => protocol = v!,
-                      decoration: const InputDecoration(labelText: 'بروتوكول'),
-                    ),
+    try {
+      await showDialog(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setDialogState) {
+              return AlertDialog(
+                backgroundColor: AppTheme.semiBlack,
+                title: Text(
+                  index == null ? 'إضافة راوتر' : 'تعديل راوتر',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextField(
+                        controller: nameController,
+                        decoration:
+                            const InputDecoration(labelText: 'اسم الراوتر'),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: ipController,
+                        decoration: const InputDecoration(labelText: 'IP'),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: portController,
+                        decoration: const InputDecoration(
+                          labelText: 'منفذ API',
+                          hintText: '8728 أو 8729',
+                        ),
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: userController,
+                        decoration:
+                            const InputDecoration(labelText: 'اسم المستخدم'),
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: passController,
+                        decoration:
+                            const InputDecoration(labelText: 'كلمة المرور'),
+                        obscureText: true,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    flex: 1,
-                    child: TextField(
-                      controller: portController,
-                      decoration: const InputDecoration(labelText: 'المنفذ'),
-                      keyboardType: TextInputType.number,
-                    ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(dialogContext),
+                    child: const Text('إلغاء'),
+                  ),
+                  ElevatedButton(
+                    onPressed: () async {
+                      final name = nameController.text.trim();
+                      final ip = ipController.text.trim();
+                      final username = userController.text.trim();
+                      final password = passController.text.trim();
+                      final port = portController.text.trim();
+
+                      if (name.isEmpty ||
+                          ip.isEmpty ||
+                          username.isEmpty ||
+                          password.isEmpty ||
+                          port.isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                              content: Text('يرجى تعبئة الحقول الأساسية')),
+                        );
+                        return;
+                      }
+
+                      if (int.tryParse(port) == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('منفذ غير صالح')),
+                        );
+                        return;
+                      }
+
+                      setState(() => _loading = true);
+
+                      try {
+                        await _saveRouter(
+                          index: index,
+                          name: name,
+                          ip: ip,
+                          username: username,
+                          password: password,
+                          port: port,
+                        );
+
+                        if (!mounted) return;
+                        Navigator.pop(dialogContext);
+                        await _loadRouters();
+                        await _checkRemainingDays();
+                      } catch (_) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('فشل الحفظ')),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => _loading = false);
+                        }
+                      }
+                    },
+                    child: const Text('حفظ'),
                   ),
                 ],
-              ),
-              TextField(
-                  controller: userController,
-                  decoration: const InputDecoration(labelText: 'اسم المستخدم')),
-              TextField(
-                  controller: passController,
-                  decoration: const InputDecoration(labelText: 'كلمة المرور'),
-                  obscureText: true),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('إلغاء')),
-          ElevatedButton(
-            onPressed: () async {
-              final router = {
-                'name': nameController.text.trim(),
-                'ip': ipController.text.trim(),
-                'username': userController.text.trim(),
-                'password': passController.text.trim(),
-                'protocol': protocol,
-                'port': portController.text.trim(),
-              };
-              if (index == null) {
-                await _storage.addRouter(router);
-              } else {
-                await _storage.updateRouter(index, router);
-              }
-              final phone = await _storage.getPhone();
-              if (phone != null) {
-                await FirebaseService.saveUserPhone(phone, router);
-              }
-              _loadRouters();
-              Navigator.pop(context);
+              );
             },
-            child: const Text('حفظ'),
-          ),
-        ],
-      ),
-    );
+          );
+        },
+      );
+    } finally {
+      nameController.dispose();
+      ipController.dispose();
+      userController.dispose();
+      passController.dispose();
+      portController.dispose();
+    }
   }
 
-  void _deleteRouter(int index) async {
+  Future<void> _deleteRouter(int index) async {
     await _storage.deleteRouter(index);
-    _loadRouters();
+    if (!mounted) return;
+    await _loadRouters();
   }
 
   void _selectRouter(Map<String, String> router) {
     Navigator.pushNamed(context, '/dashboard', arguments: router);
+  }
+
+  Widget _buildSummaryCard() {
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppTheme.semiBlack,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: AppTheme.gold.withOpacity(0.25),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppTheme.gold.withOpacity(0.12),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.router, color: AppTheme.gold),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'الراوترات المحفوظة',
+                  style: TextStyle(color: Colors.white, fontSize: 14),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'عدد الراوترات: ${_routers.length}',
+                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              const Text(
+                'المدة المتبقية',
+                style: TextStyle(color: Colors.white54, fontSize: 11),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$_remainingDays يوم',
+                style: const TextStyle(
+                  color: AppTheme.gold,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -158,52 +318,76 @@ class _RoutersScreenState extends State<RoutersScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('إدارة الراوترات'),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(30),
-          child: Padding(
-            padding: const EdgeInsets.only(bottom: 8),
-            child: Text(
-              'المدة المتبقية: $_remainingDays يوم',
-              style: const TextStyle(color: AppTheme.gold, fontSize: 14),
-            ),
+        actions: [
+          IconButton(
+            onPressed: _refreshData,
+            icon: const Icon(Icons.refresh),
+            tooltip: 'تحديث',
           ),
-        ),
+        ],
       ),
-      body: _routers.isEmpty
-          ? const Center(
-              child: Text('لا يوجد راوترات مضافة',
-                  style: TextStyle(color: Colors.white54)))
-          : ListView.builder(
-              itemCount: _routers.length,
-              itemBuilder: (_, i) {
-                final r = _routers[i];
-                return Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.router, color: AppTheme.gold),
-                    title: Text(r['name'] ?? '',
-                        style: const TextStyle(color: Colors.white)),
-                    subtitle: Text(
-                        '${r['ip']} (${r['protocol'] ?? 'https'}:${r['port'] ?? '443'})',
-                        style: const TextStyle(color: Colors.white54)),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.white54),
-                            onPressed: () => _addOrEditRouter(index: i)),
-                        IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => _deleteRouter(i)),
-                      ],
+      body: Column(
+        children: [
+          if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
+          _buildSummaryCard(),
+          Expanded(
+            child: _routers.isEmpty
+                ? const Center(
+                    child: Text(
+                      'لا يوجد راوترات مضافة',
+                      style: TextStyle(color: Colors.white54),
                     ),
-                    onTap: () => _selectRouter(r),
+                  )
+                : RefreshIndicator(
+                    onRefresh: _refreshData,
+                    child: ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount: _routers.length,
+                      itemBuilder: (_, i) {
+                        final r = _routers[i];
+                        return Card(
+                          child: ListTile(
+                            leading:
+                                const Icon(Icons.router, color: AppTheme.gold),
+                            title: Text(
+                              r['name'] ?? '',
+                              style: const TextStyle(color: Colors.white),
+                            ),
+                            subtitle: Text(
+                              '${r['ip']} :${r['port'] ?? '8728'}',
+                              style: const TextStyle(color: Colors.white54),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.edit,
+                                    color: Colors.white54,
+                                  ),
+                                  onPressed: () => _addOrEditRouter(index: i),
+                                ),
+                                IconButton(
+                                  icon: const Icon(
+                                    Icons.delete,
+                                    color: Colors.red,
+                                  ),
+                                  onPressed: () => _deleteRouter(i),
+                                ),
+                              ],
+                            ),
+                            onTap: () => _selectRouter(r),
+                          ),
+                        );
+                      },
+                    ),
                   ),
-                );
-              },
-            ),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: AppTheme.gold,
-        onPressed: () => _addOrEditRouter(),
+        onPressed: _addOrEditRouter,
         child: const Icon(Icons.add),
       ),
     );

@@ -16,6 +16,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _pinController = TextEditingController();
   final _pinConfirmController = TextEditingController();
   final SecureStorageService _storage = SecureStorageService();
+
   bool _loading = false;
   bool _isPinSet = false;
   bool _showConfirmPin = false;
@@ -26,9 +27,20 @@ class _LoginScreenState extends State<LoginScreen> {
     _checkExistingData();
   }
 
+  @override
+  void dispose() {
+    _phoneController.dispose();
+    _pinController.dispose();
+    _pinConfirmController.dispose();
+    super.dispose();
+  }
+
   Future<void> _checkExistingData() async {
     final phone = await _storage.getPhone();
     final pin = await _storage.getPin();
+
+    if (!mounted) return;
+
     if (phone != null && pin != null) {
       setState(() {
         _phoneController.text = phone;
@@ -46,117 +58,150 @@ class _LoginScreenState extends State<LoginScreen> {
       return;
     }
 
+    if (!_isPinSet && !_showConfirmPin && pin.length < 4) {
+      _showError('يجب أن يكون رمز PIN 4 خانات على الأقل');
+      return;
+    }
+
+    if (_showConfirmPin && !_isPinSet) {
+      final confirm = _pinConfirmController.text.trim();
+      if (pin != confirm) {
+        _showError('رمز PIN غير متطابق');
+        return;
+      }
+    }
+
+    if (!mounted) return;
     setState(() => _loading = true);
 
-    if (_isPinSet) {
-      final storedPin = await _storage.getPin();
-      if (pin != storedPin) {
-        setState(() => _loading = false);
-        _showError('رمز PIN غير صحيح');
-        return;
-      }
-    } else {
-      if (pin.length < 4) {
-        setState(() => _loading = false);
-        _showError('يجب أن يكون رمز PIN 4 خانات على الأقل');
-        return;
-      }
-      if (_showConfirmPin) {
-        final confirm = _pinConfirmController.text.trim();
-        if (pin != confirm) {
-          setState(() => _loading = false);
-          _showError('رمز PIN غير متطابق');
+    try {
+      if (_isPinSet) {
+        final storedPin = await _storage.getPin();
+        if (pin != storedPin) {
+          _showError('رمز PIN غير صحيح');
           return;
         }
       } else {
-        setState(() {
-          _showConfirmPin = true;
-          _loading = false;
-        });
+        if (!_showConfirmPin) {
+          setState(() {
+            _showConfirmPin = true;
+          });
+          return;
+        }
+
+        await _storage.setPin(pin);
+        await _storage.setPhone(phone);
+
+        if (mounted) {
+          setState(() {
+            _isPinSet = true;
+            _showConfirmPin = false;
+          });
+        }
+      }
+
+      final licensed = await FirebaseService.checkLicense(phone);
+
+      if (licensed) {
+        _navigateTo('/routers');
         return;
       }
-      await _storage.setPin(pin);
-      await _storage.setPhone(phone);
-    }
 
-    final licensed = await FirebaseService.checkLicense(phone);
-    if (licensed) {
-      _navigateTo('/routers');
-    } else {
       final firstLaunchStr = await _storage.getFirstLaunch();
+
       if (firstLaunchStr == null) {
         await _storage.setFirstLaunch(DateTime.now().toIso8601String());
         _navigateTo('/routers');
-      } else {
-        final firstLaunch = DateTime.parse(firstLaunchStr);
-        final trialEnd = firstLaunch.add(const Duration(days: 3));
-        if (DateTime.now().isBefore(trialEnd)) {
-          _navigateTo('/routers');
-        } else {
-          setState(() => _loading = false);
-          if (mounted) {
-            showDialog(
-              context: context,
-              builder: (_) => AlertDialog(
-                title: const Text('انتهت مدة الجلسة'),
-                content: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Text('يرجى التواصل مع الإدارة لتجديد اشتراكك'),
-                    const SizedBox(height: 12),
-                    const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.chat, color: Colors.green), // أيقونة بديلة
-                        SizedBox(width: 8),
-                        Text('+963995870655',
-                            style: TextStyle(color: Colors.white)),
-                      ],
-                    ),
-                  ],
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('إغلاق'),
-                  ),
-                  ElevatedButton.icon(
-                    icon: const Icon(Icons.chat), // أيقونة بديلة
-                    label: const Text('واتساب'),
-                    onPressed: () async {
-                      final url = Uri.parse('https://wa.me/963995870655');
-                      if (await canLaunchUrl(url)) {
-                        await launchUrl(url,
-                            mode: LaunchMode.externalApplication);
-                      }
-                      Navigator.pop(context);
-                    },
+        return;
+      }
+
+      final firstLaunch = DateTime.parse(firstLaunchStr);
+      final trialEnd = firstLaunch.add(const Duration(days: 3));
+
+      if (DateTime.now().isBefore(trialEnd)) {
+        _navigateTo('/routers');
+        return;
+      }
+
+      if (!mounted) return;
+
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppTheme.semiBlack,
+          title: const Text('انتهت مدة الجلسة'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'يرجى التواصل مع الإدارة لتجديد اشتراكك',
+                style: TextStyle(color: Colors.white),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.chat, color: Colors.green),
+                  SizedBox(width: 8),
+                  Text(
+                    '+963995870655',
+                    style: TextStyle(color: Colors.white),
                   ),
                 ],
               ),
-            );
-          }
-          return;
-        }
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('إغلاق'),
+            ),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.chat),
+              label: const Text('واتساب'),
+              onPressed: () async {
+                final url = Uri.parse('https://wa.me/963995870655');
+                if (await canLaunchUrl(url)) {
+                  await launchUrl(url, mode: LaunchMode.externalApplication);
+                }
+                if (mounted) {
+                  Navigator.pop(context);
+                }
+              },
+            ),
+          ],
+        ),
+      );
+    } catch (_) {
+      _showError('حدث خطأ أثناء تسجيل الدخول');
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
       }
     }
-    setState(() => _loading = false);
   }
 
-  void _forgotPin() async {
+  Future<void> _forgotPin() async {
     final storedPhone = await _storage.getPhone();
     final phoneInput = _phoneController.text.trim();
+
     if (storedPhone == null || phoneInput != storedPhone) {
       _showError('رقم الهاتف لا يتطابق مع المسجل');
       return;
     }
+
     await _storage.deletePin();
+
+    if (!mounted) return;
+
     setState(() {
       _isPinSet = false;
       _showConfirmPin = false;
       _pinController.clear();
       _pinConfirmController.clear();
     });
+
     _showError('تم مسح الرمز، أنشئ رمزاً جديداً');
   }
 
@@ -170,73 +215,149 @@ class _LoginScreenState extends State<LoginScreen> {
     Navigator.pushReplacementNamed(context, route);
   }
 
+  Widget _buildHeader() {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: AppTheme.gold.withOpacity(0.08),
+            border: Border.all(
+              color: AppTheme.gold.withOpacity(0.45),
+              width: 1.4,
+            ),
+          ),
+          child: Icon(
+            Icons.shield_outlined,
+            size: 72,
+            color: AppTheme.gold,
+          ),
+        ),
+        const SizedBox(height: 18),
+        Text(
+          'ST_Manager',
+          style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                fontSize: 32,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.gold,
+              ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'إدارة الشبكة بسرعة وثقة',
+          style: TextStyle(
+            color: Colors.white54,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFieldCard({required Widget child}) {
+    return Container(
+      decoration: BoxDecoration(
+        color: AppTheme.semiBlack,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppTheme.gold.withOpacity(0.25),
+          width: 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: child,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.black,
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.shield_outlined, size: 80, color: AppTheme.gold),
-              const SizedBox(height: 20),
-              Text('ST_Manager',
-                  style: Theme.of(context)
-                      .textTheme
-                      .headlineMedium
-                      ?.copyWith(fontSize: 32)),
-              const SizedBox(height: 40),
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                enabled: !_isPinSet,
-                decoration: const InputDecoration(
-                  labelText: 'رقم الهاتف',
-                  hintText: 'مثلاً 963XXXXXXXXX',
-                ),
-                style: const TextStyle(color: AppTheme.gold),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: _pinController,
-                obscureText: true,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: _isPinSet ? 'رمز PIN' : 'أنشئ رمز PIN',
-                  hintText: '4 خانات على الأقل',
-                ),
-                style: const TextStyle(color: AppTheme.gold),
-              ),
-              if (_showConfirmPin && !_isPinSet) ...[
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _pinConfirmController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'تأكيد رمز PIN',
-                    hintText: 'أعد إدخال الرمز',
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _buildHeader(),
+                  const SizedBox(height: 32),
+                  _buildFieldCard(
+                    child: Column(
+                      children: [
+                        TextField(
+                          controller: _phoneController,
+                          keyboardType: TextInputType.phone,
+                          enabled: !_isPinSet,
+                          decoration: const InputDecoration(
+                            labelText: 'رقم الهاتف',
+                            hintText: 'مثلاً 963XXXXXXXXX',
+                          ),
+                          style: const TextStyle(color: AppTheme.gold),
+                        ),
+                        const SizedBox(height: 16),
+                        TextField(
+                          controller: _pinController,
+                          obscureText: true,
+                          keyboardType: TextInputType.number,
+                          decoration: InputDecoration(
+                            labelText: _isPinSet ? 'رمز PIN' : 'أنشئ رمز PIN',
+                            hintText: '4 خانات على الأقل',
+                          ),
+                          style: const TextStyle(color: AppTheme.gold),
+                        ),
+                        if (_showConfirmPin && !_isPinSet) ...[
+                          const SizedBox(height: 16),
+                          TextField(
+                            controller: _pinConfirmController,
+                            obscureText: true,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                              labelText: 'تأكيد رمز PIN',
+                              hintText: 'أعد إدخال الرمز',
+                            ),
+                            style: const TextStyle(color: AppTheme.gold),
+                          ),
+                        ],
+                        const SizedBox(height: 22),
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _loading ? null : _submit,
+                            child: _loading
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.black,
+                                      strokeWidth: 2.5,
+                                    ),
+                                  )
+                                : Text(_isPinSet ? 'دخول' : 'متابعة'),
+                          ),
+                        ),
+                        if (_isPinSet) ...[
+                          const SizedBox(height: 8),
+                          TextButton(
+                            onPressed: _forgotPin,
+                            child: const Text(
+                              'نسيت الرمز؟',
+                              style: TextStyle(color: AppTheme.gold),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
-                  style: const TextStyle(color: AppTheme.gold),
-                ),
-              ],
-              const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _loading ? null : _submit,
-                child: _loading
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : Text(_isPinSet ? 'دخول' : 'متابعة'),
+                ],
               ),
-              if (_isPinSet) ...[
-                TextButton(
-                  onPressed: _forgotPin,
-                  child: const Text('نسيت الرمز؟',
-                      style: TextStyle(color: AppTheme.gold)),
-                ),
-              ],
-            ],
+            ),
           ),
         ),
       ),

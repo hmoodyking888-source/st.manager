@@ -23,18 +23,25 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   RouterService? _routerService;
+
   double _cpuLoad = 0;
   double _temperature = 0;
   double _voltage = 0;
   double _currentSpeed = 0;
+
   String _routerModel = '...';
   String _uptime = '...';
+
   int _activeUsers = 0;
   int _totalUsers = 0;
   int _pppActive = 0;
   int _pppTotal = 0;
+  int _interfaceCount = 0;
+
   String? _selectedInterface = 'bridge1';
-  StreamSubscription? _speedSubscription;
+  List<String> _availableInterfaces = ['bridge1'];
+
+  StreamSubscription<double>? _speedSubscription;
   Timer? _statsTimer;
   int _currentIndex = 0;
 
@@ -46,13 +53,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _connectToRouter() async {
     final data = widget.routerData;
+
     _routerService = RouterService(
       host: data['ip']!,
       port: int.tryParse(data['port'] ?? '8728') ?? 8728,
       username: data['username']!,
       password: data['password']!,
     );
+
     final ok = await _routerService!.connect();
+
     if (ok) {
       _startMonitoring();
     } else {
@@ -67,20 +77,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   void _startMonitoring() {
     _fetchStats();
+    _loadInterfaces();
+
     _statsTimer =
         Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
+
     if (_selectedInterface != null) {
       _speedSubscription?.cancel();
       _speedSubscription = _routerService!
           .monitorTrafficStream(_selectedInterface!)
           .listen((speed) {
-        if (mounted) setState(() => _currentSpeed = speed);
+        if (mounted) {
+          setState(() => _currentSpeed = speed);
+        }
       });
     }
   }
 
+  Future<void> _loadInterfaces() async {
+    if (_routerService == null || !_routerService!.isConnected) return;
+
+    try {
+      final interfaces = await _routerService!.getInterfaceList();
+      final names = interfaces
+          .map((e) => e['name']?.toString())
+          .whereType<String>()
+          .where((name) => name.trim().isNotEmpty)
+          .toList();
+
+      if (names.isNotEmpty && mounted) {
+        setState(() {
+          _availableInterfaces = names;
+          _interfaceCount = names.length;
+
+          if (!_availableInterfaces.contains(_selectedInterface)) {
+            _selectedInterface = _availableInterfaces.first;
+          }
+        });
+
+        _speedSubscription?.cancel();
+        _speedSubscription = _routerService!
+            .monitorTrafficStream(_selectedInterface!)
+            .listen((speed) {
+          if (mounted) setState(() => _currentSpeed = speed);
+        });
+      }
+    } catch (_) {}
+  }
+
   Future<void> _fetchStats() async {
     if (_routerService == null || !_routerService!.isConnected) return;
+
     try {
       final resource = await _routerService!.getSystemResource();
       final health = await _routerService!.getSystemHealth();
@@ -89,26 +136,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
       final pppActive = await _routerService!.getPppActive();
       final pppSecrets = await _routerService!.getPppSecrets();
 
-      if (mounted) {
-        setState(() {
-          if (resource.isNotEmpty) {
-            _cpuLoad = double.tryParse(
-                    resource.first['cpu-load']?.toString() ?? '0') ??
-                0;
-            _routerModel =
-                resource.first['board-name']?.toString() ?? 'MikroTik';
-            _uptime = resource.first['uptime']?.toString() ?? '...';
-          }
-          if (health.isNotEmpty) {
-            _temperature = _parseTemperature(health);
-            _voltage = _parseVoltage(health);
-          }
-          _activeUsers = active.length;
-          _totalUsers = allUsers.length;
-          _pppActive = pppActive.length;
-          _pppTotal = pppSecrets.length;
-        });
-      }
+      if (!mounted) return;
+
+      setState(() {
+        if (resource.isNotEmpty) {
+          _cpuLoad =
+              double.tryParse(resource.first['cpu-load']?.toString() ?? '0') ??
+                  0;
+          _routerModel = resource.first['board-name']?.toString() ?? 'MikroTik';
+          _uptime = resource.first['uptime']?.toString() ?? '...';
+        }
+
+        if (health.isNotEmpty) {
+          _temperature = _parseTemperature(health);
+          _voltage = _parseVoltage(health);
+        }
+
+        _activeUsers = active.length;
+        _totalUsers = allUsers.length;
+        _pppActive = pppActive.length;
+        _pppTotal = pppSecrets.length;
+      });
     } catch (_) {}
   }
 
@@ -122,6 +170,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return temp;
         }
       }
+
       if (item.containsKey('temperature')) {
         double? temp = double.tryParse(item['temperature'].toString());
         if (temp != null) {
@@ -136,6 +185,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _parseVoltage(List<Map<String, dynamic>> health) {
     final direct = double.tryParse(health.first['voltage']?.toString() ?? '');
     if (direct != null && direct > 0) return direct;
+
     for (var item in health) {
       if (item.containsKey('name') &&
           item['name'].toString().toLowerCase().contains('volt')) {
@@ -144,14 +194,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     }
     return 0;
-  }
-
-  String _formatBytes(int bytes) {
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024)
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
   @override
@@ -167,16 +209,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('اختر الواجهة'),
-        content: DropdownButtonFormField(
+        content: DropdownButtonFormField<String>(
           value: _selectedInterface,
-          items: ['ether1', 'ether2', 'bridge1']
-              .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+          isExpanded: true,
+          items: _availableInterfaces
+              .map(
+                (e) => DropdownMenuItem<String>(
+                  value: e,
+                  child: Text(e),
+                ),
+              )
               .toList(),
           onChanged: (val) {
+            if (val == null) return;
+
             setState(() => _selectedInterface = val);
             _speedSubscription?.cancel();
             _speedSubscription =
-                _routerService!.monitorTrafficStream(val!).listen((speed) {
+                _routerService!.monitorTrafficStream(val).listen((speed) {
               if (mounted) setState(() => _currentSpeed = speed);
             });
             Navigator.pop(context);
@@ -191,13 +241,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Text(widget.routerData['name'] ?? 'ST_Manager'),
-            Text('ربطك بالعالم بسرعة وثقة',
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(fontSize: 10)),
+            Text(
+              'ربطك بالعالم بسرعة وثقة',
+              style:
+                  Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10),
+            ),
           ],
         ),
         actions: [
@@ -213,7 +264,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: _buildBody(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: (index) {
+          if (index == 4) {
+            Navigator.pushNamed(context, '/settings').then((_) {
+              if (mounted) {
+                setState(() => _currentIndex = 0);
+              }
+            });
+            return;
+          }
+          setState(() => _currentIndex = index);
+        },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'الرئيسية'),
           BottomNavigationBarItem(
@@ -234,18 +295,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return _buildDashboardContent();
       case 1:
         return const Center(
-            child:
-                Text('قسم المستخدمون', style: TextStyle(color: Colors.white)));
+          child: Text('قسم المستخدمون', style: TextStyle(color: Colors.white)),
+        );
       case 2:
         return const Center(
-            child: Text('الإشعارات', style: TextStyle(color: Colors.white)));
+          child: Text('الإشعارات', style: TextStyle(color: Colors.white)),
+        );
       case 3:
         return const Center(
-            child: Text('التقارير', style: TextStyle(color: Colors.white)));
+          child: Text('التقارير', style: TextStyle(color: Colors.white)),
+        );
       case 4:
-        WidgetsBinding.instance.addPostFrameCallback(
-            (_) => Navigator.pushNamed(context, '/settings'));
-        return const SizedBox();
+        return const Center(
+          child: Text('الإعدادات', style: TextStyle(color: Colors.white)),
+        );
       default:
         return _buildDashboardContent();
     }
@@ -265,59 +328,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _buildSmallCard(
                   'الحرارة', '${_temperature.toStringAsFixed(1)}°C'),
               _buildSmallCard('الفولت', '${_voltage.toStringAsFixed(1)}V'),
-              _buildSmallCard('النشطاء', '$_activeUsers'),
+              _buildSmallCard('الواجهات', '$_interfaceCount'),
             ],
           ),
-          const SizedBox(height: 12),
-          Center(
-            child: SizedBox(
-              height: 180,
-              width: 180,
-              child: SfRadialGauge(
-                axes: [
-                  RadialAxis(
-                    minimum: 0,
-                    maximum: 100,
-                    ranges: [
-                      GaugeRange(
-                          startValue: 0,
-                          endValue: 100,
-                          color: AppTheme.gold.withOpacity(0.1))
-                    ],
-                    pointers: [
-                      NeedlePointer(
-                          value: _currentSpeed, needleColor: AppTheme.gold)
-                    ],
-                    annotations: [
-                      GaugeAnnotation(
-                        widget: Text('${_currentSpeed.toStringAsFixed(1)} Mbps',
-                            style: const TextStyle(
-                                color: AppTheme.gold, fontSize: 16)),
-                        angle: 90,
-                        positionFactor: 0.5,
-                      )
-                    ],
-                  )
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 14),
+          _buildSpeedGauge(),
+          const SizedBox(height: 14),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Text(_routerModel,
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold)),
+                  Text(
+                    _routerModel,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                   const SizedBox(height: 4),
-                  Text('Uptime: $_uptime',
-                      style:
-                          const TextStyle(color: Colors.white54, fontSize: 13)),
+                  Text(
+                    'Uptime: $_uptime',
+                    style: const TextStyle(
+                      color: Colors.white54,
+                      fontSize: 13,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -333,66 +371,253 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Icons.wifi_password,
                 '$_totalUsers/$_activeUsers',
                 () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => HotspotActiveUsersScreen(
-                            routerService: _routerService))),
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => HotspotActiveUsersScreen(
+                      routerService: _routerService,
+                    ),
+                  ),
+                ),
               ),
               _buildMenuButtonWithCounter(
                 'برودباند',
                 Icons.router,
                 '$_pppTotal/$_pppActive',
                 () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            PppActiveScreen(routerService: _routerService))),
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PppActiveScreen(
+                      routerService: _routerService,
+                    ),
+                  ),
+                ),
               ),
               _buildMenuButton('بطاقات', Icons.credit_card, () {
                 Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            CardsScreen(routerService: _routerService)));
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CardsScreen(routerService: _routerService),
+                  ),
+                );
               }),
               _buildMenuButton('نسخ/استعادة', Icons.backup, () {
                 Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) => BackupRestoreScreen(
-                            routerService: _routerService)));
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BackupRestoreScreen(
+                      routerService: _routerService,
+                    ),
+                  ),
+                );
               }),
               _buildMenuButton('الأجهزة', Icons.cell_tower, () {
                 Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            DevicesScreen(routerService: _routerService)));
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        DevicesScreen(routerService: _routerService),
+                  ),
+                );
               }),
               _buildMenuButton('الواجهات', Icons.settings_ethernet, () {
                 Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            InterfaceScreen(routerService: _routerService)));
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        InterfaceScreen(routerService: _routerService),
+                  ),
+                );
               }),
               _buildMenuButton(
                   'قياس السرعة', Icons.speed, _showInterfacePicker),
               _buildMenuButton('Simple Queue', Icons.queue, () {
                 Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            SimpleQueueScreen(routerService: _routerService)));
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SimpleQueueScreen(
+                      routerService: _routerService,
+                    ),
+                  ),
+                );
               }),
               _buildMenuButton('User Manager', Icons.manage_accounts, () {
                 Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (_) =>
-                            UserManagerScreen(routerService: _routerService)));
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => UserManagerScreen(
+                      routerService: _routerService,
+                    ),
+                  ),
+                );
               }),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpeedGauge() {
+    final speedValue = _currentSpeed.clamp(0.0, 1000.0).toDouble();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFF111111),
+            const Color(0xFF1A1A1A),
+            const Color(0xFF0B0B0B),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: AppTheme.gold.withOpacity(0.35),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.gold.withOpacity(0.08),
+            blurRadius: 24,
+            spreadRadius: 1,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'السرعة اللحظية',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              Text(
+                _selectedInterface ?? '---',
+                style: const TextStyle(
+                  color: AppTheme.gold,
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 250,
+            child: SfRadialGauge(
+              axes: [
+                RadialAxis(
+                  minimum: 0,
+                  maximum: 1000,
+                  startAngle: 145,
+                  endAngle: 35,
+                  showLabels: true,
+                  showTicks: true,
+                  axisLabelStyle: GaugeTextStyle(
+                    color: Colors.white54,
+                    fontSize: 10,
+                  ),
+                  majorTickStyle: const MajorTickStyle(
+                    length: 10,
+                    thickness: 2,
+                    color: Colors.white30,
+                  ),
+                  minorTickStyle: const MinorTickStyle(
+                    length: 5,
+                    thickness: 1,
+                    color: Colors.white24,
+                  ),
+                  axisLineStyle: const AxisLineStyle(
+                    thickness: 0.12,
+                    thicknessUnit: GaugeSizeUnit.factor,
+                    color: Color(0xFF2A2A2A),
+                  ),
+                  ranges: [
+                    GaugeRange(
+                      startValue: 0,
+                      endValue: 350,
+                      color: Colors.greenAccent.withOpacity(0.55),
+                      startWidth: 0.12,
+                      endWidth: 0.12,
+                      sizeUnit: GaugeSizeUnit.factor,
+                    ),
+                    GaugeRange(
+                      startValue: 350,
+                      endValue: 700,
+                      color: Colors.orangeAccent.withOpacity(0.75),
+                      startWidth: 0.12,
+                      endWidth: 0.12,
+                      sizeUnit: GaugeSizeUnit.factor,
+                    ),
+                    GaugeRange(
+                      startValue: 700,
+                      endValue: 1000,
+                      color: Colors.redAccent.withOpacity(0.75),
+                      startWidth: 0.12,
+                      endWidth: 0.12,
+                      sizeUnit: GaugeSizeUnit.factor,
+                    ),
+                  ],
+                  pointers: [
+                    NeedlePointer(
+                      value: speedValue,
+                      needleColor: AppTheme.gold,
+                      knobStyle: KnobStyle(
+                        knobRadius: 0.08,
+                        sizeUnit: GaugeSizeUnit.factor,
+                        borderColor: AppTheme.gold,
+                        color: Colors.black,
+                        borderWidth: 0.04,
+                      ),
+                      needleLength: 0.75,
+                      tailStyle: TailStyle(
+                        length: 0.14,
+                        width: 10,
+                        color: AppTheme.gold.withOpacity(0.85),
+                      ),
+                    ),
+                  ],
+                  annotations: [
+                    GaugeAnnotation(
+                      positionFactor: 0.10,
+                      angle: 90,
+                      widget: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '${_currentSpeed.toStringAsFixed(1)}',
+                            style: const TextStyle(
+                              color: AppTheme.gold,
+                              fontSize: 34,
+                              fontWeight: FontWeight.bold,
+                              height: 1,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          const Text(
+                            'Mbps',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 13,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -406,14 +631,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(title,
-                style: const TextStyle(color: AppTheme.gold, fontSize: 12)),
+            Text(
+              title,
+              style: const TextStyle(
+                color: AppTheme.gold,
+                fontSize: 12,
+              ),
+            ),
             const SizedBox(height: 4),
-            Text(value,
-                style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold)),
+            Text(
+              value,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ],
         ),
       ),
@@ -429,8 +662,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Icon(icon, color: AppTheme.gold, size: 28),
             const SizedBox(height: 6),
-            Text(label,
-                style: const TextStyle(color: Colors.white, fontSize: 12)),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
           ],
         ),
       ),
@@ -438,7 +674,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildMenuButtonWithCounter(
-      String label, IconData icon, String counter, VoidCallback onTap) {
+    String label,
+    IconData icon,
+    String counter,
+    VoidCallback onTap,
+  ) {
     return InkWell(
       onTap: onTap,
       child: Card(
@@ -447,8 +687,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Icon(icon, color: AppTheme.gold, size: 28),
             const SizedBox(height: 2),
-            Text(label,
-                style: const TextStyle(color: Colors.white, fontSize: 12)),
+            Text(
+              label,
+              style: const TextStyle(color: Colors.white, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
             const SizedBox(height: 2),
             Text(
               counter,
