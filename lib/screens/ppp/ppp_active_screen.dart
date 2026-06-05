@@ -26,7 +26,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   String _searchQuery = '';
   String _sortBy = 'name';
-  String _filter = 'all'; // all, active, disabled
+  String _filter = 'all';
   bool _loading = false;
 
   final Map<String, _TrafficSample> _previousTraffic = {};
@@ -49,10 +49,16 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     super.dispose();
   }
 
-  String _userKey(Map<String, dynamic> item) {
+  String _normalizeKey(Map<String, dynamic> item) {
     return item['name']?.toString().trim().isNotEmpty == true
         ? item['name'].toString().trim()
-        : item['.id']?.toString().trim() ?? '';
+        : item['user']?.toString().trim().isNotEmpty == true
+            ? item['user'].toString().trim()
+            : item['username']?.toString().trim().isNotEmpty == true
+                ? item['username'].toString().trim()
+                : item['caller-id']?.toString().trim().isNotEmpty == true
+                    ? item['caller-id'].toString().trim()
+                    : item['address']?.toString().trim() ?? '';
   }
 
   int _toInt(dynamic value) {
@@ -69,16 +75,15 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   int _extractBytesTotal(Map<String, dynamic> activeEntry) {
     final bytesIn = _toInt(activeEntry['bytes-in']);
     final bytesOut = _toInt(activeEntry['bytes-out']);
-
-    if (bytesIn + bytesOut > 0) {
-      return bytesIn + bytesOut;
-    }
+    if (bytesIn + bytesOut > 0) return bytesIn + bytesOut;
 
     final rx = _toInt(activeEntry['rx-byte']);
     final tx = _toInt(activeEntry['tx-byte']);
-    if (rx + tx > 0) {
-      return rx + tx;
-    }
+    if (rx + tx > 0) return rx + tx;
+
+    final inBits = _toInt(activeEntry['rx-bits-per-second']);
+    final outBits = _toInt(activeEntry['tx-bits-per-second']);
+    if (inBits + outBits > 0) return ((inBits + outBits) / 8).toInt();
 
     return _toInt(activeEntry['total-bytes']);
   }
@@ -98,7 +103,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         final diffBytes = totalBytes - previous.bytes;
         final diffSeconds =
             now.difference(previous.time).inMilliseconds / 1000.0;
-
         if (diffBytes >= 0 && diffSeconds > 0) {
           speedMbps = (diffBytes * 8) / diffSeconds / 1000000;
         }
@@ -116,9 +120,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Future<void> _load({bool initial = false}) async {
     if (widget.routerService == null) return;
 
-    if (initial && mounted) {
-      setState(() => _loading = true);
-    }
+    if (initial && mounted) setState(() => _loading = true);
 
     try {
       widget.routerService!.clearCache();
@@ -129,8 +131,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
       final activeByName = <String, Map<String, dynamic>>{};
       for (final a in active) {
-        final key =
-            (a['name'] ?? a['user'] ?? a['username'] ?? '').toString().trim();
+        final key = _normalizeKey(a);
         if (key.isNotEmpty) {
           activeByName[key] = a;
         }
@@ -147,16 +148,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         });
       }
     } catch (_) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   List<Map<String, dynamic>> get filtered {
     final activeByName = <String, Map<String, dynamic>>{
       for (final a in _active)
-        if (_userKey(a).isNotEmpty) _userKey(a): a,
+        if (_normalizeKey(a).isNotEmpty) _normalizeKey(a): a,
     };
 
     var list = _secrets.map((s) {
@@ -192,19 +191,15 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     if (_searchQuery.isNotEmpty) {
       final q = _searchQuery.toLowerCase();
       list = list
-          .where(
-            (u) => (u['name'] ?? '').toString().toLowerCase().contains(q),
-          )
+          .where((u) => (u['name'] ?? '').toString().toLowerCase().contains(q))
           .toList();
     }
 
     switch (_sortBy) {
       case 'uptime':
-        list.sort(
-          (a, b) => (a['uptime'] ?? '')
-              .toString()
-              .compareTo((b['uptime'] ?? '').toString()),
-        );
+        list.sort((a, b) => (a['uptime'] ?? '')
+            .toString()
+            .compareTo((b['uptime'] ?? '').toString()));
         break;
       case 'usage':
         list.sort((a, b) {
@@ -214,18 +209,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         });
         break;
       case 'profile':
-        list.sort(
-          (a, b) => (a['profile'] ?? '')
-              .toString()
-              .compareTo((b['profile'] ?? '').toString()),
-        );
+        list.sort((a, b) => (a['profile'] ?? '')
+            .toString()
+            .compareTo((b['profile'] ?? '').toString()));
         break;
       default:
-        list.sort(
-          (a, b) => (a['name'] ?? '')
-              .toString()
-              .compareTo((b['name'] ?? '').toString()),
-        );
+        list.sort((a, b) => (a['name'] ?? '')
+            .toString()
+            .compareTo((b['name'] ?? '').toString()));
     }
     return list;
   }
@@ -263,9 +254,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     if (user['active'] == true && activeId.isNotEmpty) {
       await widget.routerService?.sendCommand(
         '/ppp/active/remove',
-        params: {
-          'numbers': activeId,
-        },
+        params: {'numbers': activeId},
       );
     }
 
@@ -284,10 +273,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             if (user['active'] == true)
               ListTile(
                 leading: const Icon(Icons.delete, color: Colors.red),
-                title: const Text(
-                  'قطع الاتصال',
-                  style: TextStyle(color: Colors.white),
-                ),
+                title: const Text('قطع الاتصال',
+                    style: TextStyle(color: Colors.white)),
                 onTap: () async {
                   Navigator.pop(context);
                   final activeId = user['active-id']?.toString() ?? '';
@@ -302,10 +289,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               ),
             ListTile(
               leading: const Icon(Icons.edit, color: AppTheme.gold),
-              title: const Text(
-                'تعديل',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('تعديل', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -347,10 +331,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.speed, color: AppTheme.gold),
-              title: const Text(
-                'فتح السرعة',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('فتح السرعة',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 _applySpeedProfile(user);
@@ -450,6 +432,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return Scaffold(
       appBar: AppBar(title: const Text('جميع حسابات البرودباند')),
       floatingActionButton: FloatingActionButton(
@@ -498,7 +482,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       prefixIcon: Icon(Icons.search, color: AppTheme.gold),
                       contentPadding: EdgeInsets.symmetric(vertical: 8),
                     ),
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                    style: TextStyle(color: onSurface, fontSize: 13),
                     onChanged: (v) => setState(() => _searchQuery = v),
                   ),
                 ),
@@ -546,7 +530,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       ),
                       title: Text(
                         u['name']?.toString() ?? '',
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: onSurface),
                       ),
                       subtitle: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -556,16 +540,16 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                             isActive
                                 ? 'متصل • ${u['uptime']?.toString() ?? ''}'
                                 : 'غير متصل',
-                            style: const TextStyle(
-                              color: Colors.white54,
+                            style: TextStyle(
+                              color: onSurface.withOpacity(0.65),
                               fontSize: 11,
                             ),
                           ),
                           if (phone.isNotEmpty)
                             Text(
                               '📞 $phone',
-                              style: const TextStyle(
-                                color: Colors.white54,
+                              style: TextStyle(
+                                color: onSurface.withOpacity(0.65),
                                 fontSize: 11,
                               ),
                             ),
@@ -575,8 +559,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                               padding: const EdgeInsets.only(top: 4),
                               child: Text(
                                 'البروفايل: ${u['profile']}',
-                                style: const TextStyle(
-                                  color: Colors.white54,
+                                style: TextStyle(
+                                  color: onSurface.withOpacity(0.65),
                                   fontSize: 11,
                                 ),
                               ),

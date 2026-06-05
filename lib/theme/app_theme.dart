@@ -9,21 +9,19 @@ class AppTheme {
   static const Color redOffline = Color(0xFFF44336);
   static const Color navyBlue = Color(0xFF1A237E);
 
-  static const Color lightBackground = Color(0xFFF4F8F4);
+  static const Color lightBackground = Color(0xFFF5F8F5);
   static const Color lightSurface = Color(0xFFFFFFFF);
-  static const Color lightSurfaceAlt = Color(0xFFF0F6F0);
-  static const Color lightBorder = Color(0xFFCFE0D0);
+  static const Color lightSurfaceAlt = Color(0xFFF0F5F0);
+  static const Color lightBorder = Color(0xFFC9D8CA);
   static const Color lightPrimaryGreen = Color(0xFF2E7D32);
   static const Color lightSecondaryGreen = Color(0xFF66BB6A);
   static const Color lightAccentGreen = Color(0xFFA5D6A7);
-  static const Color lightGold = Color(0xFFC8A43A);
   static const Color darkText = Color(0xFF1F2A1F);
   static const Color mediumText = Color(0xFF5E6B5E);
-  static const Color softText = Color(0xFF7B887B);
+  static const Color softText = Color(0xFF6F7B6F);
 
   static const String _fontFamily = 'Cairo';
 
-  // ---------- الثيم الداكن (الافتراضي) ----------
   static ThemeData get darkTheme {
     return ThemeData(
       brightness: Brightness.dark,
@@ -57,8 +55,6 @@ class AppTheme {
         selectedItemColor: gold,
         unselectedItemColor: Colors.grey,
         type: BottomNavigationBarType.fixed,
-        selectedLabelStyle:
-            TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.bold),
       ),
       cardTheme: CardThemeData(
         color: semiBlack,
@@ -114,16 +110,24 @@ class AppTheme {
           fontSize: 20,
         ),
         bodyLarge: TextStyle(
-            fontFamily: _fontFamily, color: Colors.white, fontSize: 16),
+          fontFamily: _fontFamily,
+          color: Colors.white,
+          fontSize: 16,
+        ),
         bodyMedium: TextStyle(
-            fontFamily: _fontFamily, color: Colors.white70, fontSize: 14),
-        labelSmall:
-            TextStyle(fontFamily: _fontFamily, color: gold, fontSize: 12),
+          fontFamily: _fontFamily,
+          color: Colors.white70,
+          fontSize: 14,
+        ),
+        labelSmall: TextStyle(
+          fontFamily: _fontFamily,
+          color: gold,
+          fontSize: 12,
+        ),
       ),
     );
   }
 
-  // ---------- الثيم الفاتح الجديد ----------
   static ThemeData get lightTheme {
     return ThemeData(
       brightness: Brightness.light,
@@ -158,8 +162,6 @@ class AppTheme {
         selectedItemColor: lightPrimaryGreen,
         unselectedItemColor: softText,
         type: BottomNavigationBarType.fixed,
-        selectedLabelStyle:
-            TextStyle(fontFamily: _fontFamily, fontWeight: FontWeight.bold),
       ),
       cardTheme: CardThemeData(
         color: lightSurface,
@@ -253,7 +255,7 @@ class AppTheme {
       textTheme: const TextTheme(
         headlineMedium: TextStyle(
           fontFamily: _fontFamily,
-          color: lightPrimaryGreen,
+          color: darkText,
           fontWeight: FontWeight.bold,
           fontSize: 24,
         ),

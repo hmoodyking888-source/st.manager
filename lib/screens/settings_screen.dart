@@ -15,14 +15,17 @@ class SettingsScreen extends StatelessWidget {
     required BuildContext context,
     required Widget child,
   }) {
+    final isLight = currentMode == ThemeMode.light;
+    final bg = isLight ? AppTheme.lightSurface : AppTheme.semiBlack;
+    final border =
+        isLight ? AppTheme.lightBorder : AppTheme.gold.withOpacity(0.25);
+
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: AppTheme.semiBlack,
+        color: bg,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: AppTheme.gold.withOpacity(0.25),
-        ),
+        border: Border.all(color: border),
       ),
       child: child,
     );
@@ -31,6 +34,8 @@ class SettingsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLight = currentMode == ThemeMode.light;
+    final fg = isLight ? AppTheme.darkText : Colors.white;
+    final fgSub = isLight ? AppTheme.mediumText : Colors.white54;
 
     return Scaffold(
       appBar: AppBar(title: const Text('الإعدادات')),
@@ -39,13 +44,13 @@ class SettingsScreen extends StatelessWidget {
           _buildSectionCard(
             context: context,
             child: SwitchListTile(
-              title: const Text(
+              title: Text(
                 'الوضع الفاتح',
-                style: TextStyle(color: Colors.white),
+                style: TextStyle(color: fg),
               ),
-              subtitle: const Text(
+              subtitle: Text(
                 'تغيير مظهر التطبيق إلى الألوان الفاتحة',
-                style: TextStyle(color: Colors.white54),
+                style: TextStyle(color: fgSub),
               ),
               value: isLight,
               onChanged: (value) {
@@ -58,27 +63,31 @@ class SettingsScreen extends StatelessWidget {
             context: context,
             child: ListTile(
               leading: const Icon(Icons.info_outline, color: AppTheme.gold),
-              title: const Text(
+              title: Text(
                 'حول التطبيق',
-                style: TextStyle(color: Colors.white),
+                style: TextStyle(color: fg),
               ),
-              subtitle: const Text(
+              subtitle: Text(
                 'ST_Manager - MikroTik Network Management',
-                style: TextStyle(color: Colors.white54),
+                style: TextStyle(color: fgSub),
               ),
-              trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+              trailing: Icon(
+                Icons.chevron_right,
+                color: isLight ? AppTheme.mediumText : Colors.white54,
+              ),
               onTap: () {
                 showDialog(
                   context: context,
                   builder: (_) => AlertDialog(
-                    backgroundColor: AppTheme.semiBlack,
-                    title: const Text(
+                    backgroundColor:
+                        isLight ? AppTheme.lightSurface : AppTheme.semiBlack,
+                    title: Text(
                       'ST_Manager',
-                      style: TextStyle(color: Colors.white),
+                      style: TextStyle(color: fg),
                     ),
-                    content: const Text(
+                    content: Text(
                       'واجهة إدارة ميكروتك مع نظام راوترات، PPP، هوتسبوت، وواجهة تحكم سريعة.',
-                      style: TextStyle(color: Colors.white70),
+                      style: TextStyle(color: fgSub),
                     ),
                     actions: [
                       TextButton(

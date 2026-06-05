@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:syncfusion_flutter_gauges/gauges.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 import 'package:st_manager/screens/hotspot/hotspot_active_users_screen.dart';
@@ -27,7 +26,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   double _cpuLoad = 0;
   double _temperature = 0;
   double _voltage = 0;
-  double _currentSpeed = 0;
+
+  double _rxSpeed = 0;
+  double _txSpeed = 0;
+  bool _showRxMain = true;
 
   String _routerModel = '...';
   String _uptime = '...';
@@ -41,7 +43,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String? _selectedInterface = 'bridge1';
   List<String> _availableInterfaces = ['bridge1'];
 
-  StreamSubscription<double>? _speedSubscription;
+  StreamSubscription<Map<String, double>>? _speedSubscription;
   Timer? _statsTimer;
   int _currentIndex = 0;
 
@@ -79,19 +81,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _fetchStats();
     _loadInterfaces();
 
-    _statsTimer =
-        Timer.periodic(const Duration(seconds: 2), (_) => _fetchStats());
+    _statsTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => _fetchStats(),
+    );
 
     if (_selectedInterface != null) {
       _speedSubscription?.cancel();
       _speedSubscription = _routerService!
-          .monitorTrafficStream(_selectedInterface!)
+          .monitorTrafficDetailsStream(_selectedInterface!)
           .listen((speed) {
-        if (mounted) {
-          setState(() => _currentSpeed = speed);
-        }
+        if (!mounted) return;
+        setState(() {
+          _rxSpeed = (speed['rx-bits-per-second'] ?? 0) / 1000000;
+          _txSpeed = (speed['tx-bits-per-second'] ?? 0) / 1000000;
+        });
       });
     }
+  }
+
+  bool _isPortOrBridge(Map<String, dynamic> iface) {
+    final name = iface['name']?.toString().toLowerCase().trim() ?? '';
+    final type = iface['type']?.toString().toLowerCase().trim() ?? '';
+    final kind =
+        iface['actual-interface-type']?.toString().toLowerCase().trim() ?? '';
+
+    bool startsWithAny(List<String> prefixes) => prefixes.any(
+        (p) => name.startsWith(p) || type.startsWith(p) || kind.startsWith(p));
+
+    return startsWithAny([
+      'ether',
+      'bridge',
+      'sfp',
+      'wlan',
+      'bond',
+    ]);
   }
 
   Future<void> _loadInterfaces() async {
@@ -100,6 +124,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     try {
       final interfaces = await _routerService!.getInterfaceList();
       final names = interfaces
+          .where(_isPortOrBridge)
           .map((e) => e['name']?.toString())
           .whereType<String>()
           .where((name) => name.trim().isNotEmpty)
@@ -117,9 +142,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         _speedSubscription?.cancel();
         _speedSubscription = _routerService!
-            .monitorTrafficStream(_selectedInterface!)
+            .monitorTrafficDetailsStream(_selectedInterface!)
             .listen((speed) {
-          if (mounted) setState(() => _currentSpeed = speed);
+          if (!mounted) return;
+          setState(() {
+            _rxSpeed = (speed['rx-bits-per-second'] ?? 0) / 1000000;
+            _txSpeed = (speed['tx-bits-per-second'] ?? 0) / 1000000;
+          });
         });
       }
     } catch (_) {}
@@ -183,6 +212,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   double _parseVoltage(List<Map<String, dynamic>> health) {
+    if (health.isEmpty) return 0;
+
     final direct = double.tryParse(health.first['voltage']?.toString() ?? '');
     if (direct != null && direct > 0) return direct;
 
@@ -225,9 +256,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
             setState(() => _selectedInterface = val);
             _speedSubscription?.cancel();
-            _speedSubscription =
-                _routerService!.monitorTrafficStream(val).listen((speed) {
-              if (mounted) setState(() => _currentSpeed = speed);
+            _speedSubscription = _routerService!
+                .monitorTrafficDetailsStream(val)
+                .listen((speed) {
+              if (!mounted) return;
+              setState(() {
+                _rxSpeed = (speed['rx-bits-per-second'] ?? 0) / 1000000;
+                _txSpeed = (speed['tx-bits-per-second'] ?? 0) / 1000000;
+              });
             });
             Navigator.pop(context);
           },
@@ -236,8 +272,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _toggleSpeedView() {
+    setState(() => _showRxMain = !_showRxMain);
+  }
+
+  String _formatSpeed(double speed) {
+    if (speed >= 1000) return '${(speed / 1000).toStringAsFixed(1)} Gbps';
+    if (speed >= 1) return '${speed.toStringAsFixed(1)} Mbps';
+    return '${(speed * 1000).toStringAsFixed(0)} Kbps';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final surfaceText = Theme.of(context).colorScheme.onSurface;
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -267,9 +315,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onTap: (index) {
           if (index == 4) {
             Navigator.pushNamed(context, '/settings').then((_) {
-              if (mounted) {
-                setState(() => _currentIndex = 0);
-              }
+              if (mounted) setState(() => _currentIndex = 0);
             });
             return;
           }
@@ -294,20 +340,24 @@ class _DashboardScreenState extends State<DashboardScreen> {
       case 0:
         return _buildDashboardContent();
       case 1:
-        return const Center(
-          child: Text('قسم المستخدمون', style: TextStyle(color: Colors.white)),
+        return Center(
+          child: Text('قسم المستخدمون',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         );
       case 2:
-        return const Center(
-          child: Text('الإشعارات', style: TextStyle(color: Colors.white)),
+        return Center(
+          child: Text('الإشعارات',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         );
       case 3:
-        return const Center(
-          child: Text('التقارير', style: TextStyle(color: Colors.white)),
+        return Center(
+          child: Text('التقارير',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         );
       case 4:
-        return const Center(
-          child: Text('الإعدادات', style: TextStyle(color: Colors.white)),
+        return Center(
+          child: Text('الإعدادات',
+              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
         );
       default:
         return _buildDashboardContent();
@@ -315,6 +365,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildDashboardContent() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -332,7 +384,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           const SizedBox(height: 14),
-          _buildSpeedGauge(),
+          _buildSpeedCard(onSurface),
           const SizedBox(height: 14),
           Card(
             child: Padding(
@@ -342,8 +394,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 children: [
                   Text(
                     _routerModel,
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: onSurface,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -351,8 +403,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   const SizedBox(height: 4),
                   Text(
                     'Uptime: $_uptime',
-                    style: const TextStyle(
-                      color: Colors.white54,
+                    style: TextStyle(
+                      color: onSurface.withOpacity(0.7),
                       fontSize: 13,
                     ),
                   ),
@@ -457,8 +509,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildSpeedGauge() {
-    final speedValue = _currentSpeed.clamp(0.0, 1000.0).toDouble();
+  Widget _buildSpeedCard(Color onSurface) {
+    final primary = _showRxMain ? _rxSpeed : _txSpeed;
+    final secondary = _showRxMain ? _txSpeed : _rxSpeed;
+    final primaryLabel = _showRxMain ? 'RX' : 'TX';
+    final secondaryLabel = _showRxMain ? 'TX' : 'RX';
 
     return Container(
       width: double.infinity,
@@ -466,9 +521,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            const Color(0xFF111111),
-            const Color(0xFF1A1A1A),
-            const Color(0xFF0B0B0B),
+            AppTheme.black,
+            AppTheme.darkGrey,
+            AppTheme.semiBlack,
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -510,105 +565,101 @@ class _DashboardScreenState extends State<DashboardScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          SizedBox(
-            height: 250,
-            child: SfRadialGauge(
-              axes: [
-                RadialAxis(
-                  minimum: 0,
-                  maximum: 1000,
-                  startAngle: 145,
-                  endAngle: 35,
-                  showLabels: true,
-                  showTicks: true,
-                  axisLabelStyle: GaugeTextStyle(
-                    color: Colors.white54,
-                    fontSize: 10,
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white12),
                   ),
-                  majorTickStyle: const MajorTickStyle(
-                    length: 10,
-                    thickness: 2,
-                    color: Colors.white30,
-                  ),
-                  minorTickStyle: const MinorTickStyle(
-                    length: 5,
-                    thickness: 1,
-                    color: Colors.white24,
-                  ),
-                  axisLineStyle: const AxisLineStyle(
-                    thickness: 0.12,
-                    thicknessUnit: GaugeSizeUnit.factor,
-                    color: Color(0xFF2A2A2A),
-                  ),
-                  ranges: [
-                    GaugeRange(
-                      startValue: 0,
-                      endValue: 350,
-                      color: Colors.greenAccent.withOpacity(0.55),
-                      startWidth: 0.12,
-                      endWidth: 0.12,
-                      sizeUnit: GaugeSizeUnit.factor,
-                    ),
-                    GaugeRange(
-                      startValue: 350,
-                      endValue: 700,
-                      color: Colors.orangeAccent.withOpacity(0.75),
-                      startWidth: 0.12,
-                      endWidth: 0.12,
-                      sizeUnit: GaugeSizeUnit.factor,
-                    ),
-                    GaugeRange(
-                      startValue: 700,
-                      endValue: 1000,
-                      color: Colors.redAccent.withOpacity(0.75),
-                      startWidth: 0.12,
-                      endWidth: 0.12,
-                      sizeUnit: GaugeSizeUnit.factor,
-                    ),
-                  ],
-                  pointers: [
-                    NeedlePointer(
-                      value: speedValue,
-                      needleColor: AppTheme.gold,
-                      knobStyle: KnobStyle(
-                        knobRadius: 0.08,
-                        sizeUnit: GaugeSizeUnit.factor,
-                        borderColor: AppTheme.gold,
-                        color: Colors.black,
-                        borderWidth: 0.04,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        primaryLabel,
+                        style: const TextStyle(
+                          color: AppTheme.gold,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                        ),
                       ),
-                      needleLength: 0.75,
-                      tailStyle: TailStyle(
-                        length: 0.14,
-                        width: 10,
-                        color: AppTheme.gold.withOpacity(0.85),
+                      const SizedBox(height: 8),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _formatSpeed(primary),
+                          style: TextStyle(
+                            color: onSurface,
+                            fontSize: 34,
+                            fontWeight: FontWeight.bold,
+                            height: 1,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'الأولوية الآن: $primaryLabel',
+                        style: TextStyle(
+                          color: onSurface.withOpacity(0.72),
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 84,
+                child: Column(
+                  children: [
+                    ElevatedButton(
+                      onPressed: _toggleSpeedView,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 10),
+                        minimumSize: const Size.fromHeight(40),
+                      ),
+                      child: Icon(
+                        _showRxMain ? Icons.swap_vert : Icons.swap_vert,
+                        size: 18,
                       ),
                     ),
-                  ],
-                  annotations: [
-                    GaugeAnnotation(
-                      positionFactor: 0.10,
-                      angle: 90,
-                      widget: Column(
-                        mainAxisSize: MainAxisSize.min,
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: Column(
                         children: [
                           Text(
-                            '${_currentSpeed.toStringAsFixed(1)}',
+                            secondaryLabel,
                             style: const TextStyle(
-                              color: AppTheme.gold,
-                              fontSize: 34,
+                              color: Colors.white70,
+                              fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              height: 1,
                             ),
                           ),
-                          const SizedBox(height: 2),
-                          const Text(
-                            'Mbps',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 13,
-                              letterSpacing: 1.2,
+                          const SizedBox(height: 6),
+                          Text(
+                            _formatSpeed(secondary),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              height: 1,
                             ),
                           ),
                         ],
@@ -616,8 +667,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
       ),
@@ -625,6 +676,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildSmallCard(String title, String value) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(8.0),
@@ -633,7 +685,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Text(
               title,
-              style: const TextStyle(
+              style: TextStyle(
                 color: AppTheme.gold,
                 fontSize: 12,
               ),
@@ -641,8 +693,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 4),
             Text(
               value,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: onSurface,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -654,6 +706,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildMenuButton(String label, IconData icon, VoidCallback onTap) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return InkWell(
       onTap: onTap,
       child: Card(
@@ -664,7 +717,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 6),
             Text(
               label,
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+              style: TextStyle(color: onSurface, fontSize: 12),
               textAlign: TextAlign.center,
             ),
           ],
@@ -679,6 +732,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String counter,
     VoidCallback onTap,
   ) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return InkWell(
       onTap: onTap,
       child: Card(
@@ -689,7 +743,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             const SizedBox(height: 2),
             Text(
               label,
-              style: const TextStyle(color: Colors.white, fontSize: 12),
+              style: TextStyle(color: onSurface, fontSize: 12),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 2),

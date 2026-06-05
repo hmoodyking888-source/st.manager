@@ -120,24 +120,6 @@ class RouterService {
     _cacheTimestamps.clear();
   }
 
-  Stream<double> monitorTrafficStream(String interface) async* {
-    while (_connected && _client != null) {
-      try {
-        final data = await getPortCurrentRate(interface);
-
-        final totalMbps = ((data['rx-bits-per-second'] ?? 0) +
-                (data['tx-bits-per-second'] ?? 0)) /
-            1000000;
-
-        yield totalMbps;
-      } catch (_) {
-        yield 0;
-      }
-
-      await Future.delayed(const Duration(seconds: 1));
-    }
-  }
-
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
     final result = await sendCommand(
       '/interface/monitor-traffic',
@@ -184,6 +166,37 @@ class RouterService {
       'rx-bits-per-second': 0,
       'tx-bits-per-second': 0,
     };
+  }
+
+  Stream<double> monitorTrafficStream(String interface) async* {
+    while (_connected && _client != null) {
+      try {
+        final data = await getPortCurrentRate(interface);
+        final totalMbps = ((data['rx-bits-per-second'] ?? 0) +
+                (data['tx-bits-per-second'] ?? 0)) /
+            1000000;
+        yield totalMbps;
+      } catch (_) {
+        yield 0;
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
+  }
+
+  Stream<Map<String, double>> monitorTrafficDetailsStream(
+      String interface) async* {
+    while (_connected && _client != null) {
+      try {
+        final data = await getPortCurrentRate(interface);
+        yield data;
+      } catch (_) {
+        yield {
+          'rx-bits-per-second': 0,
+          'tx-bits-per-second': 0,
+        };
+      }
+      await Future.delayed(const Duration(seconds: 1));
+    }
   }
 
   Future<List<Map<String, dynamic>>> getSystemHealth() =>

@@ -2,11 +2,13 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:cross_file/cross_file.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
@@ -31,6 +33,24 @@ class _CardTemplate {
     required this.border,
     required this.text,
     required this.mutedText,
+  });
+}
+
+class _GeneratedCard {
+  final String user;
+  final String pass;
+  final String profile;
+  final String network;
+  final String duration;
+  final String notes;
+
+  const _GeneratedCard({
+    required this.user,
+    required this.pass,
+    required this.profile,
+    required this.network,
+    required this.duration,
+    required this.notes,
   });
 }
 
@@ -161,7 +181,6 @@ class _CardsScreenState extends State<CardsScreen> {
 
   Future<void> _loadProfiles() async {
     if (widget.routerService == null) return;
-
     try {
       final res = await widget.routerService!.getHotspotProfiles();
       final names = res
@@ -220,11 +239,77 @@ class _CardsScreenState extends State<CardsScreen> {
 
   _CardTemplate get _currentTemplate => _templates[_selectedTemplateIndex];
 
-  Future<void> _generatePdf() async {
+  Future<void> _ensureHotspotProfileExists() async {
+    if (widget.routerService == null) return;
+
+    final profile = _profileCtrl.text.trim();
+    if (profile.isEmpty) return;
+
     try {
+      await widget.routerService!.sendCommand(
+        '/ip/hotspot/user/profile/add',
+        params: {
+          'name': profile,
+          'rate-limit': '',
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<List<_GeneratedCard>> _buildGeneratedCards() async {
+    final cards = <_GeneratedCard>[];
+    final count = _cardCount < 1 ? 1 : _cardCount;
+    final profile = _profileCtrl.text.trim();
+
+    for (int i = 0; i < count; i++) {
+      cards.add(
+        _GeneratedCard(
+          user: _generateRandom(length: _userLength),
+          pass: _generateRandom(length: _passLength),
+          profile: profile,
+          network: _networkCtrl.text.trim(),
+          duration: _durationCtrl.text.trim(),
+          notes: _showNotes ? _notesCtrl.text.trim() : '',
+        ),
+      );
+    }
+
+    return cards;
+  }
+
+  Future<void> _pushGeneratedUsersToHotspot(List<_GeneratedCard> cards) async {
+    if (widget.routerService == null) return;
+
+    await _ensureHotspotProfileExists();
+
+    for (final card in cards) {
+      try {
+        await widget.routerService!.sendCommand(
+          '/ip/hotspot/user/add',
+          params: {
+            'name': card.user,
+            'password': card.pass,
+            'profile': card.profile,
+            'comment': card.notes.isNotEmpty
+                ? 'network:${card.network} | duration:${card.duration} | ${card.notes}'
+                : 'network:${card.network} | duration:${card.duration}',
+          },
+        );
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _generatePdfAndOpenWith() async {
+    try {
+      final cards = await _buildGeneratedCards();
+
+      if (widget.routerService != null) {
+        await _pushGeneratedUsersToHotspot(cards);
+      }
+
       final pdf = pw.Document();
       final template = _currentTemplate;
-      final pageFormat = PdfPageFormat.a4.landscape;
+      final pageFormat = PdfPageFormat.a4;
       final cardW = 85 * PdfPageFormat.mm;
       final cardH = 55 * PdfPageFormat.mm;
       const margin = 10.0;
@@ -232,27 +317,23 @@ class _CardsScreenState extends State<CardsScreen> {
 
       final usableW = pageFormat.width - (margin * 2);
       final usableH = pageFormat.height - (margin * 2);
-
       final cols = max(1, ((usableW + spacing) / (cardW + spacing)).floor());
       final rows = max(1, ((usableH + spacing) / (cardH + spacing)).floor());
       final cardsPerPage = cols * rows;
 
-      final totalCards = _cardCount < 1 ? 1 : _cardCount;
       final imageBytes =
           _templateImage != null ? _templateImage!.readAsBytesSync() : null;
 
       for (int pageStart = 0;
-          pageStart < totalCards;
+          pageStart < cards.length;
           pageStart += cardsPerPage) {
         final children = <pw.Widget>[];
 
         for (int slot = 0; slot < cardsPerPage; slot++) {
           final index = pageStart + slot;
-          if (index >= totalCards) break;
+          if (index >= cards.length) break;
 
-          final user = _generateRandom(length: _userLength);
-          final pass = _generateRandom(length: _passLength);
-
+          final card = cards[index];
           final col = slot % cols;
           final row = slot ~/ cols;
 
@@ -266,12 +347,7 @@ class _CardsScreenState extends State<CardsScreen> {
               child: _buildPdfCard(
                 template: template,
                 imageBytes: imageBytes,
-                user: user,
-                pass: pass,
-                profile: _profileCtrl.text.trim(),
-                network: _networkCtrl.text.trim(),
-                duration: _durationCtrl.text.trim(),
-                notes: _showNotes ? _notesCtrl.text.trim() : '',
+                card: card,
                 cardW: cardW,
                 cardH: cardH,
               ),
@@ -288,14 +364,20 @@ class _CardsScreenState extends State<CardsScreen> {
         );
       }
 
-      await Printing.layoutPdf(
-        onLayout: (_) async => pdf.save(),
-        format: pageFormat,
+      final bytes = await pdf.save();
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/hotspot_cards.pdf');
+      await file.writeAsBytes(bytes, flush: true);
+
+      if (!mounted) return;
+      await Share.shareXFiles(
+        [XFile(file.path)],
+        text: 'بطاقات الهوتسبوت',
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('فشل تصدير PDF: $e')),
+        SnackBar(content: Text('فشل التصدير: $e')),
       );
     }
   }
@@ -353,12 +435,7 @@ class _CardsScreenState extends State<CardsScreen> {
   pw.Widget _buildPdfCard({
     required _CardTemplate template,
     required Uint8List? imageBytes,
-    required String user,
-    required String pass,
-    required String profile,
-    required String network,
-    required String duration,
-    required String notes,
+    required _GeneratedCard card,
     required double cardW,
     required double cardH,
   }) {
@@ -433,14 +510,14 @@ class _CardsScreenState extends State<CardsScreen> {
             top: 8,
             child: _buildPdfField(
               label: 'اسم الشبكة',
-              value: network,
+              value: card.network,
               textColor: text,
               accentColor: accent,
               labelSize: 7.5,
               valueSize: 11,
             ),
           ),
-          if (profile.isNotEmpty)
+          if (card.profile.isNotEmpty)
             pw.Positioned(
               left: cardW * 0.68,
               top: cardH * 0.14,
@@ -452,7 +529,7 @@ class _CardsScreenState extends State<CardsScreen> {
                   borderRadius: pw.BorderRadius.circular(20),
                 ),
                 child: pw.Text(
-                  profile,
+                  card.profile,
                   style: pw.TextStyle(
                     color: text,
                     fontSize: 8,
@@ -466,7 +543,7 @@ class _CardsScreenState extends State<CardsScreen> {
             top: cardH * 0.35,
             child: _buildPdfField(
               label: 'USER',
-              value: user,
+              value: card.user,
               textColor: text,
               accentColor: accent,
               labelSize: 7,
@@ -478,7 +555,7 @@ class _CardsScreenState extends State<CardsScreen> {
             top: cardH * 0.56,
             child: _buildPdfField(
               label: 'PASSWORD',
-              value: pass,
+              value: card.pass,
               textColor: text,
               accentColor: accent,
               labelSize: 7,
@@ -490,7 +567,7 @@ class _CardsScreenState extends State<CardsScreen> {
             top: cardH * 0.77,
             child: _buildPdfField(
               label: 'المدة',
-              value: duration,
+              value: card.duration,
               textColor: text,
               accentColor: accent,
               labelSize: 7.5,
@@ -498,13 +575,13 @@ class _CardsScreenState extends State<CardsScreen> {
               compact: true,
             ),
           ),
-          if (notes.isNotEmpty)
+          if (card.notes.isNotEmpty)
             pw.Positioned(
               left: cardW * 0.58,
               top: cardH * 0.77,
               child: _buildPdfField(
                 label: 'ملاحظات',
-                value: notes,
+                value: card.notes,
                 textColor: text,
                 accentColor: accent,
                 labelSize: 7.5,
@@ -1260,9 +1337,9 @@ class _CardsScreenState extends State<CardsScreen> {
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
-              icon: const Icon(Icons.picture_as_pdf),
-              label: const Text('تصدير PDF'),
-              onPressed: _generatePdf,
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('فتح بواسطة'),
+              onPressed: _generatePdfAndOpenWith,
             ),
           ],
         ),
