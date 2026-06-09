@@ -449,7 +449,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
-  List<Map<String, dynamic>> get filtered {
+  List<Map<String, dynamic>> _buildAccounts() {
     final activeIndex = _buildActiveIndex(_active);
 
     final list = _secrets.map((secret) {
@@ -460,6 +460,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final isDisabled = _isDisabled(secret);
       final isExpired = _isExpired(parsed.expiryDate);
       final isActive = activeEntry != null;
+
       final speedRx = sessionKey.isNotEmpty ? (_rxSpeeds[sessionKey] ?? 0) : 0;
       final speedTx = sessionKey.isNotEmpty ? (_txSpeeds[sessionKey] ?? 0) : 0;
 
@@ -492,7 +493,40 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       };
     }).toList();
 
-    List<Map<String, dynamic>> result = list;
+    switch (_sortBy) {
+      case 'status':
+        list.sort((a, b) => (a['status'] ?? '')
+            .toString()
+            .compareTo((b['status'] ?? '').toString()));
+        break;
+      case 'uptime':
+        list.sort((a, b) => (a['uptime'] ?? '')
+            .toString()
+            .compareTo((b['uptime'] ?? '').toString()));
+        break;
+      case 'usage':
+        list.sort((a, b) {
+          final aSpeed = (a['speed-mbps'] as double?) ?? 0;
+          final bSpeed = (b['speed-mbps'] as double?) ?? 0;
+          return bSpeed.compareTo(aSpeed);
+        });
+        break;
+      case 'profile':
+        list.sort((a, b) => (a['profile'] ?? '')
+            .toString()
+            .compareTo((b['profile'] ?? '').toString()));
+        break;
+      default:
+        list.sort((a, b) => (a['name'] ?? '')
+            .toString()
+            .compareTo((b['name'] ?? '').toString()));
+    }
+
+    return list;
+  }
+
+  List<Map<String, dynamic>> get filtered {
+    var result = _buildAccounts();
 
     switch (_filter) {
       case 'active':
@@ -524,35 +558,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         ].map((e) => e?.toString().toLowerCase() ?? '').join(' | ');
         return searchable.contains(q);
       }).toList();
-    }
-
-    switch (_sortBy) {
-      case 'status':
-        result.sort((a, b) => (a['status'] ?? '')
-            .toString()
-            .compareTo((b['status'] ?? '').toString()));
-        break;
-      case 'uptime':
-        result.sort((a, b) => (a['uptime'] ?? '')
-            .toString()
-            .compareTo((b['uptime'] ?? '').toString()));
-        break;
-      case 'usage':
-        result.sort((a, b) {
-          final aSpeed = (a['speed-mbps'] as double?) ?? 0;
-          final bSpeed = (b['speed-mbps'] as double?) ?? 0;
-          return bSpeed.compareTo(aSpeed);
-        });
-        break;
-      case 'profile':
-        result.sort((a, b) => (a['profile'] ?? '')
-            .toString()
-            .compareTo((b['profile'] ?? '').toString()));
-        break;
-      default:
-        result.sort((a, b) => (a['name'] ?? '')
-            .toString()
-            .compareTo((b['name'] ?? '').toString()));
     }
 
     return result;
@@ -760,145 +765,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     ).then((_) => _load());
   }
 
-  Widget _buildSummaryCard({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withOpacity(0.35)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: onSurface,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: onSurface.withOpacity(0.7),
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSpeedOverview(List<Map<String, dynamic>> list) {
-    final activeItems = list.where((u) => u['status'] == 'active').toList();
-
-    final totalRx = activeItems.fold<double>(
-        0, (sum, item) => sum + ((item['rx-speed'] as double?) ?? 0));
-    final totalTx = activeItems.fold<double>(
-        0, (sum, item) => sum + ((item['tx-speed'] as double?) ?? 0));
-
-    final primaryLabel = _showRxFirst ? 'RX' : 'TX';
-    final primaryValue = _showRxFirst ? totalRx : totalTx;
-    final secondaryLabel = _showRxFirst ? 'TX' : 'RX';
-    final secondaryValue = _showRxFirst ? totalTx : totalRx;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            AppTheme.semiBlack,
-            AppTheme.darkGrey,
-            AppTheme.black,
-          ],
-        ),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: AppTheme.gold.withOpacity(0.35)),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'السرعة اللحظية',
-                  style: TextStyle(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withOpacity(0.85),
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Text(
-                  primaryLabel,
-                  style: const TextStyle(
-                    color: AppTheme.gold,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                Text(
-                  _formatSpeed(primaryValue),
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurface,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                    height: 1.1,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '$secondaryLabel: ${_formatSpeed(secondaryValue)}',
-                  style: TextStyle(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .onSurface
-                        .withOpacity(0.7),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            children: [
-              IconButton(
-                onPressed: () => setState(() => _showRxFirst = !_showRxFirst),
-                icon: const Icon(Icons.swap_vert, color: AppTheme.gold),
-                tooltip: 'عكس RX / TX',
-              ),
-              Text(
-                _showRxFirst ? 'RX أولاً' : 'TX أولاً',
-                style: const TextStyle(
-                  color: Colors.white54,
-                  fontSize: 10,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildSpeedBadge(double rxSpeed, double txSpeed) {
     final primaryLabel = _showRxFirst ? 'RX' : 'TX';
     final primaryValue = _showRxFirst ? rxSpeed : txSpeed;
@@ -906,7 +772,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final secondaryValue = _showRxFirst ? txSpeed : rxSpeed;
 
     return Container(
-      width: 112,
+      width: 122,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
         color: AppTheme.greenOnline.withOpacity(0.14),
@@ -916,32 +782,58 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           width: 1,
         ),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Stack(
         children: [
-          Text(
-            primaryLabel,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-            ),
+          Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                primaryLabel,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                _formatSpeed(primaryValue),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '$secondaryLabel: ${_formatSpeed(secondaryValue)}',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 9,
+                ),
+              ),
+            ],
           ),
-          Text(
-            _formatSpeed(primaryValue),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            '$secondaryLabel: ${_formatSpeed(secondaryValue)}',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 9,
+          Positioned(
+            top: -6,
+            right: -6,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(999),
+              onTap: () => setState(() => _showRxFirst = !_showRxFirst),
+              child: Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white24),
+                ),
+                child: const Icon(
+                  Icons.swap_vert,
+                  size: 14,
+                  color: Colors.white,
+                ),
+              ),
             ),
           ),
         ],
@@ -1093,7 +985,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               const SizedBox(height: 12),
               _buildInfoLine(
                 'السرعة اللحظية',
-                isActive ? '${_formatSpeed(totalSpeed)}' : '0',
+                isActive ? _formatSpeed(totalSpeed) : '0',
               ),
               if (phone.isNotEmpty) _buildInfoLine('الهاتف', phone),
               if (expiryLabel.isNotEmpty)
@@ -1144,11 +1036,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   }
 
   Widget _buildFilters() {
-    final all = _secrets.length;
-    final active = _secrets.where((u) => u['status'] == 'active').length;
-    final offline = _secrets.where((u) => u['status'] == 'offline').length;
-    final disabled = _secrets.where((u) => u['status'] == 'disabled').length;
-    final expired = _secrets.where((u) => u['status'] == 'expired').length;
+    final accounts = _buildAccounts();
+
+    final all = accounts.length;
+    final active = _countStatus(accounts, 'active');
+    final offline = _countStatus(accounts, 'offline');
+    final disabled = _countStatus(accounts, 'disabled');
+    final expired = _countStatus(accounts, 'expired');
 
     final chips = [
       ('all', 'الكل', all),
@@ -1209,47 +1103,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       body: Column(
         children: [
           if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: _buildSpeedOverview(filteredList),
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: GridView.count(
-              crossAxisCount: 2,
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 10,
-              crossAxisSpacing: 10,
-              childAspectRatio: 1.6,
-              children: [
-                _buildSummaryCard(
-                  title: 'متصل',
-                  value: '${_countStatus(_secrets, 'active')}',
-                  icon: Icons.wifi,
-                  color: AppTheme.greenOnline,
-                ),
-                _buildSummaryCard(
-                  title: 'غير متصل',
-                  value: '${_countStatus(_secrets, 'offline')}',
-                  icon: Icons.wifi_off,
-                  color: Colors.blueGrey,
-                ),
-                _buildSummaryCard(
-                  title: 'معطل',
-                  value: '${_countStatus(_secrets, 'disabled')}',
-                  icon: Icons.block,
-                  color: Colors.orange,
-                ),
-                _buildSummaryCard(
-                  title: 'منتهي',
-                  value: '${_countStatus(_secrets, 'expired')}',
-                  icon: Icons.hourglass_bottom,
-                  color: AppTheme.redOffline,
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 12),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
