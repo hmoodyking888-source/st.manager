@@ -1,6 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
+
+class _CommentData {
+  final String phone;
+  final String note;
+  final DateTime? expiryDate;
+
+  const _CommentData({
+    required this.phone,
+    required this.note,
+    required this.expiryDate,
+  });
+}
 
 class PppUserScreen extends StatefulWidget {
   final RouterService? routerService;
@@ -29,6 +42,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
 
   List<String> _profiles = [];
   String? _selectedProfile;
+  DateTime? _expiryDate;
 
   @override
   void initState() {
@@ -41,7 +55,10 @@ class _PppUserScreenState extends State<PppUserScreen> {
           widget.initialData!['profile']?.toString() ?? '';
 
       final rawComment = widget.initialData!['comment']?.toString() ?? '';
-      _parseComment(rawComment);
+      final parsed = _parseComment(rawComment);
+      _phoneController.text = parsed.phone;
+      _commentController.text = parsed.note;
+      _expiryDate = parsed.expiryDate;
     }
 
     _loadProfiles();
@@ -57,13 +74,75 @@ class _PppUserScreenState extends State<PppUserScreen> {
     super.dispose();
   }
 
+  _CommentData _parseComment(String raw) {
+    if (raw.trim().isEmpty) {
+      return const _CommentData(phone: '', note: '', expiryDate: null);
+    }
+
+    String phone = '';
+    DateTime? expiryDate;
+    final notes = <String>[];
+
+    for (final part in raw.split('|')) {
+      final token = part.trim();
+      if (token.isEmpty) continue;
+
+      if (token.toLowerCase().startsWith('phone:')) {
+        phone = token.substring(6).trim();
+        continue;
+      }
+
+      if (token.toLowerCase().startsWith('exp:')) {
+        final rawDate = token.substring(4).trim();
+        final parsed = DateTime.tryParse(rawDate);
+        if (parsed != null) {
+          expiryDate = parsed;
+        }
+        continue;
+      }
+
+      notes.add(token);
+    }
+
+    return _CommentData(
+      phone: phone,
+      note: notes.join(' | '),
+      expiryDate: expiryDate,
+    );
+  }
+
+  String _buildComment() {
+    final parts = <String>[];
+
+    final phone = _phoneController.text.trim();
+    final comment = _commentController.text.trim();
+
+    if (phone.isNotEmpty) {
+      parts.add('phone:$phone');
+    }
+
+    if (_expiryDate != null) {
+      parts.add('exp:${DateFormat('yyyy-MM-dd').format(_expiryDate!)}');
+    }
+
+    if (comment.isNotEmpty) {
+      parts.add(comment);
+    }
+
+    return parts.join(' | ');
+  }
+
   Future<void> _loadProfiles() async {
     if (widget.routerService == null) return;
 
     setState(() => _loadingProfiles = true);
 
     try {
-      final result = await widget.routerService!.getPppProfiles();
+      final result = await widget.routerService!.sendCommand(
+        '/ppp/profile/print',
+        useCache: false,
+      );
+
       final names = result
           .map((e) => e['name']?.toString().trim() ?? '')
           .where((name) => name.isNotEmpty)
@@ -98,29 +177,24 @@ class _PppUserScreenState extends State<PppUserScreen> {
     }
   }
 
-  void _parseComment(String raw) {
-    if (raw.startsWith('phone:')) {
-      final parts = raw.split('|');
-      if (parts.isNotEmpty) {
-        final phonePart = parts[0].replaceFirst('phone:', '').trim();
-        _phoneController.text = phonePart;
+  Future<void> _pickExpiryDate() async {
+    final initial = _expiryDate ?? DateTime.now().add(const Duration(days: 30));
 
-        if (parts.length > 1) {
-          _commentController.text = parts.sublist(1).join('|').trim();
-        }
-      }
-    } else {
-      _commentController.text = raw;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime.now().subtract(const Duration(days: 1)),
+      lastDate: DateTime(2100),
+    );
+
+    if (picked != null && mounted) {
+      setState(() => _expiryDate = picked);
     }
   }
 
-  String _buildComment() {
-    final phone = _phoneController.text.trim();
-    final comment = _commentController.text.trim();
-    if (phone.isNotEmpty) {
-      return 'phone:$phone | $comment';
-    }
-    return comment;
+  Future<void> _clearExpiryDate() async {
+    if (!mounted) return;
+    setState(() => _expiryDate = null);
   }
 
   Future<void> _save() async {
@@ -148,11 +222,15 @@ class _PppUserScreenState extends State<PppUserScreen> {
 
       if (widget.isEdit && widget.initialData != null) {
         params['numbers'] = widget.initialData!['.id']?.toString() ?? '';
-        await widget.routerService!
-            .sendCommand('/ppp/secret/set', params: params);
+        await widget.routerService!.sendCommand(
+          '/ppp/secret/set',
+          params: params,
+        );
       } else {
-        await widget.routerService!
-            .sendCommand('/ppp/secret/add', params: params);
+        await widget.routerService!.sendCommand(
+          '/ppp/secret/add',
+          params: params,
+        );
       }
 
       if (mounted) Navigator.pop(context, true);
@@ -213,8 +291,73 @@ class _PppUserScreenState extends State<PppUserScreen> {
     );
   }
 
+  Widget _buildExpiryCard() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppTheme.gold.withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'صلاحية الحساب',
+            style: TextStyle(
+              color: onSurface,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _expiryDate == null
+                ? 'بدون صلاحية محددة'
+                : 'تنتهي في: ${DateFormat('yyyy-MM-dd').format(_expiryDate!)}',
+            style: TextStyle(
+              color: onSurface.withOpacity(0.75),
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              TextButton.icon(
+                onPressed: _pickExpiryDate,
+                icon: const Icon(Icons.date_range, color: AppTheme.gold),
+                label: const Text('تحديد الصلاحية'),
+              ),
+              const SizedBox(width: 8),
+              if (_expiryDate != null)
+                TextButton.icon(
+                  onPressed: _clearExpiryDate,
+                  icon: const Icon(Icons.clear, color: Colors.red),
+                  label: const Text('إلغاء'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'عند انتهاء الصلاحية سيتم نقل الحساب إلى بروفايل Xpirer بسرعة 512K/512K.',
+            style: TextStyle(
+              color: onSurface.withOpacity(0.65),
+              fontSize: 11,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(widget.isEdit ? 'تعديل حساب PPP' : 'إضافة حساب PPP'),
@@ -233,43 +376,67 @@ class _PppUserScreenState extends State<PppUserScreen> {
             children: [
               TextField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'اسم المستخدم'),
-                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'اسم المستخدم',
+                  filled: true,
+                  fillColor: Theme.of(context).cardColor,
+                ),
+                style: TextStyle(color: onSurface),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _passController,
-                decoration: const InputDecoration(labelText: 'كلمة المرور'),
-                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'كلمة المرور',
+                  filled: true,
+                  fillColor: Theme.of(context).cardColor,
+                ),
+                style: TextStyle(color: onSurface),
                 obscureText: true,
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _phoneController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'رقم هاتف الزبون (للإشعارات)',
                   hintText: 'مثلاً 963xxxxxxxxx',
+                  filled: true,
+                  fillColor: Theme.of(context).cardColor,
                 ),
                 keyboardType: TextInputType.phone,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: onSurface),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: _commentController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'تعليق / ملاحظات',
                   hintText: 'أي ملاحظات إضافية',
+                  filled: true,
+                  fillColor: Theme.of(context).cardColor,
                 ),
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: onSurface),
               ),
+              const SizedBox(height: 12),
+              _buildExpiryCard(),
               const SizedBox(height: 12),
               _buildProfileField(),
               const SizedBox(height: 24),
-              ElevatedButton(
-                onPressed: _loading ? null : _save,
-                child: _loading
-                    ? const CircularProgressIndicator(color: Colors.black)
-                    : const Text('حفظ'),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _loading ? null : _save,
+                  child: _loading
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.black,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text('حفظ'),
+                ),
               ),
             ],
           ),
