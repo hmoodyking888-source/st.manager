@@ -4,19 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:st_manager/screens/ppp/ppp_user_screen.dart';
 import 'package:st_manager/services/router_service.dart';
+import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
-
-class _TrafficSnapshot {
-  final int bytesIn;
-  final int bytesOut;
-  final DateTime time;
-
-  const _TrafficSnapshot({
-    required this.bytesIn,
-    required this.bytesOut,
-    required this.time,
-  });
-}
 
 class _CommentData {
   final String phone;
@@ -41,10 +30,12 @@ class PppActiveScreen extends StatefulWidget {
 class _PppActiveScreenState extends State<PppActiveScreen> {
   static const String _expiredProfileName = 'Xpirer';
   static const String _expiredRateLimit = '512K/512K';
+  static const String _expirationCheckKey = 'ppp_last_expiration_check';
+
+  final SecureStorageService _storage = SecureStorageService();
 
   List<Map<String, dynamic>> _secrets = [];
   List<Map<String, dynamic>> _active = [];
-  List<Map<String, dynamic>> _profiles = [];
 
   String _searchQuery = '';
   String _sortBy = 'name';
@@ -52,16 +43,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   bool _loading = false;
   bool _showRxFirst = true;
 
-  final Map<String, _TrafficSnapshot> _previousTraffic = {};
-  final Map<String, double> _rxSpeeds = {};
-  final Map<String, double> _txSpeeds = {};
+  String? _lastExpirationCheckIso;
 
   Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
-    _load(initial: true);
+    _bootstrap();
+  }
+
+  Future<void> _bootstrap() async {
+    _lastExpirationCheckIso = await _storage.read(_expirationCheckKey);
+    await _load(initial: true);
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 2),
       (_) => _load(),
@@ -226,90 +220,27 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return null;
   }
 
-  String? _matchActiveSessionKey(
-    Map<String, dynamic> secret,
-    Map<String, Map<String, dynamic>> activeBySession,
-  ) {
-    final secretKeys = _candidateKeys(secret);
-
-    for (final entry in activeBySession.entries) {
-      final activeKeys = _candidateKeys(entry.value);
-      for (final key in secretKeys) {
-        if (activeKeys.contains(key)) {
-          return entry.key;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  int _extractBytesIn(Map<String, dynamic> activeEntry) {
-    final bytesIn = _toInt(activeEntry['bytes-in']);
-    if (bytesIn > 0) return bytesIn;
-
-    final rxByte = _toInt(activeEntry['rx-byte']);
-    if (rxByte > 0) return rxByte;
-
-    return _toInt(activeEntry['total-bytes']);
-  }
-
-  int _extractBytesOut(Map<String, dynamic> activeEntry) {
-    final bytesOut = _toInt(activeEntry['bytes-out']);
-    if (bytesOut > 0) return bytesOut;
-
-    final txByte = _toInt(activeEntry['tx-byte']);
-    if (txByte > 0) return txByte;
-
-    return _toInt(activeEntry['total-bytes']);
-  }
-
-  void _updateTrafficSpeed(Map<String, Map<String, dynamic>> activeBySession) {
+  Future<bool> _shouldRunExpirationCheck() async {
     final now = DateTime.now();
-    final nextKeys = <String>{};
+    final todayAtNoon = DateTime(now.year, now.month, now.day, 12);
 
-    for (final entry in activeBySession.entries) {
-      final key = entry.key;
-      final activeEntry = entry.value;
-
-      final currentIn = _extractBytesIn(activeEntry);
-      final currentOut = _extractBytesOut(activeEntry);
-      final previous = _previousTraffic[key];
-
-      double rxMbps = 0;
-      double txMbps = 0;
-
-      if (previous != null) {
-        final elapsedSeconds =
-            now.difference(previous.time).inMilliseconds / 1000.0;
-
-        if (elapsedSeconds > 0) {
-          final diffIn = currentIn - previous.bytesIn;
-          final diffOut = currentOut - previous.bytesOut;
-
-          if (diffIn >= 0) {
-            rxMbps = (diffIn * 8) / elapsedSeconds / 1000000;
-          }
-
-          if (diffOut >= 0) {
-            txMbps = (diffOut * 8) / elapsedSeconds / 1000000;
-          }
-        }
-      }
-
-      _rxSpeeds[key] = rxMbps;
-      _txSpeeds[key] = txMbps;
-      _previousTraffic[key] = _TrafficSnapshot(
-        bytesIn: currentIn,
-        bytesOut: currentOut,
-        time: now,
-      );
-      nextKeys.add(key);
+    if (now.isBefore(todayAtNoon)) {
+      return false;
     }
 
-    _previousTraffic.removeWhere((key, _) => !nextKeys.contains(key));
-    _rxSpeeds.removeWhere((key, _) => !nextKeys.contains(key));
-    _txSpeeds.removeWhere((key, _) => !nextKeys.contains(key));
+    if (_lastExpirationCheckIso != null) {
+      final last = DateTime.tryParse(_lastExpirationCheckIso!);
+      if (last != null &&
+          last.year == now.year &&
+          last.month == now.month &&
+          last.day == now.day) {
+        return false;
+      }
+    }
+
+    _lastExpirationCheckIso = now.toIso8601String();
+    await _storage.write(_expirationCheckKey, _lastExpirationCheckIso!);
+    return true;
   }
 
   Future<void> _ensureExpiredProfile() async {
@@ -402,6 +333,76 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return changed;
   }
 
+  String? _matchActiveSessionKey(
+    Map<String, dynamic> secret,
+    Map<String, Map<String, dynamic>> activeBySession,
+  ) {
+    final secretKeys = _candidateKeys(secret);
+
+    for (final entry in activeBySession.entries) {
+      final activeKeys = _candidateKeys(entry.value);
+      for (final key in secretKeys) {
+        if (activeKeys.contains(key)) {
+          return entry.key;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  Future<Map<String, double>> _getTrafficForInterface(
+      String interfaceName) async {
+    if (widget.routerService == null || interfaceName.trim().isEmpty) {
+      return {
+        'rx-bits-per-second': 0,
+        'tx-bits-per-second': 0,
+      };
+    }
+
+    return widget.routerService!.getPortCurrentRate(interfaceName.trim());
+  }
+
+  Future<List<Map<String, dynamic>>> _attachLiveTrafficToActive(
+    List<Map<String, dynamic>> active,
+  ) async {
+    final interfaces = <String>{};
+    for (final a in active) {
+      final iface = _normalizeText(a['interface']);
+      if (iface.isNotEmpty) {
+        interfaces.add(iface);
+      }
+    }
+
+    final trafficByInterface = <String, Map<String, double>>{};
+
+    await Future.wait(
+      interfaces.map((iface) async {
+        trafficByInterface[iface] = await _getTrafficForInterface(iface);
+      }),
+    );
+
+    return active.map((a) {
+      final iface = _normalizeText(a['interface']);
+      final traffic = trafficByInterface[iface] ??
+          {
+            'rx-bits-per-second': 0,
+            'tx-bits-per-second': 0,
+          };
+
+      final rxBits = traffic['rx-bits-per-second'] ?? 0;
+      final txBits = traffic['tx-bits-per-second'] ?? 0;
+
+      return {
+        ...a,
+        'traffic-interface': iface,
+        'rx-speed': rxBits / 1000000,
+        'tx-speed': txBits / 1000000,
+        'speed-mbps': (rxBits + txBits) / 1000000,
+      };
+    }).toList();
+  }
+
   Future<void> _load({bool initial = false}) async {
     if (widget.routerService == null) return;
 
@@ -410,36 +411,23 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
 
     try {
-      final results = await Future.wait([
-        widget.routerService!.sendCommand(
-          '/ppp/secret/print',
-          useCache: false,
-        ),
-        widget.routerService!.sendCommand(
-          '/ppp/active/print',
-          useCache: false,
-        ),
-        widget.routerService!.sendCommand(
-          '/ppp/profile/print',
-          useCache: false,
-        ),
-      ]);
+      widget.routerService!.clearCache();
 
-      final secrets = List<Map<String, dynamic>>.from(results[0]);
-      final active = List<Map<String, dynamic>>.from(results[1]);
-      final profiles = List<Map<String, dynamic>>.from(results[2]);
+      final secrets = await widget.routerService!.getPppSecrets();
+      final rawActive = await widget.routerService!.getPppActive();
+      final active = await _attachLiveTrafficToActive(rawActive);
 
       final activeBySession = _buildActiveBySession(active);
-      _updateTrafficSpeed(activeBySession);
 
-      await _applyExpirationRules(secrets, activeBySession);
+      if (await _shouldRunExpirationCheck()) {
+        await _applyExpirationRules(secrets, activeBySession);
+      }
 
       if (!mounted) return;
 
       setState(() {
         _secrets = secrets;
         _active = activeBySession.values.toList();
-        _profiles = profiles;
         _loading = false;
       });
     } catch (_) {
@@ -454,15 +442,15 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
     final list = _secrets.map((secret) {
       final activeEntry = _matchActiveEntry(secret, activeIndex);
-      final sessionKey = activeEntry != null ? _sessionKey(activeEntry) : '';
       final parsed = _parseComment(secret['comment']?.toString() ?? '');
 
       final isDisabled = _isDisabled(secret);
       final isExpired = _isExpired(parsed.expiryDate);
       final isActive = activeEntry != null;
 
-      final speedRx = sessionKey.isNotEmpty ? (_rxSpeeds[sessionKey] ?? 0) : 0;
-      final speedTx = sessionKey.isNotEmpty ? (_txSpeeds[sessionKey] ?? 0) : 0;
+      final rxSpeed = (activeEntry?['rx-speed'] as num?)?.toDouble() ?? 0;
+      final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
+      final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
 
       String status = 'offline';
       if (isDisabled) {
@@ -486,10 +474,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         'expired': isExpired,
         'status': status,
         'active-id': _normalizeText(activeEntry?['.id']),
-        'session-key': sessionKey,
-        'rx-speed': speedRx,
-        'tx-speed': speedTx,
-        'speed-mbps': speedRx + speedTx,
+        'session-key': activeEntry != null ? _sessionKey(activeEntry) : '',
+        'rx-speed': rxSpeed,
+        'tx-speed': txSpeed,
+        'speed-mbps': totalSpeed,
       };
     }).toList();
 
@@ -765,6 +753,48 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     ).then((_) => _load());
   }
 
+  Widget _buildSummaryCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: onSurface.withOpacity(0.7),
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildSpeedBadge(double rxSpeed, double txSpeed) {
     final primaryLabel = _showRxFirst ? 'RX' : 'TX';
     final primaryValue = _showRxFirst ? rxSpeed : txSpeed;
@@ -896,7 +926,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final phone = user['phone']?.toString() ?? '';
     final expiryLabel = user['expiry-label']?.toString() ?? '';
     final profile = user['profile']?.toString() ?? '';
-    final totalSpeed = (user['speed-mbps'] as double?) ?? 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -983,10 +1012,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 ],
               ),
               const SizedBox(height: 12),
-              _buildInfoLine(
-                'السرعة اللحظية',
-                isActive ? _formatSpeed(totalSpeed) : '0',
-              ),
               if (phone.isNotEmpty) _buildInfoLine('الهاتف', phone),
               if (expiryLabel.isNotEmpty)
                 _buildInfoLine('الصلاحية', expiryLabel),
