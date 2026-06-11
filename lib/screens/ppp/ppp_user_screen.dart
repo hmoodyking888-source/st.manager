@@ -35,7 +35,6 @@ class PppUserScreen extends StatefulWidget {
 class _PppUserScreenState extends State<PppUserScreen> {
   final _nameController = TextEditingController();
   final _passController = TextEditingController();
-  final _profileController = TextEditingController();
   final _phoneController = TextEditingController();
   final _commentController = TextEditingController();
 
@@ -54,8 +53,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
     if (widget.initialData != null) {
       _nameController.text = widget.initialData!['name']?.toString() ?? '';
       _passController.text = widget.initialData!['password']?.toString() ?? '';
-      _profileController.text =
-          widget.initialData!['profile']?.toString() ?? '';
+      _selectedProfile = widget.initialData!['profile']?.toString().trim();
 
       final rawComment = widget.initialData!['comment']?.toString() ?? '';
       final parsed = _parseComment(rawComment);
@@ -72,7 +70,6 @@ class _PppUserScreenState extends State<PppUserScreen> {
   void dispose() {
     _nameController.dispose();
     _passController.dispose();
-    _profileController.dispose();
     _phoneController.dispose();
     _commentController.dispose();
     super.dispose();
@@ -137,11 +134,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
       parts.add('exp:${DateFormat('yyyy-MM-dd').format(_expiryDate!)}');
     }
 
-    if (_isPaid) {
-      parts.add('paid:true');
-    } else {
-      parts.add('paid:false');
-    }
+    parts.add('paid:$_isPaid');
 
     if (comment.isNotEmpty) {
       parts.add(comment);
@@ -166,7 +159,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
           .where((name) => name.isNotEmpty)
           .toList();
 
-      final currentProfile = widget.initialData?['profile']?.toString().trim();
+      final currentProfile = _selectedProfile;
 
       if (currentProfile != null &&
           currentProfile.isNotEmpty &&
@@ -180,11 +173,6 @@ class _PppUserScreenState extends State<PppUserScreen> {
           _selectedProfile = currentProfile?.isNotEmpty == true
               ? currentProfile
               : (names.isNotEmpty ? names.first : null);
-
-          if (_selectedProfile != null) {
-            _profileController.text = _selectedProfile!;
-          }
-
           _loadingProfiles = false;
         });
       }
@@ -224,9 +212,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
     setState(() => _loading = true);
 
     try {
-      final profile = (_selectedProfile?.trim().isNotEmpty == true)
-          ? _selectedProfile!.trim()
-          : _profileController.text.trim();
+      final profile = _selectedProfile?.trim() ?? '';
 
       final params = <String, dynamic>{
         'name': name,
@@ -252,10 +238,10 @@ class _PppUserScreenState extends State<PppUserScreen> {
       }
 
       if (mounted) Navigator.pop(context, true);
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('فشل الحفظ')),
+          SnackBar(content: Text('فشل الحفظ: $e')),
         );
       }
     } finally {
@@ -291,21 +277,14 @@ class _PppUserScreenState extends State<PppUserScreen> {
         onChanged: (value) {
           setState(() {
             _selectedProfile = value;
-            if (value != null) {
-              _profileController.text = value;
-            }
           });
         },
       );
     }
 
-    return TextField(
-      controller: _profileController,
-      decoration: const InputDecoration(
-        labelText: 'البروفايل (يدوي)',
-        hintText: 'إذا لم يتم جلب البروفايلات',
-      ),
-      style: const TextStyle(color: Colors.white),
+    return const Text(
+      'لا توجد بروفايلات متاحة',
+      style: TextStyle(color: Colors.red),
     );
   }
 
