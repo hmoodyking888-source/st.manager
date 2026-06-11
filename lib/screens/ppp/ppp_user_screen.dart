@@ -7,11 +7,13 @@ class _CommentData {
   final String phone;
   final String note;
   final DateTime? expiryDate;
+  final bool isPaid;
 
   const _CommentData({
     required this.phone,
     required this.note,
     required this.expiryDate,
+    this.isPaid = false,
   });
 }
 
@@ -39,6 +41,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
 
   bool _loading = false;
   bool _loadingProfiles = false;
+  bool _isPaid = false;
 
   List<String> _profiles = [];
   String? _selectedProfile;
@@ -59,6 +62,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
       _phoneController.text = parsed.phone;
       _commentController.text = parsed.note;
       _expiryDate = parsed.expiryDate;
+      _isPaid = parsed.isPaid;
     }
 
     _loadProfiles();
@@ -76,11 +80,13 @@ class _PppUserScreenState extends State<PppUserScreen> {
 
   _CommentData _parseComment(String raw) {
     if (raw.trim().isEmpty) {
-      return const _CommentData(phone: '', note: '', expiryDate: null);
+      return const _CommentData(
+          phone: '', note: '', expiryDate: null, isPaid: false);
     }
 
     String phone = '';
     DateTime? expiryDate;
+    bool isPaid = false;
     final notes = <String>[];
 
     for (final part in raw.split('|')) {
@@ -101,6 +107,11 @@ class _PppUserScreenState extends State<PppUserScreen> {
         continue;
       }
 
+      if (token.toLowerCase().startsWith('paid:')) {
+        isPaid = token.substring(5).trim().toLowerCase() == 'true';
+        continue;
+      }
+
       notes.add(token);
     }
 
@@ -108,6 +119,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
       phone: phone,
       note: notes.join(' | '),
       expiryDate: expiryDate,
+      isPaid: isPaid,
     );
   }
 
@@ -123,6 +135,12 @@ class _PppUserScreenState extends State<PppUserScreen> {
 
     if (_expiryDate != null) {
       parts.add('exp:${DateFormat('yyyy-MM-dd').format(_expiryDate!)}');
+    }
+
+    if (_isPaid) {
+      parts.add('paid:true');
+    } else {
+      parts.add('paid:false');
     }
 
     if (comment.isNotEmpty) {
@@ -421,6 +439,21 @@ class _PppUserScreenState extends State<PppUserScreen> {
               _buildExpiryCard(),
               const SizedBox(height: 12),
               _buildProfileField(),
+              const SizedBox(height: 12),
+              SwitchListTile(
+                title: const Text('تم دفع الاشتراك'),
+                value: _isPaid,
+                activeColor: AppTheme.gold,
+                tileColor: Theme.of(context).cardColor,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                onChanged: (val) {
+                  setState(() {
+                    _isPaid = val;
+                  });
+                },
+              ),
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,

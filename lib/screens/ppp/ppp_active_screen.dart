@@ -11,11 +11,13 @@ class _CommentData {
   final String phone;
   final String note;
   final DateTime? expiryDate;
+  final bool isPaid;
 
   const _CommentData({
     required this.phone,
     required this.note,
     required this.expiryDate,
+    this.isPaid = false,
   });
 }
 
@@ -57,7 +59,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     _lastExpirationCheckIso = await _storage.read(_expirationCheckKey);
     await _load(initial: true);
     _refreshTimer = Timer.periodic(
-      const Duration(seconds: 2),
+      const Duration(seconds: 15), // تم تعديل المؤقت لتخفيف الضغط الرهيب
       (_) => _load(),
     );
   }
@@ -102,11 +104,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   _CommentData _parseComment(String raw) {
     if (raw.trim().isEmpty) {
-      return const _CommentData(phone: '', note: '', expiryDate: null);
+      return const _CommentData(
+          phone: '', note: '', expiryDate: null, isPaid: false);
     }
 
     String phone = '';
     DateTime? expiryDate;
+    bool isPaid = false;
     final notes = <String>[];
 
     for (final part in raw.split('|')) {
@@ -127,6 +131,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         continue;
       }
 
+      if (token.toLowerCase().startsWith('paid:')) {
+        isPaid = token.substring(5).trim().toLowerCase() == 'true';
+        continue;
+      }
+
       notes.add(token);
     }
 
@@ -134,6 +143,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       phone: phone,
       note: notes.join(' | '),
       expiryDate: expiryDate,
+      isPaid: isPaid,
     );
   }
 
@@ -469,6 +479,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         'expiry-label': parsed.expiryDate == null
             ? ''
             : _dateOnlyString(parsed.expiryDate!),
+        'is-paid': parsed.isPaid,
         'active': isActive,
         'disabled': isDisabled,
         'expired': isExpired,
@@ -642,6 +653,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   void _showActions(Map<String, dynamic> user) {
     final isDisabled = user['status'] == 'disabled';
+    final isPaid = user['is-paid'] == true;
 
     showModalBottomSheet(
       context: context,
@@ -649,6 +661,41 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       builder: (_) => SafeArea(
         child: Wrap(
           children: [
+            ListTile(
+              leading: Icon(
+                isPaid ? Icons.money_off : Icons.attach_money,
+                color: isPaid ? Colors.red : Colors.green,
+              ),
+              title: Text(
+                isPaid ? 'تغيير إلى: لم يتم الدفع' : 'تغيير إلى: تم الدفع',
+                style: const TextStyle(color: Colors.white),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                final secretId = user['.id']?.toString() ?? '';
+                if (secretId.isNotEmpty) {
+                  final parsed =
+                      _parseComment(user['comment']?.toString() ?? '');
+                  final newParts = <String>[];
+                  if (parsed.phone.isNotEmpty)
+                    newParts.add('phone:${parsed.phone}');
+                  if (parsed.expiryDate != null)
+                    newParts.add(
+                        'exp:${DateFormat('yyyy-MM-dd').format(parsed.expiryDate!)}');
+                  newParts.add('paid:${!isPaid}');
+                  if (parsed.note.isNotEmpty) newParts.add(parsed.note);
+
+                  await widget.routerService?.sendCommand(
+                    '/ppp/secret/set',
+                    params: {
+                      'numbers': secretId,
+                      'comment': newParts.join(' | ')
+                    },
+                  );
+                  _load();
+                }
+              },
+            ),
             if (user['active'] == true)
               ListTile(
                 leading: const Icon(Icons.link_off, color: Colors.red),
@@ -926,6 +973,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final phone = user['phone']?.toString() ?? '';
     final expiryLabel = user['expiry-label']?.toString() ?? '';
     final profile = user['profile']?.toString() ?? '';
+    final isPaid = user['is-paid'] == true;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1003,6 +1051,29 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                                   ),
                                 ),
                               ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 5,
+                              ),
+                              decoration: BoxDecoration(
+                                color: (isPaid ? Colors.green : Colors.red)
+                                    .withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: (isPaid ? Colors.green : Colors.red)
+                                      .withOpacity(0.35),
+                                ),
+                              ),
+                              child: Text(
+                                isPaid ? 'مدفوع' : 'غير مدفوع',
+                                style: TextStyle(
+                                  color: isPaid ? Colors.green : Colors.red,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ],
