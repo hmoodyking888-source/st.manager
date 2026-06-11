@@ -6,7 +6,7 @@ import 'package:st_manager/screens/ppp/ppp_user_screen.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
-import 'package:url_launcher/url_launcher.dart'; // لإضافة زر فتح المتصفح
+import 'package:url_launcher/url_launcher.dart';
 
 class _CommentData {
   final String phone;
@@ -75,14 +75,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return value?.toString().trim() ?? '';
   }
 
-  int _toInt(dynamic value) {
-    if (value == null) return 0;
-    if (value is num) return value.toInt();
-    return int.tryParse(value.toString()) ?? 0;
-  }
-
+  /// FIX 1: إصلاح التحقق من حالة التعطيل
+  /// RouterOS يُرجع 'true' أو 'false' كنص، نتحقق من جميع الحالات الممكنة
   bool _isDisabled(Map<String, dynamic> user) {
-    final value = user['disabled']?.toString().toLowerCase();
+    final value = user['disabled']?.toString().toLowerCase().trim();
     return value == 'true' || value == 'yes' || value == '1';
   }
 
@@ -460,6 +456,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
+  /// FIX 2: منطق الحالة الصحيح
+  /// - active: موجود في ppp active (متصل فعلاً)
+  /// - expired: انتهت صلاحيته (اكسبير) وليس متصلاً
+  /// - disabled: تم تعطيله يدوياً وليس متصلاً وليس منتهياً
+  /// - offline: موجود في الكل وليس ضمن الاكتف ولا معطل ولا منتهي
   List<Map<String, dynamic>> _buildAccounts() {
     final activeIndex = _buildActiveIndex(_active);
 
@@ -475,9 +476,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
       final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
 
-      // منطق الحالة الصارم حسب ترتيب الأولوية:
-      // active > expired > disabled > offline
-      String status = 'offline';
+      // الأولوية: active > expired > disabled > offline
+      String status;
       if (isActive) {
         status = 'active';
       } else if (isExpired) {
@@ -488,8 +488,20 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         status = 'offline';
       }
 
-      // استخراج عنوان IP من الجلسة النشطة (إن وجد)
-      final activeIp = activeEntry?['address']?.toString() ?? '';
+      // استخراج IP من active entry أو من local-address في الـ secret
+      final activeAddress = _normalizeText(activeEntry?['address']);
+      final localAddress = _normalizeText(activeEntry?['local-address']);
+      final secretLocalAddress = _normalizeText(secret['local-address']);
+
+      // IP للمتصفح: نفضل عنوان الـ active، ثم local-address
+      String browserIp = '';
+      if (activeAddress.isNotEmpty) {
+        browserIp = activeAddress;
+      } else if (localAddress.isNotEmpty) {
+        browserIp = localAddress;
+      } else if (secretLocalAddress.isNotEmpty) {
+        browserIp = secretLocalAddress;
+      }
 
       return {
         ...secret,
@@ -505,11 +517,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         'expired': isExpired,
         'status': status,
         'active-id': _normalizeText(activeEntry?['.id']),
-        'active-ip': activeIp, // تمت الإضافة: عنوان IP للمستخدم النشط
         'session-key': activeEntry != null ? _sessionKey(activeEntry) : '',
         'rx-speed': rxSpeed,
         'tx-speed': txSpeed,
         'speed-mbps': totalSpeed,
+        'browser-ip': browserIp,
       };
     }).toList();
 
@@ -593,13 +605,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Color _statusColor(String status) {
     switch (status) {
       case 'active':
-        return AppTheme.greenOnline; // أخضر
+        return AppTheme.greenOnline;
       case 'expired':
-        return Colors.orange; // برتقالي
+        return Colors.orange;
       case 'disabled':
-        return Colors.red; // أحمر
+        return Colors.red;
       case 'offline':
-        return Colors.blue; // أزرق
+        return Colors.blue;
       default:
         return AppTheme.gold;
     }
@@ -660,25 +672,69 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     _load();
   }
 
-  // دالة لفتح المتصفح على IP الحساب
-  Future<void> _openBrowserForIp(String ip) async {
-    final url = Uri.parse('http://$ip');
+  /// FIX 3: فتح المتصفح على IP الحساب
+  Future<void> _openBrowser(Map<String, dynamic> user) async {
+    String ip = user['browser-ip']?.toString().trim() ?? '';
+
+    // إذا لم يوجد IP في الحساب، نطلب من المستخدم إدخاله
+    if (ip.isEmpty) {
+      if (!mounted) return;
+      final controller = TextEditingController();
+      final result = await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppTheme.semiBlack,
+          title: const Text(
+            'أدخل IP العميل',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white),
+            keyboardType: TextInputType.number,
+            decoration: InputDecoration(
+              hintText: 'مثال: 10.16.255.213',
+              hintStyle: TextStyle(color: Colors.white38),
+              filled: true,
+              fillColor: Colors.white10,
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child:
+                  const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: Text('فتح', style: TextStyle(color: AppTheme.gold)),
+            ),
+          ],
+        ),
+      );
+      if (result == null || result.isEmpty) return;
+      ip = result;
+    }
+
+    final url = Uri.parse('http://$ip/login.html');
     if (await canLaunchUrl(url)) {
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('لا يمكن فتح المتصفح لهذا العنوان')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('لا يمكن فتح: http://$ip/login.html'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
   void _showActions(Map<String, dynamic> user) {
-    final isDisabled = user['status'] == 'disabled';
+    // FIX 1: التحقق الصحيح من حالة التعطيل عبر _isDisabled
+    final isDisabled = _isDisabled(user);
     final isPaid = user['is-paid'] == true;
-    final activeIp = user['active-ip']?.toString() ?? '';
-    final isActive = user['active'] == true;
 
     showModalBottomSheet(
       context: context,
@@ -686,7 +742,28 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       builder: (_) => SafeArea(
         child: Wrap(
           children: [
-            // زر تم الدفع / لم يتم الدفع
+            // FIX 3: زر فتح المتصفح
+            ListTile(
+              leading: const Icon(Icons.open_in_browser, color: Colors.cyan),
+              title: const Text(
+                'فتح في المتصفح',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: () {
+                final ip = user['browser-ip']?.toString().trim() ?? '';
+                if (ip.isNotEmpty) {
+                  return Text(
+                    'http://$ip/login.html',
+                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  );
+                }
+                return null;
+              }(),
+              onTap: () {
+                Navigator.pop(context);
+                _openBrowser(user);
+              },
+            ),
             ListTile(
               leading: Icon(
                 isPaid ? Icons.money_off : Icons.attach_money,
@@ -703,11 +780,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                   final parsed =
                       _parseComment(user['comment']?.toString() ?? '');
                   final newParts = <String>[];
-                  if (parsed.phone.isNotEmpty)
+                  if (parsed.phone.isNotEmpty) {
                     newParts.add('phone:${parsed.phone}');
-                  if (parsed.expiryDate != null)
+                  }
+                  if (parsed.expiryDate != null) {
                     newParts.add(
                         'exp:${DateFormat('yyyy-MM-dd').format(parsed.expiryDate!)}');
+                  }
                   newParts.add('paid:${!isPaid}');
                   if (parsed.note.isNotEmpty) newParts.add(parsed.note);
 
@@ -722,21 +801,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 }
               },
             ),
-            // زر فتح المتصفح (يظهر فقط إذا كان الحساب نشطاً وله IP)
-            if (isActive && activeIp.isNotEmpty)
-              ListTile(
-                leading:
-                    const Icon(Icons.open_in_browser, color: AppTheme.gold),
-                title: const Text(
-                  'فتح في المتصفح',
-                  style: TextStyle(color: Colors.white),
-                ),
-                onTap: () {
-                  Navigator.pop(context);
-                  _openBrowserForIp(activeIp);
-                },
-              ),
-            // زر قطع الاتصال (إذا كان نشطاً)
             if (user['active'] == true)
               ListTile(
                 leading: const Icon(Icons.link_off, color: Colors.red),
@@ -756,7 +820,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                   }
                 },
               ),
-            // تعديل
             ListTile(
               leading: const Icon(Icons.edit, color: AppTheme.gold),
               title: const Text(
@@ -777,33 +840,35 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 ).then((_) => _load());
               },
             ),
-            // تعطيل / تفعيل
+            // FIX 1: إصلاح تعطيل/تفعيل الحسابات
+            // نستخدم _isDisabled(user) بدل user['status'] == 'disabled'
+            // لأن الحساب قد يكون معطلاً ومتصلاً في نفس الوقت
             ListTile(
               leading: Icon(
                 Icons.block,
                 color: isDisabled ? Colors.green : Colors.orange,
               ),
               title: Text(
-                isDisabled ? 'تفعيل' : 'تعطيل',
+                isDisabled ? 'تفعيل الحساب' : 'تعطيل الحساب',
                 style: const TextStyle(color: Colors.white),
               ),
               onTap: () async {
                 Navigator.pop(context);
-                final disable = isDisabled ? 'no' : 'yes';
+                // RouterOS: 'yes' = معطل، 'no' = مفعل
+                final newDisabledValue = isDisabled ? 'no' : 'yes';
                 final secretId = user['.id']?.toString() ?? '';
                 if (secretId.isNotEmpty) {
                   await widget.routerService?.sendCommand(
                     '/ppp/secret/set',
                     params: {
                       'numbers': secretId,
-                      'disabled': disable,
+                      'disabled': newDisabledValue,
                     },
                   );
                   _load();
                 }
               },
             ),
-            // فتح السرعة
             ListTile(
               leading: const Icon(Icons.speed, color: AppTheme.gold),
               title: const Text(
@@ -815,7 +880,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 _applySpeedProfile(user);
               },
             ),
-            // حذف
             ListTile(
               leading: const Icon(Icons.delete_forever, color: Colors.red),
               title: const Text(
@@ -977,6 +1041,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final expiryLabel = user['expiry-label']?.toString() ?? '';
     final profile = user['profile']?.toString() ?? '';
     final isPaid = user['is-paid'] == true;
+    final browserIp = user['browser-ip']?.toString().trim() ?? '';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1018,13 +1083,54 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          user['name']?.toString() ?? '',
-                          style: TextStyle(
-                            color: onSurface,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                user['name']?.toString() ?? '',
+                                style: TextStyle(
+                                  color: onSurface,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                            // FIX 3: زر المتصفح في الكارد مباشرة
+                            if (browserIp.isNotEmpty)
+                              Tooltip(
+                                message: 'http://$browserIp/login.html',
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(8),
+                                  onTap: () => _openBrowser(user),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.cyan.withOpacity(0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                          color: Colors.cyan.withOpacity(0.35)),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.open_in_browser,
+                                            color: Colors.cyan, size: 14),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          browserIp,
+                                          style: const TextStyle(
+                                            color: Colors.cyan,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 8),
                         Wrap(
@@ -1082,7 +1188,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       ],
                     ),
                   ),
-                  if (isActive) _buildSpeedBadge(rxSpeed, txSpeed),
+                  if (isActive) ...[
+                    const SizedBox(width: 8),
+                    _buildSpeedBadge(rxSpeed, txSpeed),
+                  ],
                 ],
               ),
               const SizedBox(height: 12),
