@@ -59,7 +59,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     _lastExpirationCheckIso = await _storage.read(_expirationCheckKey);
     await _load(initial: true);
     _refreshTimer = Timer.periodic(
-      const Duration(seconds: 15), // تم تعديل المؤقت لتخفيف الضغط الرهيب
+      const Duration(seconds: 15),
       (_) => _load(),
     );
   }
@@ -370,31 +370,40 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       };
     }
 
-    return widget.routerService!.getPortCurrentRate(interfaceName.trim());
+    try {
+      return await widget.routerService!
+          .getPortCurrentRate(interfaceName.trim());
+    } catch (_) {
+      return {
+        'rx-bits-per-second': 0,
+        'tx-bits-per-second': 0,
+      };
+    }
   }
 
   Future<List<Map<String, dynamic>>> _attachLiveTrafficToActive(
     List<Map<String, dynamic>> active,
   ) async {
-    final interfaces = <String>{};
-    for (final a in active) {
-      final iface = _normalizeText(a['interface']);
-      if (iface.isNotEmpty) {
-        interfaces.add(iface);
-      }
-    }
-
-    final trafficByInterface = <String, Map<String, double>>{};
+    final trafficBySession = <String, Map<String, double>>{};
 
     await Future.wait(
-      interfaces.map((iface) async {
-        trafficByInterface[iface] = await _getTrafficForInterface(iface);
+      active.map((a) async {
+        var service = _normalizeText(a['service']).toLowerCase();
+        if (service.isEmpty) service = 'pppoe'; // افتراضي للبرودباند
+
+        final username = _normalizeText(a['name']);
+
+        if (username.isNotEmpty) {
+          // الطريقة المضمونة: المايكروتك يسمي الواجهة الديناميكية بهذا النمط
+          final interfaceName = '<$service-$username>';
+          trafficBySession[_sessionKey(a)] =
+              await _getTrafficForInterface(interfaceName);
+        }
       }),
     );
 
     return active.map((a) {
-      final iface = _normalizeText(a['interface']);
-      final traffic = trafficByInterface[iface] ??
+      final traffic = trafficBySession[_sessionKey(a)] ??
           {
             'rx-bits-per-second': 0,
             'tx-bits-per-second': 0,
@@ -403,9 +412,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final rxBits = traffic['rx-bits-per-second'] ?? 0;
       final txBits = traffic['tx-bits-per-second'] ?? 0;
 
+      var service = _normalizeText(a['service']).toLowerCase();
+      if (service.isEmpty) service = 'pppoe';
+      final username = _normalizeText(a['name']);
+
       return {
         ...a,
-        'traffic-interface': iface,
+        'traffic-interface': '<$service-$username>',
         'rx-speed': rxBits / 1000000,
         'tx-speed': txBits / 1000000,
         'speed-mbps': (rxBits + txBits) / 1000000,
@@ -462,13 +475,18 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
       final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
 
+      // تعديل منطق الأولوية هنا:
+      // 1. إذا كان متصل
+      // 2. إذا كان منتهي (أولوية أعلى من المعطل)
+      // 3. إذا كان معطل
+      // 4. غير ذلك غير متصل
       String status = 'offline';
-      if (isDisabled) {
-        status = 'disabled';
+      if (isActive) {
+        status = 'active';
       } else if (isExpired) {
         status = 'expired';
-      } else if (isActive) {
-        status = 'active';
+      } else if (isDisabled) {
+        status = 'disabled';
       }
 
       return {
@@ -529,16 +547,16 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
     switch (_filter) {
       case 'active':
-        result = result.where((u) => u['status'] == 'active').toList();
+        result = result.where((u) => u['active'] == true).toList();
         break;
       case 'offline':
-        result = result.where((u) => u['status'] == 'offline').toList();
+        result = result.where((u) => u['active'] == false).toList();
         break;
       case 'disabled':
-        result = result.where((u) => u['status'] == 'disabled').toList();
+        result = result.where((u) => u['disabled'] == true).toList();
         break;
       case 'expired':
-        result = result.where((u) => u['status'] == 'expired').toList();
+        result = result.where((u) => u['expired'] == true).toList();
         break;
       default:
         break;
@@ -562,8 +580,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return result;
   }
 
-  int _countStatus(List<Map<String, dynamic>> list, String status) {
-    return list.where((u) => u['status'] == status).length;
+  int _countStatus(List<Map<String, dynamic>> list, String filterType) {
+    switch (filterType) {
+      case 'active':
+        return list.where((u) => u['active'] == true).length;
+      case 'offline':
+        return list.where((u) => u['active'] == false).length;
+      case 'disabled':
+        return list.where((u) => u['disabled'] == true).length;
+      case 'expired':
+        return list.where((u) => u['expired'] == true).length;
+      default:
+        return list.length;
+    }
   }
 
   String _statusLabel(String status) {
@@ -966,7 +995,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Widget _buildAccountCard(Map<String, dynamic> user) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final status = user['status']?.toString() ?? 'offline';
-    final isActive = status == 'active';
+    final isActive = user['active'] == true;
     final rxSpeed = (user['rx-speed'] as double?) ?? 0;
     final txSpeed = (user['tx-speed'] as double?) ?? 0;
     final note = user['note']?.toString() ?? '';
@@ -1134,6 +1163,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Widget _buildFilters() {
     final accounts = _buildAccounts();
 
+    // يتم جلب العدد الصحيح بدقة من الدالة الجديدة
     final all = accounts.length;
     final active = _countStatus(accounts, 'active');
     final offline = _countStatus(accounts, 'offline');
