@@ -58,8 +58,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Future<void> _bootstrap() async {
     _lastExpirationCheckIso = await _storage.read(_expirationCheckKey);
     await _load(initial: true);
+    // تم التعديل إلى 3 ثواني
     _refreshTimer = Timer.periodic(
-      const Duration(seconds: 15),
+      const Duration(seconds: 3),
       (_) => _load(),
     );
   }
@@ -389,12 +390,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     await Future.wait(
       active.map((a) async {
         var service = _normalizeText(a['service']).toLowerCase();
-        if (service.isEmpty) service = 'pppoe'; // افتراضي للبرودباند
+        if (service.isEmpty) service = 'pppoe';
 
         final username = _normalizeText(a['name']);
 
         if (username.isNotEmpty) {
-          // الطريقة المضمونة: المايكروتك يسمي الواجهة الديناميكية بهذا النمط
           final interfaceName = '<$service-$username>';
           trafficBySession[_sessionKey(a)] =
               await _getTrafficForInterface(interfaceName);
@@ -475,11 +475,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
       final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
 
-      // تعديل منطق الأولوية هنا:
-      // 1. إذا كان متصل
-      // 2. إذا كان منتهي (أولوية أعلى من المعطل)
-      // 3. إذا كان معطل
-      // 4. غير ذلك غير متصل
+      // منطق الحالة الصارم:
       String status = 'offline';
       if (isActive) {
         status = 'active';
@@ -487,6 +483,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         status = 'expired';
       } else if (isDisabled) {
         status = 'disabled';
+      } else {
+        status = 'offline';
       }
 
       return {
@@ -545,21 +543,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   List<Map<String, dynamic>> get filtered {
     var result = _buildAccounts();
 
-    switch (_filter) {
-      case 'active':
-        result = result.where((u) => u['active'] == true).toList();
-        break;
-      case 'offline':
-        result = result.where((u) => u['active'] == false).toList();
-        break;
-      case 'disabled':
-        result = result.where((u) => u['disabled'] == true).toList();
-        break;
-      case 'expired':
-        result = result.where((u) => u['expired'] == true).toList();
-        break;
-      default:
-        break;
+    if (_filter != 'all') {
+      result = result.where((u) => u['status'] == _filter).toList();
     }
 
     if (_searchQuery.isNotEmpty) {
@@ -581,18 +566,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   }
 
   int _countStatus(List<Map<String, dynamic>> list, String filterType) {
-    switch (filterType) {
-      case 'active':
-        return list.where((u) => u['active'] == true).length;
-      case 'offline':
-        return list.where((u) => u['active'] == false).length;
-      case 'disabled':
-        return list.where((u) => u['disabled'] == true).length;
-      case 'expired':
-        return list.where((u) => u['expired'] == true).length;
-      default:
-        return list.length;
-    }
+    if (filterType == 'all') return list.length;
+    return list.where((u) => u['status'] == filterType).length;
   }
 
   String _statusLabel(String status) {
@@ -613,13 +588,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Color _statusColor(String status) {
     switch (status) {
       case 'active':
-        return AppTheme.greenOnline;
-      case 'offline':
-        return Colors.blueGrey;
-      case 'disabled':
-        return Colors.orange;
+        return AppTheme.greenOnline; // أخضر
       case 'expired':
-        return AppTheme.redOffline;
+        return Colors.orange; // برتقالي
+      case 'disabled':
+        return Colors.red; // أحمر
+      case 'offline':
+        return Colors.blue; // أزرق
       default:
         return AppTheme.gold;
     }
@@ -827,48 +802,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         ),
       ),
     ).then((_) => _load());
-  }
-
-  Widget _buildSummaryCard({
-    required String title,
-    required String value,
-    required IconData icon,
-    required Color color,
-  }) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: color.withOpacity(0.35)),
-      ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, color: color),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              color: onSurface,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: onSurface.withOpacity(0.7),
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _buildSpeedBadge(double rxSpeed, double txSpeed) {
@@ -1116,43 +1049,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               if (expiryLabel.isNotEmpty)
                 _buildInfoLine('الصلاحية', expiryLabel),
               if (note.isNotEmpty) _buildInfoLine('الكومنت', note),
-              const SizedBox(height: 8),
-              if (isActive)
-                Text(
-                  'متصل الآن',
-                  style: TextStyle(
-                    color: AppTheme.greenOnline,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
-              else if (status == 'disabled')
-                Text(
-                  'معطل',
-                  style: TextStyle(
-                    color: AppTheme.redOffline,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
-              else if (status == 'expired')
-                Text(
-                  'منتهي - سيُنقل إلى بروفايل Xpirer بسرعة 512K/512K',
-                  style: TextStyle(
-                    color: AppTheme.redOffline,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
-              else
-                Text(
-                  'غير متصل',
-                  style: TextStyle(
-                    color: onSurface.withOpacity(0.65),
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
             ],
           ),
         ),
@@ -1162,8 +1058,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   Widget _buildFilters() {
     final accounts = _buildAccounts();
-
-    // يتم جلب العدد الصحيح بدقة من الدالة الجديدة
     final all = accounts.length;
     final active = _countStatus(accounts, 'active');
     final offline = _countStatus(accounts, 'offline');
@@ -1241,7 +1135,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 Expanded(
                   child: TextField(
                     decoration: InputDecoration(
-                      hintText: 'بحث باسم المستخدم أو الهاتف أو الكومنت...',
+                      hintText: 'بحث...',
                       prefixIcon:
                           const Icon(Icons.search, color: AppTheme.gold),
                       filled: true,
@@ -1266,8 +1160,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                     DropdownMenuItem(value: 'status', child: Text('الحالة')),
                     DropdownMenuItem(value: 'usage', child: Text('الأعلى سحب')),
                     DropdownMenuItem(value: 'profile', child: Text('الباقة')),
-                    DropdownMenuItem(
-                        value: 'uptime', child: Text('وقت التشغيل')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _sortBy = v);
