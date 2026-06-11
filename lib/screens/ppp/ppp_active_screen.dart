@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart'; // تمت إضافة الحزمة لفتح المتصفح
 import 'package:st_manager/screens/ppp/ppp_user_screen.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
@@ -390,11 +391,12 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     await Future.wait(
       active.map((a) async {
         var service = _normalizeText(a['service']).toLowerCase();
-        if (service.isEmpty) service = 'pppoe';
+        if (service.isEmpty) service = 'pppoe'; // افتراضي للبرودباند
 
         final username = _normalizeText(a['name']);
 
         if (username.isNotEmpty) {
+          // الطريقة المضمونة: المايكروتك يسمي الواجهة الديناميكية بهذا النمط
           final interfaceName = '<$service-$username>';
           trafficBySession[_sessionKey(a)] =
               await _getTrafficForInterface(interfaceName);
@@ -474,8 +476,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final rxSpeed = (activeEntry?['rx-speed'] as num?)?.toDouble() ?? 0;
       final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
       final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
+      final activeAddress = _normalizeText(activeEntry?['address']);
 
-      // منطق الحالة الصارم:
+      // منطق الحالة الصارم والنهائي:
       String status = 'offline';
       if (isActive) {
         status = 'active';
@@ -501,6 +504,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         'expired': isExpired,
         'status': status,
         'active-id': _normalizeText(activeEntry?['.id']),
+        'active-address': activeAddress, // إضافة الـ IP لزر المتصفح
         'session-key': activeEntry != null ? _sessionKey(activeEntry) : '',
         'rx-speed': rxSpeed,
         'tx-speed': txSpeed,
@@ -588,13 +592,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Color _statusColor(String status) {
     switch (status) {
       case 'active':
-        return AppTheme.greenOnline; // أخضر
-      case 'expired':
-        return Colors.orange; // برتقالي
-      case 'disabled':
-        return Colors.red; // أحمر
+        return AppTheme.greenOnline;
       case 'offline':
-        return Colors.blue; // أزرق
+        return Colors.blue; // أزرق كما طلبت
+      case 'disabled':
+        return Colors.red; // أحمر كما طلبت
+      case 'expired':
+        return Colors.orange; // برتقالي كما طلبت
       default:
         return AppTheme.gold;
     }
@@ -658,6 +662,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   void _showActions(Map<String, dynamic> user) {
     final isDisabled = user['status'] == 'disabled';
     final isPaid = user['is-paid'] == true;
+    final activeAddress = user['active-address']?.toString() ?? '';
 
     showModalBottomSheet(
       context: context,
@@ -665,6 +670,27 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       builder: (_) => SafeArea(
         child: Wrap(
           children: [
+            // إضافة زر فتح المتصفح إذا كان الحساب متصلاً وله IP
+            if (user['active'] == true && activeAddress.isNotEmpty)
+              ListTile(
+                leading: const Icon(Icons.language, color: Colors.blue),
+                title: Text(
+                  'الدخول لمتصفح الزبون ($activeAddress)',
+                  style: const TextStyle(color: Colors.white),
+                ),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final url = Uri.parse('http://$activeAddress');
+                  try {
+                    if (await canLaunchUrl(url)) {
+                      await launchUrl(url,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  } catch (e) {
+                    debugPrint('Error launching url: $e');
+                  }
+                },
+              ),
             ListTile(
               leading: Icon(
                 isPaid ? Icons.money_off : Icons.attach_money,
@@ -739,6 +765,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 ).then((_) => _load());
               },
             ),
+            // التعديل المضمون لزر التفعيل والتعطيل وفصل الأكتف
             ListTile(
               leading: Icon(
                 Icons.block,
@@ -753,6 +780,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 final disable = isDisabled ? 'no' : 'yes';
                 final secretId = user['.id']?.toString() ?? '';
                 if (secretId.isNotEmpty) {
+                  // تحديث حالة التعطيل في السيكرت
                   await widget.routerService?.sendCommand(
                     '/ppp/secret/set',
                     params: {
@@ -760,6 +788,17 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       'disabled': disable,
                     },
                   );
+
+                  // إذا كان المستخدم متصلاً وقمنا بتعطيله، افصله من الاكتف فوراً
+                  if (!isDisabled && user['active'] == true) {
+                    final activeId = user['active-id']?.toString() ?? '';
+                    if (activeId.isNotEmpty) {
+                      await widget.routerService?.sendCommand(
+                        '/ppp/active/remove',
+                        params: {'numbers': activeId},
+                      );
+                    }
+                  }
                   _load();
                 }
               },
@@ -802,6 +841,48 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         ),
       ),
     ).then((_) => _load());
+  }
+
+  Widget _buildSummaryCard({
+    required String title,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: TextStyle(
+              color: onSurface,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: onSurface.withOpacity(0.7),
+              fontSize: 11,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildSpeedBadge(double rxSpeed, double txSpeed) {
@@ -1058,6 +1139,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   Widget _buildFilters() {
     final accounts = _buildAccounts();
+
     final all = accounts.length;
     final active = _countStatus(accounts, 'active');
     final offline = _countStatus(accounts, 'offline');
@@ -1135,7 +1217,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 Expanded(
                   child: TextField(
                     decoration: InputDecoration(
-                      hintText: 'بحث...',
+                      hintText: 'بحث باسم المستخدم أو الهاتف أو الكومنت...',
                       prefixIcon:
                           const Icon(Icons.search, color: AppTheme.gold),
                       filled: true,
@@ -1160,6 +1242,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                     DropdownMenuItem(value: 'status', child: Text('الحالة')),
                     DropdownMenuItem(value: 'usage', child: Text('الأعلى سحب')),
                     DropdownMenuItem(value: 'profile', child: Text('الباقة')),
+                    DropdownMenuItem(
+                        value: 'uptime', child: Text('وقت التشغيل')),
                   ],
                   onChanged: (v) {
                     if (v != null) setState(() => _sortBy = v);
