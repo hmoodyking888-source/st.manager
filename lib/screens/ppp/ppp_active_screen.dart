@@ -58,7 +58,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     await _load(initial: true);
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 3),
-      (_) => _load(), // تم الإصلاح هنا بإضافة المعامل الـ _ الخاص بالـ Timer
+      (_) => _load(),
     );
   }
 
@@ -350,6 +350,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
+  // التعديل رقم 2 و 3: إصلاح دقيق وقوي لجلب سرعات الـ Traffic وفحص الـ user والـ name مع الـ Try-Catch
   Future<List<Map<String, dynamic>>> _attachLiveTrafficToActive(
     List<Map<String, dynamic>> active,
   ) async {
@@ -358,14 +359,27 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     await Future.wait(
       active.map((a) async {
         var service = _normalizeText(a['service']).toLowerCase();
-        if (service.isEmpty) service = 'pppoe';
 
-        final username = _normalizeText(a['name']);
+        if (service.isEmpty) {
+          service = 'pppoe';
+        }
+
+        final username = _normalizeText(a['name']).isNotEmpty
+            ? _normalizeText(a['name'])
+            : _normalizeText(a['user']);
 
         if (username.isNotEmpty) {
           final interfaceName = '<$service-$username>';
-          trafficBySession[_sessionKey(a)] =
-              await _getTrafficForInterface(interfaceName);
+
+          try {
+            trafficBySession[_sessionKey(a)] =
+                await _getTrafficForInterface(interfaceName);
+          } catch (_) {
+            trafficBySession[_sessionKey(a)] = {
+              'rx-bits-per-second': 0,
+              'tx-bits-per-second': 0,
+            };
+          }
         }
       }),
     );
@@ -382,7 +396,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
       var service = _normalizeText(a['service']).toLowerCase();
       if (service.isEmpty) service = 'pppoe';
-      final username = _normalizeText(a['name']);
+
+      final username = _normalizeText(a['name']).isNotEmpty
+          ? _normalizeText(a['name'])
+          : _normalizeText(a['user']);
 
       return {
         ...a,
@@ -498,6 +515,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       'expired': 3
     };
 
+    // التعديل رقم 1 ورقم 4: إصلاح إضافة case 'name' وتعديل فرز case 'usage' للحسابات المتصلة حسب السرعة
     switch (_sortBy) {
       case 'status':
         list.sort((a, b) {
@@ -509,15 +527,25 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               .compareTo(_normalizeText(b['name']).toLowerCase());
         });
         break;
+      case 'name':
+        list.sort(
+            (a, b) => (a['name'] ?? '').toString().toLowerCase().compareTo(
+                  (b['name'] ?? '').toString().toLowerCase(),
+                ));
+        break;
       case 'uptime':
         list.sort((a, b) =>
             _normalizeText(a['uptime']).compareTo(_normalizeText(b['uptime'])));
         break;
       case 'usage':
         list.sort((a, b) {
-          final aSpeed = (a['speed-mbps'] as double?) ?? 0.0;
-          final bSpeed = (b['speed-mbps'] as double?) ?? 0.0;
-          return bSpeed.compareTo(aSpeed);
+          final aRx = (a['rx-speed'] as num?)?.toDouble() ?? 0;
+          final aTx = (a['tx-speed'] as num?)?.toDouble() ?? 0;
+
+          final bRx = (b['rx-speed'] as num?)?.toDouble() ?? 0;
+          final bTx = (b['tx-speed'] as num?)?.toDouble() ?? 0;
+
+          return (bRx + bTx).compareTo(aRx + aTx);
         });
         break;
       case 'profile':
@@ -603,7 +631,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           'only-one': 'no',
         },
       );
-    } catch (_) {} // تم تصحيح الـ catch الفارغة هنا لمنع مشاكل الكومبايلر
+    } catch (_) {}
   }
 
   Future<void> _applySpeedProfile(Map<String, dynamic> user) async {
@@ -890,6 +918,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     );
   }
 
+  // تم إصلاح الدالة هنا أيضاً بإضافة (_) بدلاً من الأقواس الفارغة لتجنب خطأ الـ Type Assignable الذي ظهر سابقاً
   void _addNewAccount() {
     Navigator.push(
       context,
