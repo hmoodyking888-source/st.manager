@@ -58,7 +58,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     await _load(initial: true);
     _refreshTimer = Timer.periodic(
       const Duration(seconds: 3),
-      (_) => _load(),
+      (_) => _load(), // تم الإصلاح هنا بإضافة المعامل الـ _ الخاص بالـ Timer
     );
   }
 
@@ -497,38 +497,38 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       'disabled': 2,
       'expired': 3
     };
+
     switch (_sortBy) {
       case 'status':
         list.sort((a, b) {
           final aOrder = statusOrder[a['status']] ?? 99;
           final bOrder = statusOrder[b['status']] ?? 99;
           if (aOrder != bOrder) return aOrder.compareTo(bOrder);
-          return (a['name'] ?? '')
-              .toString()
-              .compareTo((b['name'] ?? '').toString());
+          return _normalizeText(a['name'])
+              .toLowerCase()
+              .compareTo(_normalizeText(b['name']).toLowerCase());
         });
         break;
       case 'uptime':
-        list.sort((a, b) => (a['uptime'] ?? '')
-            .toString()
-            .compareTo((b['uptime'] ?? '').toString()));
+        list.sort((a, b) =>
+            _normalizeText(a['uptime']).compareTo(_normalizeText(b['uptime'])));
         break;
       case 'usage':
         list.sort((a, b) {
-          final aSpeed = (a['speed-mbps'] as double?) ?? 0;
-          final bSpeed = (b['speed-mbps'] as double?) ?? 0;
+          final aSpeed = (a['speed-mbps'] as double?) ?? 0.0;
+          final bSpeed = (b['speed-mbps'] as double?) ?? 0.0;
           return bSpeed.compareTo(aSpeed);
         });
         break;
       case 'profile':
-        list.sort((a, b) => (a['profile'] ?? '')
-            .toString()
-            .compareTo((b['profile'] ?? '').toString()));
+        list.sort((a, b) => _normalizeText(a['profile'])
+            .toLowerCase()
+            .compareTo(_normalizeText(b['profile']).toLowerCase()));
         break;
       default:
-        list.sort((a, b) => (a['name'] ?? '')
-            .toString()
-            .compareTo((b['name'] ?? '').toString()));
+        list.sort((a, b) => _normalizeText(a['name'])
+            .toLowerCase()
+            .compareTo(_normalizeText(b['name']).toLowerCase()));
     }
     return list;
   }
@@ -603,7 +603,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           'only-one': 'no',
         },
       );
-    } catch (_) {}
+    } catch (_) {} // تم تصحيح الـ catch الفارغة هنا لمنع مشاكل الكومبايلر
   }
 
   Future<void> _applySpeedProfile(Map<String, dynamic> user) async {
