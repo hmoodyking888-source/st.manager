@@ -1,5 +1,4 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:st_manager/screens/ppp/ppp_user_screen.dart';
@@ -13,7 +12,6 @@ class _CommentData {
   final String note;
   final DateTime? expiryDate;
   final bool isPaid;
-
   const _CommentData({
     required this.phone,
     required this.note,
@@ -41,7 +39,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   List<Map<String, dynamic>> _active = [];
 
   String _searchQuery = '';
-  String _sortBy = 'name';
+  String _sortBy = 'status'; // افتراضي: فرز حسب الحالة (متصل أولاً)
   String _filter = 'all';
   bool _loading = false;
   bool _showRxFirst = true;
@@ -75,9 +73,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return value?.toString().trim() ?? '';
   }
 
-  /// FIX 1: إصلاح التحقق من حالة التعطيل
-  /// RouterOS يُرجع 'true' أو 'false' كنص أو boolean
-  /// نتحقق من جميع الحالات الممكنة مع معالجة null
+  /// ✅ تصحيح التحقق من حالة التعطيل
   bool _isDisabled(Map<String, dynamic> user) {
     final raw = user['disabled'];
     if (raw == null) return false;
@@ -195,20 +191,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return keys.map((e) => e.toLowerCase()).toSet().toList(growable: false);
   }
 
-  Map<String, Map<String, dynamic>> _buildActiveIndex(
-    List<Map<String, dynamic>> active,
-  ) {
-    final index = <String, Map<String, dynamic>>{};
-    for (final a in active) {
-      final sessionKey = _sessionKey(a);
-      index['_sid:$sessionKey'] = a;
-      for (final key in _candidateKeys(a)) {
-        index[key] = a;
-      }
-    }
-    return index;
-  }
-
   Map<String, Map<String, dynamic>> _buildActiveBySession(
     List<Map<String, dynamic>> active,
   ) {
@@ -219,14 +201,21 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return map;
   }
 
-  Map<String, dynamic>? _matchActiveEntry(
+  String? _matchActiveSessionKey(
     Map<String, dynamic> secret,
-    Map<String, Map<String, dynamic>> activeIndex,
+    Map<String, Map<String, dynamic>> activeBySession,
   ) {
-    for (final key in _candidateKeys(secret)) {
-      final active = activeIndex[key];
-      if (active != null) return active;
+    final secretKeys = _candidateKeys(secret);
+
+    for (final entry in activeBySession.entries) {
+      final activeKeys = _candidateKeys(entry.value);
+      for (final key in secretKeys) {
+        if (activeKeys.contains(key)) {
+          return entry.key;
+        }
+      }
     }
+
     return null;
   }
 
@@ -343,24 +332,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return changed;
   }
 
-  String? _matchActiveSessionKey(
-    Map<String, dynamic> secret,
-    Map<String, Map<String, dynamic>> activeBySession,
-  ) {
-    final secretKeys = _candidateKeys(secret);
-
-    for (final entry in activeBySession.entries) {
-      final activeKeys = _candidateKeys(entry.value);
-      for (final key in secretKeys) {
-        if (activeKeys.contains(key)) {
-          return entry.key;
-        }
-      }
-    }
-
-    return null;
-  }
-
   Future<Map<String, double>> _getTrafficForInterface(
       String interfaceName) async {
     if (widget.routerService == null || interfaceName.trim().isEmpty) {
@@ -459,16 +430,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
-  /// FIX 2: منطق الحالة الصحيح + IP صحيح + فرز منطقي
-  /// - active: موجود في ppp active (متصل فعلاً)
-  /// - expired: انتهت صلاحيته (اكسبير) وليس متصلاً
-  /// - disabled: تم تعطيله يدوياً وليس متصلاً وليس منتهياً
-  /// - offline: موجود في الكل وليس ضمن الاكتف ولا معطل ولا منتهي
+  /// ✅ بناء الحسابات مع تحديد الحالة الصحيحة
   List<Map<String, dynamic>> _buildAccounts() {
-    final activeIndex = _buildActiveIndex(_active);
+    final activeBySession = _buildActiveBySession(_active);
 
     final list = _secrets.map((secret) {
-      final activeEntry = _matchActiveEntry(secret, activeIndex);
+      final sessionKey = _matchActiveSessionKey(secret, activeBySession);
+      final activeEntry =
+          (sessionKey != null) ? activeBySession[sessionKey] : null;
       final parsed = _parseComment(secret['comment']?.toString() ?? '');
 
       final isDisabled = _isDisabled(secret);
@@ -479,7 +448,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
       final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
 
-      // الأولوية: active > expired > disabled > offline
+      // ✅ تحديد الحالة حسب الأولوية: active > expired > disabled > offline
       String status;
       if (isActive) {
         status = 'active';
@@ -491,13 +460,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         status = 'offline';
       }
 
-      // استخراج IP من active entry أو من secret
       final activeAddress = _normalizeText(activeEntry?['address']);
-      // FIX: remote-address في الـ secret هو IP العميل الثابت
       final secretRemoteAddress = _normalizeText(secret['remote-address']);
       final secretLocalAddress = _normalizeText(secret['local-address']);
 
-      // IP للمتصفح: نفضل عنوان الـ active (IP العميل الديناميكي)، ثم remote-address
       String browserIp = '';
       if (activeAddress.isNotEmpty) {
         browserIp = activeAddress;
@@ -521,7 +487,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         'expired': isExpired,
         'status': status,
         'active-id': _normalizeText(activeEntry?['.id']),
-        'session-key': activeEntry != null ? _sessionKey(activeEntry) : '',
+        'session-key': sessionKey ?? '',
         'rx-speed': rxSpeed,
         'tx-speed': txSpeed,
         'speed-mbps': totalSpeed,
@@ -529,15 +495,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       };
     }).toList();
 
+    // ✅ فرز حسب الحالة (متصل أولاً)
+    const statusOrder = {
+      'active': 0,
+      'offline': 1,
+      'disabled': 2,
+      'expired': 3
+    };
     switch (_sortBy) {
       case 'status':
-        // FIX: فرز حسب أولوية منطقية: متصل → غير متصل → معطل → منتهي
-        const order = {'active': 0, 'offline': 1, 'disabled': 2, 'expired': 3};
         list.sort((a, b) {
-          final aOrder = order[a['status']?.toString()] ?? 99;
-          final bOrder = order[b['status']?.toString()] ?? 99;
+          final aOrder = statusOrder[a['status']] ?? 99;
+          final bOrder = statusOrder[b['status']] ?? 99;
           if (aOrder != bOrder) return aOrder.compareTo(bOrder);
-          // ترتيب ثانوي حسب الاسم
           return (a['name'] ?? '')
               .toString()
               .compareTo((b['name'] ?? '').toString());
@@ -565,7 +535,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             .toString()
             .compareTo((b['name'] ?? '').toString()));
     }
-
     return list;
   }
 
@@ -684,11 +653,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     _load();
   }
 
-  /// FIX 3: فتح المتصفح على IP الحساب
   Future<void> _openBrowser(Map<String, dynamic> user) async {
     String ip = user['browser-ip']?.toString().trim() ?? '';
 
-    // إذا لم يوجد IP في الحساب، نطلب من المستخدم إدخاله
     if (ip.isEmpty) {
       if (!mounted) return;
       final controller = TextEditingController();
@@ -729,10 +696,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       ip = result;
     }
 
-    // تنظيف IP - إزالة http:// أو https:// إذا أدخلها المستخدم بالخطأ
     ip = ip.replaceAll(RegExp(r'^https?://'), '');
 
-    // التحقق من صحة IP بشكل أساسي
     if (!RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(ip)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -747,7 +712,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final url = Uri.parse('http://$ip/login.html');
 
     try {
-      // FIX: استخدام launchUrl مباشرة بدلاً من canLaunchUrl (غير موثوق في Android 11+)
       final launched = await launchUrl(
         url,
         mode: LaunchMode.externalApplication,
@@ -772,7 +736,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   }
 
   void _showActions(Map<String, dynamic> user) {
-    // FIX 1: التحقق الصحيح من حالة التعطيل عبر _isDisabled
     final isDisabled = _isDisabled(user);
     final isPaid = user['is-paid'] == true;
 
@@ -782,7 +745,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       builder: (_) => SafeArea(
         child: Wrap(
           children: [
-            // FIX 3: زر فتح المتصفح
             ListTile(
               leading: const Icon(Icons.open_in_browser, color: Colors.cyan),
               title: const Text(
@@ -880,9 +842,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 ).then((_) => _load());
               },
             ),
-            // FIX 1: إصلاح تعطيل/تفعيل الحسابات
-            // نستخدم _isDisabled(user) بدل user['status'] == 'disabled'
-            // لأن الحساب قد يكون معطلاً ومتصلاً في نفس الوقت
             ListTile(
               leading: Icon(
                 Icons.block,
@@ -894,7 +853,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               ),
               onTap: () async {
                 Navigator.pop(context);
-                // RouterOS: 'yes' = معطل، 'no' = مفعل
                 final newDisabledValue = isDisabled ? 'no' : 'yes';
                 final secretId = user['.id']?.toString() ?? '';
                 if (secretId.isNotEmpty) {
@@ -1135,7 +1093,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                                 ),
                               ),
                             ),
-                            // FIX 3: زر المتصفح في الكارد مباشرة
                             if (browserIp.isNotEmpty)
                               Tooltip(
                                 message: 'http://$browserIp/login.html',
@@ -1346,8 +1303,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                   style: TextStyle(color: onSurface, fontSize: 12),
                   underline: const SizedBox(),
                   items: const [
-                    DropdownMenuItem(value: 'name', child: Text('الاسم')),
                     DropdownMenuItem(value: 'status', child: Text('الحالة')),
+                    DropdownMenuItem(value: 'name', child: Text('الاسم')),
                     DropdownMenuItem(value: 'usage', child: Text('الأعلى سحب')),
                     DropdownMenuItem(value: 'profile', child: Text('الباقة')),
                   ],

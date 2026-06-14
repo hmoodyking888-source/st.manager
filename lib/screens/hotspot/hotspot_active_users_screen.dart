@@ -7,7 +7,6 @@ import 'package:st_manager/theme/app_theme.dart';
 class _TrafficSample {
   final int bytes;
   final DateTime time;
-
   const _TrafficSample(this.bytes, this.time);
 }
 
@@ -26,6 +25,10 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   String _searchQuery = '';
   String _sortBy = 'name';
   bool _loading = false;
+
+  // وضع التحديد المتعدد
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = {};
 
   final Map<String, _TrafficSample> _previousTraffic = {};
   final Map<String, double> _liveSpeeds = {};
@@ -67,78 +70,55 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   int _extractBytesTotal(Map<String, dynamic> activeEntry) {
     final bytesIn = _toInt(activeEntry['bytes-in']);
     final bytesOut = _toInt(activeEntry['bytes-out']);
-
-    if (bytesIn + bytesOut > 0) {
-      return bytesIn + bytesOut;
-    }
-
+    if (bytesIn + bytesOut > 0) return bytesIn + bytesOut;
     final rx = _toInt(activeEntry['rx-byte']);
     final tx = _toInt(activeEntry['tx-byte']);
-    if (rx + tx > 0) {
-      return rx + tx;
-    }
-
+    if (rx + tx > 0) return rx + tx;
     return _toInt(activeEntry['total-bytes']);
   }
 
   void _updateTrafficSpeed(Map<String, Map<String, dynamic>> activeByName) {
     final now = DateTime.now();
     final nextKeys = <String>{};
-
     for (final entry in activeByName.entries) {
       final key = entry.key;
       final activeEntry = entry.value;
       final totalBytes = _extractBytesTotal(activeEntry);
       final previous = _previousTraffic[key];
-
       double speedMbps = 0;
       if (previous != null) {
         final diffBytes = totalBytes - previous.bytes;
         final diffSeconds =
             now.difference(previous.time).inMilliseconds / 1000.0;
-
         if (diffBytes >= 0 && diffSeconds > 0) {
           speedMbps = (diffBytes * 8) / diffSeconds / 1000000;
         }
       }
-
       _liveSpeeds[key] = speedMbps;
       _previousTraffic[key] = _TrafficSample(totalBytes, now);
       nextKeys.add(key);
     }
-
     _previousTraffic.removeWhere((key, _) => !nextKeys.contains(key));
     _liveSpeeds.removeWhere((key, _) => !nextKeys.contains(key));
   }
 
   Future<void> _loadUsers({bool initial = false}) async {
     if (widget.routerService == null) return;
-
-    if (initial && mounted) {
-      setState(() => _loading = true);
-    }
-
+    if (initial && mounted) setState(() => _loading = true);
     try {
       widget.routerService!.clearCache();
-
       final active = await widget.routerService!.getHotspotActive();
       final all = await widget.routerService!.getHotspotUsers();
-
       final activeByName = <String, Map<String, dynamic>>{};
       for (final a in active) {
         final key =
             (a['user'] ?? a['name'] ?? a['username'] ?? '').toString().trim();
-        if (key.isNotEmpty) {
-          activeByName[key] = a;
-        }
+        if (key.isNotEmpty) activeByName[key] = a;
       }
-
       _updateTrafficSpeed(activeByName);
-
       final merged = all.map((u) {
         final name = u['name']?.toString().trim() ?? '';
         final activeData = activeByName[name] ?? <String, dynamic>{};
-
         return {
           ...u,
           'active': activeData.isNotEmpty,
@@ -150,24 +130,22 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
           'speed-mbps': _liveSpeeds[name] ?? 0,
         };
       }).toList();
-
       if (!mounted) return;
       setState(() {
         _users = merged;
         _loading = false;
       });
     } catch (_) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   List<Map<String, dynamic>> get filtered {
     var list = _users.where((u) {
       if (_filter == 'active') return u['active'] == true;
-      if (_filter == 'disabled') return u['disabled'] == 'true';
-      if (_filter == 'expired') return u['disabled'] == 'true';
+      if (_filter == 'disabled') return _isDisabled(u);
+      if (_filter == 'expired')
+        return _isDisabled(u); // يمكن تخصيصها حسب الصلاحية لاحقاً
       return true;
     }).toList();
 
@@ -204,45 +182,107 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     return list;
   }
 
+  // --- إحصائيات لكل تصنيف ---
+  int _countStatus(String status) {
+    if (status == 'all') return _users.length;
+    return _users.where((u) {
+      if (status == 'active') return u['active'] == true;
+      if (status == 'disabled') return _isDisabled(u);
+      if (status == 'expired') return _isDisabled(u);
+      return false;
+    }).length;
+  }
+
+  // --- تحديد / إلغاء تحديد ---
+  void _toggleSelection(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+        if (_selectedIds.isEmpty) _selectionMode = false;
+      } else {
+        _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _selectAll() {
+    setState(() {
+      _selectionMode = true;
+      for (final u in filtered) {
+        final id = u['.id']?.toString() ?? '';
+        if (id.isNotEmpty) _selectedIds.add(id);
+      }
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  Future<void> _deleteSelected() async {
+    if (_selectedIds.isEmpty) return;
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: const Text('تأكيد الحذف', style: TextStyle(color: Colors.white)),
+        content: Text('حذف ${_selectedIds.length} حساب؟',
+            style: const TextStyle(color: Colors.white70)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    for (final id in _selectedIds) {
+      await widget.routerService?.sendCommand(
+        '/ip/hotspot/user/remove',
+        params: {'numbers': id},
+      );
+    }
+    _clearSelection();
+    _loadUsers();
+  }
+
+  // --- باقي الدوال (فتح السرعة، التعديل، التعطيل، إلخ) ---
   Future<void> _ensureSpeedProfile() async {
     try {
       await widget.routerService!.sendCommand(
         '/ip/hotspot/user/profile/add',
-        params: {
-          'name': 'Speed',
-          'rate-limit': '',
-        },
+        params: {'name': 'Speed', 'rate-limit': ''},
       );
     } catch (_) {}
   }
 
   Future<void> _boostUserSpeed(Map<String, dynamic> user) async {
     if (widget.routerService == null) return;
-
     final activeId = user['active-id']?.toString() ?? '';
     final userId = user['.id']?.toString() ?? '';
-
     await _ensureSpeedProfile();
-
     if (userId.isNotEmpty) {
       await widget.routerService?.sendCommand(
         '/ip/hotspot/user/set',
-        params: {
-          'numbers': userId,
-          'profile': 'Speed',
-        },
+        params: {'numbers': userId, 'profile': 'Speed'},
       );
     }
-
     if (user['active'] == true && activeId.isNotEmpty) {
       await widget.routerService?.sendCommand(
         '/ip/hotspot/active/remove',
-        params: {
-          'numbers': activeId,
-        },
+        params: {'numbers': activeId},
       );
     }
-
     _loadUsers();
   }
 
@@ -288,24 +328,20 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
             ListTile(
               leading: Icon(
                 Icons.block,
-                color:
-                    user['disabled'] == 'true' ? Colors.green : Colors.orange,
+                color: _isDisabled(user) ? Colors.green : Colors.orange,
               ),
               title: Text(
-                user['disabled'] == 'true' ? 'تفعيل' : 'تعطيل',
+                _isDisabled(user) ? 'تفعيل' : 'تعطيل',
                 style: const TextStyle(color: Colors.white),
               ),
               onTap: () async {
                 Navigator.pop(context);
-                final disable = user['disabled'] == 'true' ? 'no' : 'yes';
+                final disable = _isDisabled(user) ? 'no' : 'yes';
                 final userId = user['.id']?.toString() ?? '';
                 if (userId.isNotEmpty) {
                   await widget.routerService?.sendCommand(
                     '/ip/hotspot/user/set',
-                    params: {
-                      'numbers': userId,
-                      'disabled': disable,
-                    },
+                    params: {'numbers': userId, 'disabled': disable},
                   );
                   _loadUsers();
                 }
@@ -313,10 +349,8 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.speed, color: AppTheme.gold),
-              title: const Text(
-                'فتح السرعة',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('فتح السرعة',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 _boostUserSpeed(user);
@@ -341,12 +375,9 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   }
 
   String _formatSpeed(double speedMbps) {
-    if (speedMbps >= 1000) {
+    if (speedMbps >= 1000)
       return '${(speedMbps / 1000).toStringAsFixed(1)} Gbps';
-    }
-    if (speedMbps >= 1) {
-      return '${speedMbps.toStringAsFixed(1)} Mbps';
-    }
+    if (speedMbps >= 1) return '${speedMbps.toStringAsFixed(1)} Mbps';
     return '${(speedMbps * 1000).toStringAsFixed(0)} Kbps';
   }
 
@@ -357,36 +388,24 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
       decoration: BoxDecoration(
         color: AppTheme.greenOnline.withOpacity(0.14),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(
-          color: AppTheme.greenOnline.withOpacity(0.9),
-          width: 1,
-        ),
+        border: Border.all(color: AppTheme.greenOnline.withOpacity(0.9)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           const Icon(Icons.speed, color: Colors.white, size: 14),
           const SizedBox(height: 2),
-          const Text(
-            'السرعة',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 9,
-              height: 1,
-            ),
-            textAlign: TextAlign.center,
-          ),
+          const Text('السرعة',
+              style: TextStyle(color: Colors.white70, fontSize: 9, height: 1),
+              textAlign: TextAlign.center),
           const SizedBox(height: 2),
-          Text(
-            _formatSpeed(speedMbps),
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
-              height: 1,
-            ),
-            textAlign: TextAlign.center,
-          ),
+          Text(_formatSpeed(speedMbps),
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  height: 1),
+              textAlign: TextAlign.center),
         ],
       ),
     );
@@ -405,55 +424,92 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
         comment,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(
-          color: AppTheme.gold,
-          fontSize: 10,
-          height: 1.2,
-        ),
+        style: const TextStyle(color: AppTheme.gold, fontSize: 10, height: 1.2),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final filteredList = filtered;
+    final all = _users.length;
+    final activeCnt = _countStatus('active');
+    final disabledCnt = _countStatus('disabled');
+    final expiredCnt = _countStatus('expired');
+
     return Scaffold(
-      appBar: AppBar(title: const Text('جميع حسابات الهوتسبوت')),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppTheme.gold,
-        onPressed: _addNewAccount,
-        child: const Icon(Icons.person_add),
+      appBar: AppBar(
+        title: const Text('جميع حسابات الهوتسبوت'),
+        actions: [
+          if (_selectionMode) ...[
+            IconButton(
+              icon: const Icon(Icons.select_all),
+              tooltip: 'تحديد الكل',
+              onPressed: _selectAll,
+            ),
+            IconButton(
+              icon: const Icon(Icons.delete_sweep, color: Colors.red),
+              tooltip: 'حذف المحدد',
+              onPressed: _deleteSelected,
+            ),
+            IconButton(
+              icon: const Icon(Icons.close),
+              tooltip: 'إلغاء التحديد',
+              onPressed: _clearSelection,
+            ),
+          ] else ...[
+            IconButton(
+              icon: const Icon(Icons.checklist),
+              tooltip: 'تحديد متعدد',
+              onPressed: () => setState(() => _selectionMode = true),
+            ),
+          ],
+        ],
       ),
+      floatingActionButton: _selectionMode
+          ? null
+          : FloatingActionButton(
+              backgroundColor: AppTheme.gold,
+              onPressed: _addNewAccount,
+              child: const Icon(Icons.person_add),
+            ),
       body: Column(
         children: [
           if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
+          // أزرار الفلتر مع الأعداد
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: [
-                for (final entry in {
-                  'all': 'الكل',
-                  'active': 'متصل',
-                  'disabled': 'معطل',
-                  'expired': 'منتهي'
-                }.entries)
-                  ChoiceChip(
-                    label: Text(
-                      entry.value,
-                      style: const TextStyle(fontSize: 11),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final entry in {
+                    'all': 'الكل ($all)',
+                    'active': 'متصل ($activeCnt)',
+                    'disabled': 'معطل ($disabledCnt)',
+                    'expired': 'منتهي ($expiredCnt)',
+                  }.entries)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(entry.value,
+                            style: const TextStyle(fontSize: 11)),
+                        selected: _filter == entry.key,
+                        onSelected: (v) => setState(() => _filter = entry.key),
+                        selectedColor: AppTheme.gold,
+                        backgroundColor: AppTheme.darkGrey,
+                        labelStyle: TextStyle(
+                          color: _filter == entry.key
+                              ? Colors.black
+                              : AppTheme.gold,
+                        ),
+                      ),
                     ),
-                    selected: _filter == entry.key,
-                    onSelected: (v) => setState(() => _filter = entry.key),
-                    selectedColor: AppTheme.gold,
-                    backgroundColor: AppTheme.darkGrey,
-                    labelStyle: TextStyle(
-                      color:
-                          _filter == entry.key ? Colors.black : AppTheme.gold,
-                    ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
+          // شريط البحث والفرز
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
@@ -490,72 +546,142 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               ],
             ),
           ),
+          // عدد العناصر المحددة (عند وضع التحديد)
+          if (_selectionMode)
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 16),
+              color: AppTheme.gold.withOpacity(0.1),
+              child: Text(
+                'تم تحديد ${_selectedIds.length} من ${filteredList.length}',
+                style: const TextStyle(color: AppTheme.gold, fontSize: 12),
+              ),
+            ),
           Expanded(
             child: RefreshIndicator(
               onRefresh: _loadUsers,
-              child: ListView.builder(
-                physics: const AlwaysScrollableScrollPhysics(),
-                itemCount: filtered.length,
-                itemBuilder: (_, i) {
-                  final u = filtered[i];
-                  final isActive = u['active'] == true;
-                  final comment = (u['comment'] ?? '').toString();
-                  final phone = (u['phone'] ?? '').toString();
-                  final speed = (u['speed-mbps'] as double?) ?? 0;
-
-                  return Card(
-                    margin:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    child: ListTile(
-                      leading: Icon(
-                        isActive ? Icons.person : Icons.person_off,
-                        color: isActive ? AppTheme.greenOnline : Colors.grey,
-                      ),
-                      title: Text(
-                        u['name']?.toString() ?? '',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            isActive
-                                ? 'متصل • ${u['uptime']?.toString() ?? ''}'
-                                : 'غير متصل',
-                            style: const TextStyle(
-                              color: Colors.white54,
-                              fontSize: 11,
+              child: filteredList.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        const SizedBox(height: 120),
+                        Center(
+                          child: Text(
+                            'لا توجد حسابات مطابقة',
+                            style: TextStyle(
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurface
+                                  .withOpacity(0.6),
                             ),
                           ),
-                          if (phone.isNotEmpty)
-                            Text(
-                              '📞 $phone',
-                              style: const TextStyle(
-                                color: Colors.white54,
-                                fontSize: 11,
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      itemCount: filteredList.length,
+                      itemBuilder: (_, i) {
+                        final u = filteredList[i];
+                        final isActive = u['active'] == true;
+                        final comment = (u['comment'] ?? '').toString();
+                        final phone = (u['phone'] ?? '').toString();
+                        final speed = (u['speed-mbps'] as double?) ?? 0;
+                        final id = u['.id']?.toString() ?? '';
+                        final isSelected = _selectedIds.contains(id);
+
+                        return Card(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          child: InkWell(
+                            onTap: _selectionMode
+                                ? () => _toggleSelection(id)
+                                : () => _showUserActions(u),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 4, vertical: 4),
+                              child: Row(
+                                children: [
+                                  // مربع تحديد (في وضع التحديد)
+                                  if (_selectionMode)
+                                    Checkbox(
+                                      value: isSelected,
+                                      onChanged: (_) => _toggleSelection(id),
+                                      activeColor: AppTheme.gold,
+                                    ),
+                                  // أيقونة الحالة
+                                  Icon(
+                                    isActive ? Icons.person : Icons.person_off,
+                                    color: isActive
+                                        ? AppTheme.greenOnline
+                                        : Colors.grey,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  // محتوى الحساب
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          u['name']?.toString() ?? '',
+                                          style: const TextStyle(
+                                              color: Colors.white),
+                                        ),
+                                        Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              isActive
+                                                  ? 'متصل • ${u['uptime']?.toString() ?? ''}'
+                                                  : 'غير متصل',
+                                              style: const TextStyle(
+                                                color: Colors.white54,
+                                                fontSize: 11,
+                                              ),
+                                            ),
+                                            if (phone.isNotEmpty)
+                                              Text(
+                                                '📞 $phone',
+                                                style: const TextStyle(
+                                                  color: Colors.white54,
+                                                  fontSize: 11,
+                                                ),
+                                              ),
+                                            if (comment.isNotEmpty)
+                                              _buildCommentBox(comment),
+                                            if (u['profile']
+                                                    ?.toString()
+                                                    .isNotEmpty ??
+                                                false)
+                                              Padding(
+                                                padding: const EdgeInsets.only(
+                                                    top: 4),
+                                                child: Text(
+                                                  'البروفايل: ${u['profile']}',
+                                                  style: const TextStyle(
+                                                    color: Colors.white54,
+                                                    fontSize: 11,
+                                                  ),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // عداد السرعة (للمتصلين فقط)
+                                  if (isActive && !_selectionMode)
+                                    _buildSpeedBadge(speed),
+                                ],
                               ),
                             ),
-                          if (comment.isNotEmpty) _buildCommentBox(comment),
-                          if (u['profile']?.toString().isNotEmpty ?? false)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 4),
-                              child: Text(
-                                'البروفايل: ${u['profile']}',
-                                style: const TextStyle(
-                                  color: Colors.white54,
-                                  fontSize: 11,
-                                ),
-                              ),
-                            ),
-                        ],
-                      ),
-                      trailing: isActive ? _buildSpeedBadge(speed) : null,
-                      onTap: () => _showUserActions(u),
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
-              ),
             ),
           ),
         ],
