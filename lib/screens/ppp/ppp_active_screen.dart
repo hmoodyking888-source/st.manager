@@ -39,13 +39,12 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   List<Map<String, dynamic>> _active = [];
 
   String _searchQuery = '';
-  String _sortBy = 'status'; // افتراضي: فرز حسب الحالة (متصل أولاً)
+  String _sortBy = 'status';
   String _filter = 'all';
   bool _loading = false;
   bool _showRxFirst = true;
 
   String? _lastExpirationCheckIso;
-
   Timer? _refreshTimer;
 
   @override
@@ -73,7 +72,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return value?.toString().trim() ?? '';
   }
 
-  /// ✅ تصحيح التحقق من حالة التعطيل
   bool _isDisabled(Map<String, dynamic> user) {
     final raw = user['disabled'];
     if (raw == null) return false;
@@ -430,7 +428,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
-  /// ✅ بناء الحسابات مع تحديد الحالة الصحيحة
   List<Map<String, dynamic>> _buildAccounts() {
     final activeBySession = _buildActiveBySession(_active);
 
@@ -448,7 +445,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
       final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
 
-      // ✅ تحديد الحالة حسب الأولوية: active > expired > disabled > offline
       String status;
       if (isActive) {
         status = 'active';
@@ -495,7 +491,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       };
     }).toList();
 
-    // ✅ فرز حسب الحالة (متصل أولاً)
     const statusOrder = {
       'active': 0,
       'offline': 1,

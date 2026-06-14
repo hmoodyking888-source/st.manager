@@ -34,6 +34,8 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   final Map<String, double> _liveSpeeds = {};
   Timer? _refreshTimer;
 
+  bool _showTx = false; // ✅ متغير التبديل بين RX و TX
+
   @override
   void initState() {
     super.initState();
@@ -144,8 +146,7 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     var list = _users.where((u) {
       if (_filter == 'active') return u['active'] == true;
       if (_filter == 'disabled') return _isDisabled(u);
-      if (_filter == 'expired')
-        return _isDisabled(u); // يمكن تخصيصها حسب الصلاحية لاحقاً
+      if (_filter == 'expired') return _isDisabled(u);
       return true;
     }).toList();
 
@@ -182,7 +183,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     return list;
   }
 
-  // --- إحصائيات لكل تصنيف ---
   int _countStatus(String status) {
     if (status == 'all') return _users.length;
     return _users.where((u) {
@@ -193,7 +193,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     }).length;
   }
 
-  // --- تحديد / إلغاء تحديد ---
   void _toggleSelection(String id) {
     setState(() {
       if (_selectedIds.contains(id)) {
@@ -256,7 +255,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     _loadUsers();
   }
 
-  // --- باقي الدوال (فتح السرعة، التعديل، التعطيل، إلخ) ---
   Future<void> _ensureSpeedProfile() async {
     try {
       await widget.routerService!.sendCommand(
@@ -381,36 +379,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
     return '${(speedMbps * 1000).toStringAsFixed(0)} Kbps';
   }
 
-  Widget _buildSpeedBadge(double speedMbps) {
-    return Container(
-      width: 82,
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-      decoration: BoxDecoration(
-        color: AppTheme.greenOnline.withOpacity(0.14),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.greenOnline.withOpacity(0.9)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.speed, color: Colors.white, size: 14),
-          const SizedBox(height: 2),
-          const Text('السرعة',
-              style: TextStyle(color: Colors.white70, fontSize: 9, height: 1),
-              textAlign: TextAlign.center),
-          const SizedBox(height: 2),
-          Text(_formatSpeed(speedMbps),
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  height: 1),
-              textAlign: TextAlign.center),
-        ],
-      ),
-    );
-  }
-
   Widget _buildCommentBox(String comment) {
     return Container(
       margin: const EdgeInsets.only(top: 4),
@@ -476,7 +444,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
       body: Column(
         children: [
           if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
-          // أزرار الفلتر مع الأعداد
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: SingleChildScrollView(
@@ -509,7 +476,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               ),
             ),
           ),
-          // شريط البحث والفرز
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
             child: Row(
@@ -546,7 +512,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
               ],
             ),
           ),
-          // عدد العناصر المحددة (عند وضع التحديد)
           if (_selectionMode)
             Container(
               width: double.infinity,
@@ -602,14 +567,12 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                                   horizontal: 4, vertical: 4),
                               child: Row(
                                 children: [
-                                  // مربع تحديد (في وضع التحديد)
                                   if (_selectionMode)
                                     Checkbox(
                                       value: isSelected,
                                       onChanged: (_) => _toggleSelection(id),
                                       activeColor: AppTheme.gold,
                                     ),
-                                  // أيقونة الحالة
                                   Icon(
                                     isActive ? Icons.person : Icons.person_off,
                                     color: isActive
@@ -617,7 +580,6 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                                         : Colors.grey,
                                   ),
                                   const SizedBox(width: 8),
-                                  // محتوى الحساب
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment:
@@ -672,9 +634,39 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
                                       ],
                                     ),
                                   ),
-                                  // عداد السرعة (للمتصلين فقط)
                                   if (isActive && !_selectionMode)
-                                    _buildSpeedBadge(speed),
+                                    GestureDetector(
+                                      onTap: () =>
+                                          setState(() => _showTx = !_showTx),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 6, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.greenOnline
+                                              .withOpacity(0.14),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                          border: Border.all(
+                                              color: AppTheme.greenOnline
+                                                  .withOpacity(0.5)),
+                                        ),
+                                        child: Column(children: [
+                                          Text(
+                                            _showTx ? 'TX' : 'RX',
+                                            style: const TextStyle(
+                                                color: Colors.white70,
+                                                fontSize: 9),
+                                          ),
+                                          Text(
+                                            _formatSpeed(speed),
+                                            style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold),
+                                          ),
+                                        ]),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
