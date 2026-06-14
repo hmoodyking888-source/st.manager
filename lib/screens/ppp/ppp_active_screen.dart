@@ -350,49 +350,55 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
-  // التعديل رقم 2 و 3: إصلاح دقيق وقوي لجلب سرعات الـ Traffic وفحص الـ user والـ name مع الـ Try-Catch
+  // ✅ إصلاح #1 - جلب السرعة: إزالة useCache وضمان جلب السرعة في كل دورة بشكل صحيح
   Future<List<Map<String, dynamic>>> _attachLiveTrafficToActive(
     List<Map<String, dynamic>> active,
   ) async {
-    final trafficBySession = <String, Map<String, double>>{};
+    // جلب جميع السرعات بالتوازي لتسريع العملية
+    final trafficFutures = active.map((a) async {
+      var service = _normalizeText(a['service']).toLowerCase();
+      if (service.isEmpty) service = 'pppoe';
 
-    await Future.wait(
-      active.map((a) async {
-        var service = _normalizeText(a['service']).toLowerCase();
+      // ✅ التحقق من name أولاً ثم user للحصول على اسم المستخدم الصحيح
+      final username = _normalizeText(a['name']).isNotEmpty
+          ? _normalizeText(a['name'])
+          : _normalizeText(a['user']);
 
-        if (service.isEmpty) {
-          service = 'pppoe';
-        }
+      if (username.isEmpty) {
+        return MapEntry(_sessionKey(a), <String, double>{
+          'rx-bits-per-second': 0,
+          'tx-bits-per-second': 0,
+        });
+      }
 
-        final username = _normalizeText(a['name']).isNotEmpty
-            ? _normalizeText(a['name'])
-            : _normalizeText(a['user']);
+      final interfaceName = '<$service-$username>';
 
-        if (username.isNotEmpty) {
-          final interfaceName = '<$service-$username>';
+      try {
+        final traffic = await _getTrafficForInterface(interfaceName);
+        return MapEntry(_sessionKey(a), traffic);
+      } catch (_) {
+        return MapEntry(_sessionKey(a), <String, double>{
+          'rx-bits-per-second': 0,
+          'tx-bits-per-second': 0,
+        });
+      }
+    });
 
-          try {
-            trafficBySession[_sessionKey(a)] =
-                await _getTrafficForInterface(interfaceName);
-          } catch (_) {
-            trafficBySession[_sessionKey(a)] = {
-              'rx-bits-per-second': 0,
-              'tx-bits-per-second': 0,
-            };
-          }
-        }
-      }),
+    // انتظار جميع نتائج السرعة دفعة واحدة
+    final trafficResults = await Future.wait(trafficFutures);
+    final trafficBySession = Map<String, Map<String, double>>.fromEntries(
+      trafficResults,
     );
 
     return active.map((a) {
       final traffic = trafficBySession[_sessionKey(a)] ??
           {
-            'rx-bits-per-second': 0,
-            'tx-bits-per-second': 0,
+            'rx-bits-per-second': 0.0,
+            'tx-bits-per-second': 0.0,
           };
 
-      final rxBits = traffic['rx-bits-per-second'] ?? 0;
-      final txBits = traffic['tx-bits-per-second'] ?? 0;
+      final rxBits = (traffic['rx-bits-per-second'] ?? 0).toDouble();
+      final txBits = (traffic['tx-bits-per-second'] ?? 0).toDouble();
 
       var service = _normalizeText(a['service']).toLowerCase();
       if (service.isEmpty) service = 'pppoe';
@@ -419,10 +425,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
 
     try {
+      // ✅ إصلاح #2 - جلب السرعة: مسح الكاش قبل جلب البيانات لضمان قراءة السرعة الحية دائماً
       widget.routerService!.clearCache();
 
       final secrets = await widget.routerService!.getPppSecrets();
       final rawActive = await widget.routerService!.getPppActive();
+
+      // جلب السرعات الحية لجميع الجلسات المتصلة
       final active = await _attachLiveTrafficToActive(rawActive);
 
       final activeBySession = _buildActiveBySession(active);
@@ -445,6 +454,36 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
+  // ✅ إصلاح #3 - الفرز: تحويل uptime من نص (مثل "2d3h20m5s") إلى ثوانٍ للمقارنة الصحيحة
+  int _parseUptimeToSeconds(String uptime) {
+    if (uptime.trim().isEmpty) return 0;
+
+    int total = 0;
+    final pattern = RegExp(r'(\d+)([wdhms])');
+    for (final match in pattern.allMatches(uptime.toLowerCase())) {
+      final value = int.tryParse(match.group(1) ?? '0') ?? 0;
+      final unit = match.group(2) ?? '';
+      switch (unit) {
+        case 'w':
+          total += value * 7 * 24 * 3600;
+          break;
+        case 'd':
+          total += value * 24 * 3600;
+          break;
+        case 'h':
+          total += value * 3600;
+          break;
+        case 'm':
+          total += value * 60;
+          break;
+        case 's':
+          total += value;
+          break;
+      }
+    }
+    return total;
+  }
+
   List<Map<String, dynamic>> _buildAccounts() {
     final activeBySession = _buildActiveBySession(_active);
 
@@ -458,9 +497,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final isExpired = _isExpired(parsed.expiryDate);
       final isActive = activeEntry != null;
 
-      final rxSpeed = (activeEntry?['rx-speed'] as num?)?.toDouble() ?? 0;
-      final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0;
-      final totalSpeed = (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0;
+      // ✅ جلب السرعة من activeEntry مباشرة بعد تحديثها في _attachLiveTrafficToActive
+      final rxSpeed = (activeEntry?['rx-speed'] as num?)?.toDouble() ?? 0.0;
+      final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0.0;
+      final totalSpeed =
+          (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0.0;
+
+      // ✅ uptime يُجلب من activeEntry للحصول على وقت الاتصال الحالي
+      final uptime = _normalizeText(activeEntry?['uptime']);
 
       String status;
       if (isActive) {
@@ -504,6 +548,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         'rx-speed': rxSpeed,
         'tx-speed': txSpeed,
         'speed-mbps': totalSpeed,
+        // ✅ حفظ uptime من الجلسة الحية مع تحويله لثوانٍ للفرز
+        'uptime': uptime,
+        'uptime-seconds': _parseUptimeToSeconds(uptime),
         'browser-ip': browserIp,
       };
     }).toList();
@@ -512,12 +559,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       'active': 0,
       'offline': 1,
       'disabled': 2,
-      'expired': 3
+      'expired': 3,
     };
 
-    // التعديل رقم 1 ورقم 4: إصلاح إضافة case 'name' وتعديل فرز case 'usage' للحسابات المتصلة حسب السرعة
+    // ✅ إصلاح #4 - الفرز: منتظم وصحيح لجميع الحالات
     switch (_sortBy) {
       case 'status':
+        // فرز حسب الحالة أولاً ثم الاسم أبجدياً داخل كل حالة
         list.sort((a, b) {
           final aOrder = statusOrder[a['status']] ?? 99;
           final bOrder = statusOrder[b['status']] ?? 99;
@@ -527,37 +575,83 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               .compareTo(_normalizeText(b['name']).toLowerCase());
         });
         break;
+
       case 'name':
-        list.sort(
-            (a, b) => (a['name'] ?? '').toString().toLowerCase().compareTo(
-                  (b['name'] ?? '').toString().toLowerCase(),
-                ));
+        // فرز أبجدي بالاسم بغض النظر عن الحالة
+        list.sort((a, b) => _normalizeText(a['name'])
+            .toLowerCase()
+            .compareTo(_normalizeText(b['name']).toLowerCase()));
         break;
+
       case 'uptime':
-        list.sort((a, b) =>
-            _normalizeText(a['uptime']).compareTo(_normalizeText(b['uptime'])));
-        break;
-      case 'usage':
+        // ✅ فرز صحيح: المتصلون أولاً (أطول uptime للأعلى)، ثم غير المتصلين
         list.sort((a, b) {
-          final aRx = (a['rx-speed'] as num?)?.toDouble() ?? 0;
-          final aTx = (a['tx-speed'] as num?)?.toDouble() ?? 0;
+          final aIsActive = a['active'] == true;
+          final bIsActive = b['active'] == true;
 
-          final bRx = (b['rx-speed'] as num?)?.toDouble() ?? 0;
-          final bTx = (b['tx-speed'] as num?)?.toDouble() ?? 0;
+          // المتصلون يظهرون دائماً قبل غير المتصلين
+          if (aIsActive && !bIsActive) return -1;
+          if (!aIsActive && bIsActive) return 1;
 
-          return (bRx + bTx).compareTo(aRx + aTx);
+          if (aIsActive && bIsActive) {
+            // كلاهما متصل: ترتيب تنازلي (أطول وقت اتصال للأعلى)
+            final aSeconds = (a['uptime-seconds'] as int?) ?? 0;
+            final bSeconds = (b['uptime-seconds'] as int?) ?? 0;
+            if (bSeconds != aSeconds) return bSeconds.compareTo(aSeconds);
+          }
+
+          // في حالة التساوي أو كلاهما غير متصل: أبجدي بالاسم
+          return _normalizeText(a['name'])
+              .toLowerCase()
+              .compareTo(_normalizeText(b['name']).toLowerCase());
         });
         break;
-      case 'profile':
-        list.sort((a, b) => _normalizeText(a['profile'])
-            .toLowerCase()
-            .compareTo(_normalizeText(b['profile']).toLowerCase()));
+
+      case 'usage':
+        // ✅ فرز صحيح: المتصلون أولاً بترتيب تنازلي حسب مجموع السرعة، ثم غير المتصلين
+        list.sort((a, b) {
+          final aIsActive = a['active'] == true;
+          final bIsActive = b['active'] == true;
+
+          // المتصلون دائماً أعلى من غير المتصلين
+          if (aIsActive && !bIsActive) return -1;
+          if (!aIsActive && bIsActive) return 1;
+
+          if (aIsActive && bIsActive) {
+            // كلاهما متصل: ترتيب تنازلي بمجموع السرعة (الأعلى استهلاكاً للأعلى)
+            final aTotal = ((a['rx-speed'] as num?)?.toDouble() ?? 0) +
+                ((a['tx-speed'] as num?)?.toDouble() ?? 0);
+            final bTotal = ((b['rx-speed'] as num?)?.toDouble() ?? 0) +
+                ((b['tx-speed'] as num?)?.toDouble() ?? 0);
+            if (bTotal != aTotal) return bTotal.compareTo(aTotal);
+          }
+
+          // في حالة التساوي أو كلاهما غير متصل: أبجدي بالاسم
+          return _normalizeText(a['name'])
+              .toLowerCase()
+              .compareTo(_normalizeText(b['name']).toLowerCase());
+        });
         break;
+
+      case 'profile':
+        // فرز أبجدي بالباقة ثم الاسم عند التساوي
+        list.sort((a, b) {
+          final profileCompare = _normalizeText(a['profile'])
+              .toLowerCase()
+              .compareTo(_normalizeText(b['profile']).toLowerCase());
+          if (profileCompare != 0) return profileCompare;
+          return _normalizeText(a['name'])
+              .toLowerCase()
+              .compareTo(_normalizeText(b['name']).toLowerCase());
+        });
+        break;
+
       default:
         list.sort((a, b) => _normalizeText(a['name'])
             .toLowerCase()
             .compareTo(_normalizeText(b['name']).toLowerCase()));
     }
+
     return list;
   }
 
@@ -918,7 +1012,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     );
   }
 
-  // تم إصلاح الدالة هنا أيضاً بإضافة (_) بدلاً من الأقواس الفارغة لتجنب خطأ الـ Type Assignable الذي ظهر سابقاً
   void _addNewAccount() {
     Navigator.push(
       context,
@@ -1329,6 +1422,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                   items: const [
                     DropdownMenuItem(value: 'status', child: Text('الحالة')),
                     DropdownMenuItem(value: 'name', child: Text('الاسم')),
+                    DropdownMenuItem(
+                        value: 'uptime', child: Text('وقت الاتصال')),
                     DropdownMenuItem(value: 'usage', child: Text('الأعلى سحب')),
                     DropdownMenuItem(value: 'profile', child: Text('الباقة')),
                   ],
