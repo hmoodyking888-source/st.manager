@@ -76,9 +76,12 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   }
 
   /// FIX 1: إصلاح التحقق من حالة التعطيل
-  /// RouterOS يُرجع 'true' أو 'false' كنص، نتحقق من جميع الحالات الممكنة
+  /// RouterOS يُرجع 'true' أو 'false' كنص أو boolean
+  /// نتحقق من جميع الحالات الممكنة مع معالجة null
   bool _isDisabled(Map<String, dynamic> user) {
-    final value = user['disabled']?.toString().toLowerCase().trim();
+    final raw = user['disabled'];
+    if (raw == null) return false;
+    final value = raw.toString().toLowerCase().trim();
     return value == 'true' || value == 'yes' || value == '1';
   }
 
@@ -456,7 +459,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
-  /// FIX 2: منطق الحالة الصحيح
+  /// FIX 2: منطق الحالة الصحيح + IP صحيح + فرز منطقي
   /// - active: موجود في ppp active (متصل فعلاً)
   /// - expired: انتهت صلاحيته (اكسبير) وليس متصلاً
   /// - disabled: تم تعطيله يدوياً وليس متصلاً وليس منتهياً
@@ -488,17 +491,18 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         status = 'offline';
       }
 
-      // استخراج IP من active entry أو من local-address في الـ secret
+      // استخراج IP من active entry أو من secret
       final activeAddress = _normalizeText(activeEntry?['address']);
-      final localAddress = _normalizeText(activeEntry?['local-address']);
+      // FIX: remote-address في الـ secret هو IP العميل الثابت
+      final secretRemoteAddress = _normalizeText(secret['remote-address']);
       final secretLocalAddress = _normalizeText(secret['local-address']);
 
-      // IP للمتصفح: نفضل عنوان الـ active، ثم local-address
+      // IP للمتصفح: نفضل عنوان الـ active (IP العميل الديناميكي)، ثم remote-address
       String browserIp = '';
       if (activeAddress.isNotEmpty) {
         browserIp = activeAddress;
-      } else if (localAddress.isNotEmpty) {
-        browserIp = localAddress;
+      } else if (secretRemoteAddress.isNotEmpty) {
+        browserIp = secretRemoteAddress;
       } else if (secretLocalAddress.isNotEmpty) {
         browserIp = secretLocalAddress;
       }
@@ -527,9 +531,17 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
     switch (_sortBy) {
       case 'status':
-        list.sort((a, b) => (a['status'] ?? '')
-            .toString()
-            .compareTo((b['status'] ?? '').toString()));
+        // FIX: فرز حسب أولوية منطقية: متصل → غير متصل → معطل → منتهي
+        const order = {'active': 0, 'offline': 1, 'disabled': 2, 'expired': 3};
+        list.sort((a, b) {
+          final aOrder = order[a['status']?.toString()] ?? 99;
+          final bOrder = order[b['status']?.toString()] ?? 99;
+          if (aOrder != bOrder) return aOrder.compareTo(bOrder);
+          // ترتيب ثانوي حسب الاسم
+          return (a['name'] ?? '')
+              .toString()
+              .compareTo((b['name'] ?? '').toString());
+        });
         break;
       case 'uptime':
         list.sort((a, b) => (a['uptime'] ?? '')
@@ -717,14 +729,42 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       ip = result;
     }
 
-    final url = Uri.parse('http://$ip/login.html');
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } else {
+    // تنظيف IP - إزالة http:// أو https:// إذا أدخلها المستخدم بالخطأ
+    ip = ip.replaceAll(RegExp(r'^https?://'), '');
+
+    // التحقق من صحة IP بشكل أساسي
+    if (!RegExp(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$').hasMatch(ip)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('لا يمكن فتح: http://$ip/login.html'),
+          content: Text('IP غير صالح: $ip'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final url = Uri.parse('http://$ip/login.html');
+
+    try {
+      // FIX: استخدام launchUrl مباشرة بدلاً من canLaunchUrl (غير موثوق في Android 11+)
+      final launched = await launchUrl(
+        url,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تعذر فتح المتصفح: http://$ip/login.html'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('خطأ في فتح المتصفح: $e'),
           backgroundColor: Colors.red,
         ),
       );
