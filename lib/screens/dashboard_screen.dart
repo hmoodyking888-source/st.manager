@@ -109,13 +109,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     bool startsWithAny(List<String> prefixes) => prefixes.any(
         (p) => name.startsWith(p) || type.startsWith(p) || kind.startsWith(p));
 
-    return startsWithAny([
-      'ether',
-      'bridge',
-      'sfp',
-      'wlan',
-      'bond',
-    ]);
+    return startsWithAny(['ether', 'bridge', 'sfp', 'wlan', 'bond']);
   }
 
   Future<void> _loadInterfaces() async {
@@ -134,7 +128,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         setState(() {
           _availableInterfaces = names;
           _interfaceCount = names.length;
-
           if (!_availableInterfaces.contains(_selectedInterface)) {
             _selectedInterface = _availableInterfaces.first;
           }
@@ -199,7 +192,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
           return temp;
         }
       }
-
       if (item.containsKey('temperature')) {
         double? temp = double.tryParse(item['temperature'].toString());
         if (temp != null) {
@@ -213,7 +205,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   double _parseVoltage(List<Map<String, dynamic>> health) {
     if (health.isEmpty) return 0;
-
     final direct = double.tryParse(health.first['voltage']?.toString() ?? '');
     if (direct != null && direct > 0) return direct;
 
@@ -239,21 +230,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('اختر الواجهة'),
+        backgroundColor: AppTheme.semiBlack,
+        title:
+            const Text('اختر الواجهة', style: TextStyle(color: Colors.white)),
         content: DropdownButtonFormField<String>(
           value: _selectedInterface,
           isExpanded: true,
+          dropdownColor: AppTheme.semiBlack,
+          style: const TextStyle(color: Colors.white),
           items: _availableInterfaces
-              .map(
-                (e) => DropdownMenuItem<String>(
-                  value: e,
-                  child: Text(e),
-                ),
-              )
+              .map((e) => DropdownMenuItem<String>(
+                    value: e,
+                    child: Text(e),
+                  ))
               .toList(),
           onChanged: (val) {
             if (val == null) return;
-
             setState(() => _selectedInterface = val);
             _speedSubscription?.cancel();
             _speedSubscription = _routerService!
@@ -272,9 +264,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _toggleSpeedView() {
-    setState(() => _showRxMain = !_showRxMain);
-  }
+  void _toggleSpeedView() => setState(() => _showRxMain = !_showRxMain);
 
   String _formatSpeed(double speed) {
     if (speed >= 1000) return '${(speed / 1000).toStringAsFixed(1)} Gbps';
@@ -282,10 +272,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '${(speed * 1000).toStringAsFixed(0)} Kbps';
   }
 
+  // ──────────────────────────────────────────
+  // الشريط السفلي - التنقل
+  // ──────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    final surfaceText = Theme.of(context).colorScheme.onSurface;
-
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -312,8 +303,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: _buildBody(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: AppTheme.semiBlack,
+        selectedItemColor: AppTheme.gold,
+        unselectedItemColor: Colors.white38,
+        selectedFontSize: 11,
+        unselectedFontSize: 10,
         onTap: (index) {
           if (index == 4) {
+            // الإعدادات: نفتحها كصفحة منفصلة ثم نرجع للرئيسية
             Navigator.pushNamed(context, '/settings').then((_) {
               if (mounted) setState(() => _currentIndex = 0);
             });
@@ -321,15 +319,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
           setState(() => _currentIndex = index);
         },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'الرئيسية'),
+        items: [
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.home_rounded),
+            label: 'الرئيسية',
+          ),
+          // ✅ البرودباند مباشرة في الشريط
           BottomNavigationBarItem(
-              icon: Icon(Icons.people), label: 'المستخدمون'),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.router_rounded),
+                if (_pppActive > 0)
+                  Positioned(
+                    top: -4,
+                    right: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: AppTheme.greenOnline,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '$_pppActive',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: 'برودباند',
+          ),
+          // ✅ الهوتسبوت مباشرة في الشريط
           BottomNavigationBarItem(
-              icon: Icon(Icons.notifications), label: 'الاشعارات'),
-          BottomNavigationBarItem(icon: Icon(Icons.report), label: 'التقارير'),
-          BottomNavigationBarItem(
-              icon: Icon(Icons.settings), label: 'الإعدادات'),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.wifi_rounded),
+                if (_activeUsers > 0)
+                  Positioned(
+                    top: -4,
+                    right: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '$_activeUsers',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: 'هوتسبوت',
+          ),
+          // ✅ الإشعارات
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.notifications_rounded),
+            label: 'الإشعارات',
+          ),
+          // ✅ الإعدادات
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.settings_rounded),
+            label: 'الإعدادات',
+          ),
         ],
       ),
     );
@@ -339,31 +401,286 @@ class _DashboardScreenState extends State<DashboardScreen> {
     switch (_currentIndex) {
       case 0:
         return _buildDashboardContent();
+
+      // ✅ البرودباند - شاشة كاملة مدمجة
       case 1:
-        return Center(
-          child: Text('قسم المستخدمون',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        );
+        return PppActiveScreen(routerService: _routerService);
+
+      // ✅ الهوتسبوت - شاشة كاملة مدمجة
       case 2:
-        return Center(
-          child: Text('الإشعارات',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        );
+        return HotspotActiveUsersScreen(routerService: _routerService);
+
+      // ✅ الإشعارات - شاشة مخصصة
       case 3:
-        return Center(
-          child: Text('التقارير',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        );
-      case 4:
-        return Center(
-          child: Text('الإعدادات',
-              style: TextStyle(color: Theme.of(context).colorScheme.onSurface)),
-        );
+        return _buildNotificationsTab();
+
+      // ✅ الإعدادات - لا يصل هنا لأنه يُعالج في onTap
       default:
         return _buildDashboardContent();
     }
   }
 
+  // ──────────────────────────────────────────
+  // ✅ تبويب الإشعارات
+  // ──────────────────────────────────────────
+  Widget _buildNotificationsTab() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    // قائمة أحداث تُبنى من البيانات الحية
+    final events = <Map<String, dynamic>>[];
+
+    if (_pppActive > 0) {
+      events.add({
+        'icon': Icons.router_rounded,
+        'color': AppTheme.greenOnline,
+        'title': 'برودباند نشط',
+        'body': '$_pppActive مستخدم متصل من أصل $_pppTotal',
+        'time': 'الآن',
+      });
+    }
+
+    if (_activeUsers > 0) {
+      events.add({
+        'icon': Icons.wifi_rounded,
+        'color': Colors.blue,
+        'title': 'هوتسبوت نشط',
+        'body': '$_activeUsers مستخدم متصل من أصل $_totalUsers',
+        'time': 'الآن',
+      });
+    }
+
+    if (_cpuLoad > 80) {
+      events.add({
+        'icon': Icons.warning_amber_rounded,
+        'color': Colors.orange,
+        'title': 'تحذير: حمل معالج مرتفع',
+        'body': 'المعالج عند ${_cpuLoad.toStringAsFixed(1)}%',
+        'time': 'الآن',
+      });
+    }
+
+    if (_temperature > 70) {
+      events.add({
+        'icon': Icons.thermostat,
+        'color': Colors.red,
+        'title': 'تحذير: درجة حرارة مرتفعة',
+        'body': 'الحرارة عند ${_temperature.toStringAsFixed(1)}°C',
+        'time': 'الآن',
+      });
+    }
+
+    return Column(
+      children: [
+        // ── رأس التبويب ──
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          color: AppTheme.semiBlack,
+          child: Row(
+            children: [
+              const Icon(Icons.notifications_rounded,
+                  color: AppTheme.gold, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'الإشعارات والتنبيهات',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold),
+              ),
+              const Spacer(),
+              if (events.isNotEmpty)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.gold,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '${events.length}',
+                    style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+            ],
+          ),
+        ),
+
+        // ── الإحصائيات السريعة ──
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              _buildStatPill(Icons.router_rounded, AppTheme.greenOnline,
+                  '$_pppActive/$_pppTotal', 'برودباند'),
+              const SizedBox(width: 8),
+              _buildStatPill(Icons.wifi_rounded, Colors.blue,
+                  '$_activeUsers/$_totalUsers', 'هوتسبوت'),
+              const SizedBox(width: 8),
+              _buildStatPill(
+                  Icons.memory_rounded,
+                  _cpuLoad > 80 ? Colors.red : Colors.green,
+                  '${_cpuLoad.toStringAsFixed(0)}%',
+                  'CPU'),
+              const SizedBox(width: 8),
+              _buildStatPill(
+                  Icons.thermostat,
+                  _temperature > 70 ? Colors.red : Colors.green,
+                  '${_temperature.toStringAsFixed(0)}°',
+                  'حرارة'),
+            ],
+          ),
+        ),
+
+        const Divider(height: 1, color: Colors.white12),
+
+        // ── قائمة الأحداث ──
+        Expanded(
+          child: events.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle_outline,
+                          color: AppTheme.greenOnline, size: 48),
+                      const SizedBox(height: 12),
+                      Text(
+                        'كل شيء يعمل بشكل طبيعي',
+                        style: TextStyle(
+                            color: onSurface.withOpacity(0.6), fontSize: 14),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: events.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) {
+                    final e = events[i];
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: (e['color'] as Color).withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: (e['color'] as Color).withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: (e['color'] as Color).withOpacity(0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              e['icon'] as IconData,
+                              color: e['color'] as Color,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  e['title'] as String,
+                                  style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  e['body'] as String,
+                                  style: TextStyle(
+                                      color: onSurface.withOpacity(0.6),
+                                      fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            e['time'] as String,
+                            style: const TextStyle(
+                                color: Colors.white38, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+
+        // ── تلميح إعداد التلجرام ──
+        Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF29B6F6).withOpacity(0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF29B6F6).withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.telegram, color: Color(0xFF29B6F6), size: 20),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'فعّل بوت التلجرام لاستقبال الإشعارات تلقائياً',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Scaffold.of(context).openDrawer(),
+                child: const Text('إعداد',
+                    style: TextStyle(
+                        color: Color(0xFF29B6F6),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatPill(
+      IconData icon, Color color, String value, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(height: 4),
+            Text(value,
+                style: TextStyle(
+                    color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+            Text(label,
+                style: const TextStyle(color: Colors.white38, fontSize: 9)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ──────────────────────────────────────────
+  // محتوى الداشبورد الرئيسي
+  // ──────────────────────────────────────────
   Widget _buildDashboardContent() {
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
@@ -420,29 +737,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
             children: [
               _buildMenuButtonWithCounter(
                 'هوتسبوت',
-                Icons.wifi_password,
+                Icons.wifi_rounded,
                 '$_totalUsers/$_activeUsers',
-                () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => HotspotActiveUsersScreen(
-                      routerService: _routerService,
-                    ),
-                  ),
-                ),
+                () => setState(() => _currentIndex = 2),
               ),
               _buildMenuButtonWithCounter(
                 'برودباند',
-                Icons.router,
+                Icons.router_rounded,
                 '$_pppTotal/$_pppActive',
-                () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PppActiveScreen(
-                      routerService: _routerService,
-                    ),
-                  ),
-                ),
+                () => setState(() => _currentIndex = 1),
               ),
               _buildMenuButton('بطاقات', Icons.credit_card, () {
                 Navigator.push(
@@ -456,9 +759,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => BackupRestoreScreen(
-                      routerService: _routerService,
-                    ),
+                    builder: (_) =>
+                        BackupRestoreScreen(routerService: _routerService),
                   ),
                 );
               }),
@@ -486,9 +788,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => SimpleQueueScreen(
-                      routerService: _routerService,
-                    ),
+                    builder: (_) =>
+                        SimpleQueueScreen(routerService: _routerService),
                   ),
                 );
               }),
@@ -496,9 +797,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => UserManagerScreen(
-                      routerService: _routerService,
-                    ),
+                    builder: (_) =>
+                        UserManagerScreen(routerService: _routerService),
                   ),
                 );
               }),
@@ -520,11 +820,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            AppTheme.black,
-            AppTheme.darkGrey,
-            AppTheme.semiBlack,
-          ],
+          colors: [AppTheme.black, AppTheme.darkGrey, AppTheme.semiBlack],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -550,17 +846,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
               const Text(
                 'السرعة اللحظية',
                 style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500,
-                ),
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500),
               ),
-              Text(
-                _selectedInterface ?? '---',
-                style: const TextStyle(
-                  color: AppTheme.gold,
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
+              GestureDetector(
+                onTap: _showInterfacePicker,
+                child: Row(
+                  children: [
+                    Text(
+                      _selectedInterface ?? '---',
+                      style: const TextStyle(
+                          color: AppTheme.gold,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.expand_more,
+                        color: AppTheme.gold, size: 16),
+                  ],
                 ),
               ),
             ],
@@ -583,10 +887,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Text(
                         primaryLabel,
                         style: const TextStyle(
-                          color: AppTheme.gold,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
+                            color: AppTheme.gold,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
                       FittedBox(
@@ -595,20 +898,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         child: Text(
                           _formatSpeed(primary),
                           style: TextStyle(
-                            color: onSurface,
-                            fontSize: 34,
-                            fontWeight: FontWeight.bold,
-                            height: 1,
-                          ),
+                              color: onSurface,
+                              fontSize: 34,
+                              fontWeight: FontWeight.bold,
+                              height: 1),
                         ),
                       ),
                       const SizedBox(height: 6),
                       Text(
                         'الأولوية الآن: $primaryLabel',
                         style: TextStyle(
-                          color: onSurface.withOpacity(0.72),
-                          fontSize: 12,
-                        ),
+                            color: onSurface.withOpacity(0.72), fontSize: 12),
                       ),
                     ],
                   ),
@@ -626,10 +926,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             horizontal: 8, vertical: 10),
                         minimumSize: const Size.fromHeight(40),
                       ),
-                      child: Icon(
-                        _showRxMain ? Icons.swap_vert : Icons.swap_vert,
-                        size: 18,
-                      ),
+                      child: const Icon(Icons.swap_vert, size: 18),
                     ),
                     const SizedBox(height: 10),
                     Container(
@@ -646,21 +943,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                           Text(
                             secondaryLabel,
                             style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                            ),
+                                color: Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(height: 6),
                           Text(
                             _formatSpeed(secondary),
                             textAlign: TextAlign.center,
                             style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              height: 1,
-                            ),
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                height: 1),
                           ),
                         ],
                       ),
@@ -683,22 +978,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text(
-              title,
-              style: TextStyle(
-                color: AppTheme.gold,
-                fontSize: 12,
-              ),
-            ),
+            Text(title,
+                style: const TextStyle(color: AppTheme.gold, fontSize: 12)),
             const SizedBox(height: 4),
-            Text(
-              value,
-              style: TextStyle(
-                color: onSurface,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
+            Text(value,
+                style: TextStyle(
+                    color: onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
           ],
         ),
       ),
@@ -715,11 +1002,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Icon(icon, color: AppTheme.gold, size: 28),
             const SizedBox(height: 6),
-            Text(
-              label,
-              style: TextStyle(color: onSurface, fontSize: 12),
-              textAlign: TextAlign.center,
-            ),
+            Text(label,
+                style: TextStyle(color: onSurface, fontSize: 12),
+                textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -741,19 +1026,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
           children: [
             Icon(icon, color: AppTheme.gold, size: 28),
             const SizedBox(height: 2),
-            Text(
-              label,
-              style: TextStyle(color: onSurface, fontSize: 12),
-              textAlign: TextAlign.center,
-            ),
+            Text(label,
+                style: TextStyle(color: onSurface, fontSize: 12),
+                textAlign: TextAlign.center),
             const SizedBox(height: 2),
-            Text(
-              counter,
-              style: const TextStyle(
-                color: AppTheme.greenOnline,
-                fontSize: 10,
-              ),
-            ),
+            Text(counter,
+                style:
+                    const TextStyle(color: AppTheme.greenOnline, fontSize: 10)),
           ],
         ),
       ),
