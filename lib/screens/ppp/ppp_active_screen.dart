@@ -37,6 +37,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   List<Map<String, dynamic>> _secrets = [];
   List<Map<String, dynamic>> _active = [];
+  List<Map<String, dynamic>> _cachedAccounts = [];
 
   String _searchQuery = '';
   String _sortBy = 'status';
@@ -119,9 +120,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       if (token.toLowerCase().startsWith('exp:')) {
         final rawDate = token.substring(4).trim();
         final parsed = DateTime.tryParse(rawDate);
-        if (parsed != null) {
-          expiryDate = parsed;
-        }
+        if (parsed != null) expiryDate = parsed;
         continue;
       }
 
@@ -157,22 +156,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   String _sessionKey(Map<String, dynamic> item) {
     final id = _normalizeText(item['.id']);
     if (id.isNotEmpty) return id;
-
     final name = _normalizeText(item['name']);
     if (name.isNotEmpty) return name;
-
     final user = _normalizeText(item['user']);
     if (user.isNotEmpty) return user;
-
-    final username = _normalizeText(item['username']);
-    if (username.isNotEmpty) return username;
-
     final caller = _normalizeText(item['caller-id']);
     if (caller.isNotEmpty) return caller;
-
     final address = _normalizeText(item['address']);
     if (address.isNotEmpty) return address;
-
     return 'session-${item.hashCode}';
   }
 
@@ -183,9 +174,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       _normalizeText(item['username']),
       _normalizeText(item['caller-id']),
       _normalizeText(item['address']),
-      _normalizeText(item['service']),
     ].where((e) => e.isNotEmpty).toList();
-
     return keys.map((e) => e.toLowerCase()).toSet().toList(growable: false);
   }
 
@@ -204,26 +193,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     Map<String, Map<String, dynamic>> activeBySession,
   ) {
     final secretKeys = _candidateKeys(secret);
-
     for (final entry in activeBySession.entries) {
       final activeKeys = _candidateKeys(entry.value);
       for (final key in secretKeys) {
-        if (activeKeys.contains(key)) {
-          return entry.key;
-        }
+        if (activeKeys.contains(key)) return entry.key;
       }
     }
-
     return null;
   }
 
   Future<bool> _shouldRunExpirationCheck() async {
     final now = DateTime.now();
     final todayAtNoon = DateTime(now.year, now.month, now.day, 12);
-
-    if (now.isBefore(todayAtNoon)) {
-      return false;
-    }
+    if (now.isBefore(todayAtNoon)) return false;
 
     if (_lastExpirationCheckIso != null) {
       final last = DateTime.tryParse(_lastExpirationCheckIso!);
@@ -242,16 +224,15 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   Future<void> _ensureExpiredProfile() async {
     if (widget.routerService == null) return;
-
     final profiles = await widget.routerService!.sendCommand(
       '/ppp/profile/print',
       useCache: false,
     );
-
-    final existing = profiles.where((p) {
-      return _normalizeText(p['name']).toLowerCase() ==
-          _expiredProfileName.toLowerCase();
-    }).toList();
+    final existing = profiles
+        .where((p) =>
+            _normalizeText(p['name']).toLowerCase() ==
+            _expiredProfileName.toLowerCase())
+        .toList();
 
     if (existing.isEmpty) {
       await widget.routerService!.sendCommand(
@@ -270,10 +251,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     if (profileId.isNotEmpty) {
       await widget.routerService!.sendCommand(
         '/ppp/profile/set',
-        params: {
-          'numbers': profileId,
-          'rate-limit': _expiredRateLimit,
-        },
+        params: {'numbers': profileId, 'rate-limit': _expiredRateLimit},
       );
     }
   }
@@ -283,7 +261,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     Map<String, Map<String, dynamic>> activeBySession,
   ) async {
     if (widget.routerService == null) return false;
-
     bool changed = false;
     await _ensureExpiredProfile();
 
@@ -291,10 +268,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final commentRaw = secret['comment']?.toString() ?? '';
       final parsed = _parseComment(commentRaw);
       final expiryDate = parsed.expiryDate;
-
-      if (expiryDate == null || !_isExpired(expiryDate)) {
-        continue;
-      }
+      if (expiryDate == null || !_isExpired(expiryDate)) continue;
 
       final currentProfile = _normalizeText(secret['profile']);
       final secretId = _normalizeText(secret['.id']);
@@ -303,10 +277,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           secretId.isNotEmpty) {
         await widget.routerService!.sendCommand(
           '/ppp/secret/set',
-          params: {
-            'numbers': secretId,
-            'profile': _expiredProfileName,
-          },
+          params: {'numbers': secretId, 'profile': _expiredProfileName},
         );
         secret['profile'] = _expiredProfileName;
         changed = true;
@@ -326,90 +297,80 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         }
       }
     }
-
     return changed;
   }
 
-  Future<Map<String, double>> _getTrafficForInterface(
-      String interfaceName) async {
-    if (widget.routerService == null || interfaceName.trim().isEmpty) {
-      return {
-        'rx-bits-per-second': 0,
-        'tx-bits-per-second': 0,
-      };
+  // ========================================================
+  // ✅ إصلاح جذري للسرعة:
+  // RouterOS يعطي اسم الـ interface الفعلي في حقل 'name'
+  // من /ppp/active/print مباشرة (مثل: pppoe-1101)
+  // نستخدمه مباشرة بدون بناء أي اسم
+  // ========================================================
+  Future<Map<String, double>> _getSessionTraffic(
+      Map<String, dynamic> activeSession) async {
+    if (widget.routerService == null) {
+      return {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
+    }
+
+    // الاسم الفعلي للـ interface من الـ active session مباشرة
+    // RouterOS يضعه في حقل 'name' بصيغة pppoe-USERNAME
+    final ifName = _normalizeText(activeSession['name']);
+    if (ifName.isEmpty) {
+      return {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
     }
 
     try {
-      return await widget.routerService!
-          .getPortCurrentRate(interfaceName.trim());
+      // نستخدم sendCommand مباشرة بدون cache لضمان البيانات الحية
+      final result = await widget.routerService!.sendCommand(
+        '/interface/monitor-traffic',
+        params: {
+          'interface': ifName,
+          'once': '',
+        },
+        useCache: false,
+      );
+
+      if (result.isNotEmpty) {
+        final row = result.first;
+        final rxBits =
+            double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ?? 0;
+        final txBits =
+            double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ?? 0;
+        return {
+          'rx-bits-per-second': rxBits,
+          'tx-bits-per-second': txBits,
+        };
+      }
     } catch (_) {
-      return {
-        'rx-bits-per-second': 0,
-        'tx-bits-per-second': 0,
-      };
+      // interface غير موجود أو خطأ - نرجع صفر
     }
+
+    return {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
   }
 
-  // ✅ إصلاح #1 - جلب السرعة: إزالة useCache وضمان جلب السرعة في كل دورة بشكل صحيح
   Future<List<Map<String, dynamic>>> _attachLiveTrafficToActive(
     List<Map<String, dynamic>> active,
   ) async {
-    // جلب جميع السرعات بالتوازي لتسريع العملية
-    final trafficFutures = active.map((a) async {
-      var service = _normalizeText(a['service']).toLowerCase();
-      if (service.isEmpty) service = 'pppoe';
-
-      // ✅ التحقق من name أولاً ثم user للحصول على اسم المستخدم الصحيح
-      final username = _normalizeText(a['name']).isNotEmpty
-          ? _normalizeText(a['name'])
-          : _normalizeText(a['user']);
-
-      if (username.isEmpty) {
-        return MapEntry(_sessionKey(a), <String, double>{
-          'rx-bits-per-second': 0,
-          'tx-bits-per-second': 0,
-        });
-      }
-
-      final interfaceName = '<$service-$username>';
-
-      try {
-        final traffic = await _getTrafficForInterface(interfaceName);
+    // جلب جميع السرعات بالتوازي دفعة واحدة
+    final trafficResults = await Future.wait(
+      active.map((a) async {
+        final traffic = await _getSessionTraffic(a);
         return MapEntry(_sessionKey(a), traffic);
-      } catch (_) {
-        return MapEntry(_sessionKey(a), <String, double>{
-          'rx-bits-per-second': 0,
-          'tx-bits-per-second': 0,
-        });
-      }
-    });
-
-    // انتظار جميع نتائج السرعة دفعة واحدة
-    final trafficResults = await Future.wait(trafficFutures);
-    final trafficBySession = Map<String, Map<String, double>>.fromEntries(
-      trafficResults,
+      }),
     );
+
+    final trafficBySession =
+        Map<String, Map<String, double>>.fromEntries(trafficResults);
 
     return active.map((a) {
       final traffic = trafficBySession[_sessionKey(a)] ??
-          {
-            'rx-bits-per-second': 0.0,
-            'tx-bits-per-second': 0.0,
-          };
+          {'rx-bits-per-second': 0.0, 'tx-bits-per-second': 0.0};
 
       final rxBits = (traffic['rx-bits-per-second'] ?? 0).toDouble();
       final txBits = (traffic['tx-bits-per-second'] ?? 0).toDouble();
 
-      var service = _normalizeText(a['service']).toLowerCase();
-      if (service.isEmpty) service = 'pppoe';
-
-      final username = _normalizeText(a['name']).isNotEmpty
-          ? _normalizeText(a['name'])
-          : _normalizeText(a['user']);
-
       return {
         ...a,
-        'traffic-interface': '<$service-$username>',
         'rx-speed': rxBits / 1000000,
         'tx-speed': txBits / 1000000,
         'speed-mbps': (rxBits + txBits) / 1000000,
@@ -425,15 +386,21 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
 
     try {
-      // ✅ إصلاح #2 - جلب السرعة: مسح الكاش قبل جلب البيانات لضمان قراءة السرعة الحية دائماً
+      // ✅ مسح الكاش لضمان جلب secrets و active جديدة في كل دورة
       widget.routerService!.clearCache();
 
-      final secrets = await widget.routerService!.getPppSecrets();
-      final rawActive = await widget.routerService!.getPppActive();
+      // ✅ جلب secrets و active بدون cache (بعد clearCache ستُجلب من الراوتر مباشرة)
+      final secrets = await widget.routerService!.sendCommand(
+        '/ppp/secret/print',
+        useCache: false,
+      );
+      final rawActive = await widget.routerService!.sendCommand(
+        '/ppp/active/print',
+        useCache: false,
+      );
 
-      // جلب السرعات الحية لجميع الجلسات المتصلة
+      // جلب السرعات الحية لكل الجلسات المتصلة
       final active = await _attachLiveTrafficToActive(rawActive);
-
       final activeBySession = _buildActiveBySession(active);
 
       if (await _shouldRunExpirationCheck()) {
@@ -442,52 +409,27 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
       if (!mounted) return;
 
+      // ✅ بناء الحسابات مرة واحدة وحفظها في _cachedAccounts
+      final built = _computeAccounts(secrets, activeBySession.values.toList());
+
       setState(() {
         _secrets = secrets;
         _active = activeBySession.values.toList();
+        _cachedAccounts = built;
         _loading = false;
       });
     } catch (_) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  // ✅ إصلاح #3 - الفرز: تحويل uptime من نص (مثل "2d3h20m5s") إلى ثوانٍ للمقارنة الصحيحة
-  int _parseUptimeToSeconds(String uptime) {
-    if (uptime.trim().isEmpty) return 0;
+  List<Map<String, dynamic>> _computeAccounts(
+    List<Map<String, dynamic>> secrets,
+    List<Map<String, dynamic>> activeList,
+  ) {
+    final activeBySession = _buildActiveBySession(activeList);
 
-    int total = 0;
-    final pattern = RegExp(r'(\d+)([wdhms])');
-    for (final match in pattern.allMatches(uptime.toLowerCase())) {
-      final value = int.tryParse(match.group(1) ?? '0') ?? 0;
-      final unit = match.group(2) ?? '';
-      switch (unit) {
-        case 'w':
-          total += value * 7 * 24 * 3600;
-          break;
-        case 'd':
-          total += value * 24 * 3600;
-          break;
-        case 'h':
-          total += value * 3600;
-          break;
-        case 'm':
-          total += value * 60;
-          break;
-        case 's':
-          total += value;
-          break;
-      }
-    }
-    return total;
-  }
-
-  List<Map<String, dynamic>> _buildAccounts() {
-    final activeBySession = _buildActiveBySession(_active);
-
-    final list = _secrets.map((secret) {
+    final list = secrets.map((secret) {
       final sessionKey = _matchActiveSessionKey(secret, activeBySession);
       final activeEntry =
           (sessionKey != null) ? activeBySession[sessionKey] : null;
@@ -495,17 +437,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
       final isDisabled = _isDisabled(secret);
       final isExpired = _isExpired(parsed.expiryDate);
+
+      // ✅ isActive = فقط إذا وُجد له record في /ppp/active/print
       final isActive = activeEntry != null;
 
-      // ✅ جلب السرعة من activeEntry مباشرة بعد تحديثها في _attachLiveTrafficToActive
       final rxSpeed = (activeEntry?['rx-speed'] as num?)?.toDouble() ?? 0.0;
       final txSpeed = (activeEntry?['tx-speed'] as num?)?.toDouble() ?? 0.0;
       final totalSpeed =
           (activeEntry?['speed-mbps'] as num?)?.toDouble() ?? 0.0;
-
-      // ✅ uptime يُجلب من activeEntry للحصول على وقت الاتصال الحالي
       final uptime = _normalizeText(activeEntry?['uptime']);
 
+      // ✅ ترتيب الأولوية: active أولاً، ثم expired، ثم disabled، ثم offline
+      // حساب معطل ومتصل = active
+      // حساب منتهي ومتصل = active (لأنه فعلاً متصل وإن كان منتهياً)
       String status;
       if (isActive) {
         status = 'active';
@@ -548,13 +492,44 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         'rx-speed': rxSpeed,
         'tx-speed': txSpeed,
         'speed-mbps': totalSpeed,
-        // ✅ حفظ uptime من الجلسة الحية مع تحويله لثوانٍ للفرز
         'uptime': uptime,
         'uptime-seconds': _parseUptimeToSeconds(uptime),
         'browser-ip': browserIp,
       };
     }).toList();
 
+    return list;
+  }
+
+  int _parseUptimeToSeconds(String uptime) {
+    if (uptime.trim().isEmpty) return 0;
+    int total = 0;
+    final pattern = RegExp(r'(\d+)([wdhms])');
+    for (final match in pattern.allMatches(uptime.toLowerCase())) {
+      final value = int.tryParse(match.group(1) ?? '0') ?? 0;
+      final unit = match.group(2) ?? '';
+      switch (unit) {
+        case 'w':
+          total += value * 7 * 24 * 3600;
+          break;
+        case 'd':
+          total += value * 24 * 3600;
+          break;
+        case 'h':
+          total += value * 3600;
+          break;
+        case 'm':
+          total += value * 60;
+          break;
+        case 's':
+          total += value;
+          break;
+      }
+    }
+    return total;
+  }
+
+  List<Map<String, dynamic>> _sortAccounts(List<Map<String, dynamic>> list) {
     const statusOrder = {
       'active': 0,
       'offline': 1,
@@ -562,10 +537,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       'expired': 3,
     };
 
-    // ✅ إصلاح #4 - الفرز: منتظم وصحيح لجميع الحالات
     switch (_sortBy) {
       case 'status':
-        // فرز حسب الحالة أولاً ثم الاسم أبجدياً داخل كل حالة
         list.sort((a, b) {
           final aOrder = statusOrder[a['status']] ?? 99;
           final bOrder = statusOrder[b['status']] ?? 99;
@@ -577,30 +550,22 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         break;
 
       case 'name':
-        // فرز أبجدي بالاسم بغض النظر عن الحالة
         list.sort((a, b) => _normalizeText(a['name'])
             .toLowerCase()
             .compareTo(_normalizeText(b['name']).toLowerCase()));
         break;
 
       case 'uptime':
-        // ✅ فرز صحيح: المتصلون أولاً (أطول uptime للأعلى)، ثم غير المتصلين
         list.sort((a, b) {
-          final aIsActive = a['active'] == true;
-          final bIsActive = b['active'] == true;
-
-          // المتصلون يظهرون دائماً قبل غير المتصلين
-          if (aIsActive && !bIsActive) return -1;
-          if (!aIsActive && bIsActive) return 1;
-
-          if (aIsActive && bIsActive) {
-            // كلاهما متصل: ترتيب تنازلي (أطول وقت اتصال للأعلى)
-            final aSeconds = (a['uptime-seconds'] as int?) ?? 0;
-            final bSeconds = (b['uptime-seconds'] as int?) ?? 0;
-            if (bSeconds != aSeconds) return bSeconds.compareTo(aSeconds);
+          final aActive = a['active'] == true;
+          final bActive = b['active'] == true;
+          if (aActive && !bActive) return -1;
+          if (!aActive && bActive) return 1;
+          if (aActive && bActive) {
+            final diff = ((b['uptime-seconds'] as int?) ?? 0)
+                .compareTo((a['uptime-seconds'] as int?) ?? 0);
+            if (diff != 0) return diff;
           }
-
-          // في حالة التساوي أو كلاهما غير متصل: أبجدي بالاسم
           return _normalizeText(a['name'])
               .toLowerCase()
               .compareTo(_normalizeText(b['name']).toLowerCase());
@@ -608,25 +573,18 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         break;
 
       case 'usage':
-        // ✅ فرز صحيح: المتصلون أولاً بترتيب تنازلي حسب مجموع السرعة، ثم غير المتصلين
         list.sort((a, b) {
-          final aIsActive = a['active'] == true;
-          final bIsActive = b['active'] == true;
-
-          // المتصلون دائماً أعلى من غير المتصلين
-          if (aIsActive && !bIsActive) return -1;
-          if (!aIsActive && bIsActive) return 1;
-
-          if (aIsActive && bIsActive) {
-            // كلاهما متصل: ترتيب تنازلي بمجموع السرعة (الأعلى استهلاكاً للأعلى)
+          final aActive = a['active'] == true;
+          final bActive = b['active'] == true;
+          if (aActive && !bActive) return -1;
+          if (!aActive && bActive) return 1;
+          if (aActive && bActive) {
             final aTotal = ((a['rx-speed'] as num?)?.toDouble() ?? 0) +
                 ((a['tx-speed'] as num?)?.toDouble() ?? 0);
             final bTotal = ((b['rx-speed'] as num?)?.toDouble() ?? 0) +
                 ((b['tx-speed'] as num?)?.toDouble() ?? 0);
             if (bTotal != aTotal) return bTotal.compareTo(aTotal);
           }
-
-          // في حالة التساوي أو كلاهما غير متصل: أبجدي بالاسم
           return _normalizeText(a['name'])
               .toLowerCase()
               .compareTo(_normalizeText(b['name']).toLowerCase());
@@ -634,12 +592,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         break;
 
       case 'profile':
-        // فرز أبجدي بالباقة ثم الاسم عند التساوي
         list.sort((a, b) {
-          final profileCompare = _normalizeText(a['profile'])
+          final pc = _normalizeText(a['profile'])
               .toLowerCase()
               .compareTo(_normalizeText(b['profile']).toLowerCase());
-          if (profileCompare != 0) return profileCompare;
+          if (pc != 0) return pc;
           return _normalizeText(a['name'])
               .toLowerCase()
               .compareTo(_normalizeText(b['name']).toLowerCase());
@@ -651,12 +608,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             .toLowerCase()
             .compareTo(_normalizeText(b['name']).toLowerCase()));
     }
-
     return list;
   }
 
+  // ✅ filtered يطبق الفرز + الفلتر + البحث على _cachedAccounts
   List<Map<String, dynamic>> get filtered {
-    var result = _buildAccounts();
+    var result =
+        _sortAccounts(List<Map<String, dynamic>>.from(_cachedAccounts));
 
     if (_filter != 'all') {
       result = result.where((u) => u['status'] == _filter).toList();
@@ -680,9 +638,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return result;
   }
 
-  int _countStatus(List<Map<String, dynamic>> list, String filterType) {
-    if (filterType == 'all') return list.length;
-    return list.where((u) => u['status'] == filterType).length;
+  // ✅ الأرقام من _cachedAccounts الكاملة - استدعاء واحد بدون إعادة حساب
+  int _countStatus(String filterType) {
+    if (_cachedAccounts.isEmpty) return 0;
+    if (filterType == 'all') return _cachedAccounts.length;
+    return _cachedAccounts.where((u) => u['status'] == filterType).length;
   }
 
   String _statusLabel(String status) {
@@ -719,30 +679,21 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     try {
       await widget.routerService!.sendCommand(
         '/ppp/profile/add',
-        params: {
-          'name': 'Speed',
-          'rate-limit': '',
-          'only-one': 'no',
-        },
+        params: {'name': 'Speed', 'rate-limit': '', 'only-one': 'no'},
       );
     } catch (_) {}
   }
 
   Future<void> _applySpeedProfile(Map<String, dynamic> user) async {
     if (widget.routerService == null) return;
-
     final secretId = user['.id']?.toString() ?? '';
     final activeId = user['active-id']?.toString() ?? '';
-
     await _ensureSpeedProfile();
 
     if (secretId.isNotEmpty) {
       await widget.routerService!.sendCommand(
         '/ppp/secret/set',
-        params: {
-          'numbers': secretId,
-          'profile': 'Speed',
-        },
+        params: {'numbers': secretId, 'profile': 'Speed'},
       );
     }
 
@@ -752,21 +703,17 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         params: {'numbers': activeId},
       );
     }
-
     _load();
   }
 
   Future<void> _deleteAccount(Map<String, dynamic> user) async {
     if (widget.routerService == null) return;
-
     final id = user['.id']?.toString() ?? '';
     if (id.isEmpty) return;
-
     await widget.routerService!.sendCommand(
       '/ppp/secret/remove',
       params: {'numbers': id},
     );
-
     _load();
   }
 
@@ -780,15 +727,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         context: context,
         builder: (_) => AlertDialog(
           backgroundColor: AppTheme.semiBlack,
-          title: const Text(
-            'أدخل IP العميل',
-            style: TextStyle(color: Colors.white),
-          ),
+          title: const Text('أدخل IP العميل',
+              style: TextStyle(color: Colors.white)),
           content: TextField(
             controller: controller,
             style: const TextStyle(color: Colors.white),
             keyboardType: TextInputType.number,
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
               hintText: 'مثال: 10.16.255.213',
               hintStyle: TextStyle(color: Colors.white38),
               filled: true,
@@ -819,20 +764,15 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('IP غير صالح: $ip'),
-          backgroundColor: Colors.red,
-        ),
+            content: Text('IP غير صالح: $ip'), backgroundColor: Colors.red),
       );
       return;
     }
 
     final url = Uri.parse('http://$ip/login.html');
-
     try {
-      final launched = await launchUrl(
-        url,
-        mode: LaunchMode.externalApplication,
-      );
+      final launched =
+          await launchUrl(url, mode: LaunchMode.externalApplication);
       if (!launched && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -845,9 +785,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('خطأ في فتح المتصفح: $e'),
-          backgroundColor: Colors.red,
-        ),
+            content: Text('خطأ في فتح المتصفح: $e'),
+            backgroundColor: Colors.red),
       );
     }
   }
@@ -864,17 +803,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.open_in_browser, color: Colors.cyan),
-              title: const Text(
-                'فتح في المتصفح',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('فتح في المتصفح',
+                  style: TextStyle(color: Colors.white)),
               subtitle: () {
                 final ip = user['browser-ip']?.toString().trim() ?? '';
                 if (ip.isNotEmpty) {
-                  return Text(
-                    'http://$ip/login.html',
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
-                  );
+                  return Text('http://$ip/login.html',
+                      style:
+                          const TextStyle(color: Colors.white38, fontSize: 11));
                 }
                 return null;
               }(),
@@ -923,10 +859,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             if (user['active'] == true)
               ListTile(
                 leading: const Icon(Icons.link_off, color: Colors.red),
-                title: const Text(
-                  'قطع الاتصال',
-                  style: TextStyle(color: Colors.white),
-                ),
+                title: const Text('قطع الاتصال',
+                    style: TextStyle(color: Colors.white)),
                 onTap: () async {
                   Navigator.pop(context);
                   final activeId = user['active-id']?.toString() ?? '';
@@ -941,10 +875,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               ),
             ListTile(
               leading: const Icon(Icons.edit, color: AppTheme.gold),
-              title: const Text(
-                'تعديل',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('تعديل', style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 Navigator.push(
@@ -986,10 +917,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.speed, color: AppTheme.gold),
-              title: const Text(
-                'فتح السرعة',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('فتح السرعة',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(context);
                 _applySpeedProfile(user);
@@ -997,10 +926,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.delete_forever, color: Colors.red),
-              title: const Text(
-                'حذف الحساب',
-                style: TextStyle(color: Colors.white),
-              ),
+              title: const Text('حذف الحساب',
+                  style: TextStyle(color: Colors.white)),
               onTap: () async {
                 Navigator.pop(context);
                 await _deleteAccount(user);
@@ -1036,10 +963,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       decoration: BoxDecoration(
         color: AppTheme.greenOnline.withOpacity(0.14),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.greenOnline.withOpacity(0.85),
-          width: 1,
-        ),
+        border:
+            Border.all(color: AppTheme.greenOnline.withOpacity(0.85), width: 1),
       ),
       child: Stack(
         children: [
@@ -1047,29 +972,22 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                primaryLabel,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              Text(primaryLabel,
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold)),
               Text(
                 _formatSpeed(primaryValue),
                 style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
+                    color: Colors.white,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 4),
               Text(
                 '$secondaryLabel: ${_formatSpeed(secondaryValue)}',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 9,
-                ),
+                style: const TextStyle(color: Colors.white70, fontSize: 9),
               ),
             ],
           ),
@@ -1087,11 +1005,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                   shape: BoxShape.circle,
                   border: Border.all(color: Colors.white24),
                 ),
-                child: const Icon(
-                  Icons.swap_vert,
-                  size: 14,
-                  color: Colors.white,
-                ),
+                child:
+                    const Icon(Icons.swap_vert, size: 14, color: Colors.white),
               ),
             ),
           ),
@@ -1103,7 +1018,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   Widget _buildStatusChip(Map<String, dynamic> user) {
     final status = user['status']?.toString() ?? 'offline';
     final color = _statusColor(status);
-
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -1113,11 +1027,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       ),
       child: Text(
         _statusLabel(status),
-        style: TextStyle(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-        ),
+        style:
+            TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.bold),
       ),
     );
   }
@@ -1129,15 +1040,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       child: RichText(
         text: TextSpan(
           style: TextStyle(
-            color: onSurface.withOpacity(0.82),
-            fontSize: 12,
-            height: 1.25,
-          ),
+              color: onSurface.withOpacity(0.82), fontSize: 12, height: 1.25),
           children: [
             TextSpan(
-              text: '$title: ',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
+                text: '$title: ',
+                style: const TextStyle(fontWeight: FontWeight.bold)),
             TextSpan(text: value),
           ],
         ),
@@ -1163,9 +1070,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: _statusColor(status).withOpacity(0.45),
-        ),
+        border: Border.all(color: _statusColor(status).withOpacity(0.45)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(24),
@@ -1185,8 +1090,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       shape: BoxShape.circle,
                       color: _statusColor(status).withOpacity(0.12),
                       border: Border.all(
-                        color: _statusColor(status).withOpacity(0.4),
-                      ),
+                          color: _statusColor(status).withOpacity(0.4)),
                     ),
                     child: Icon(
                       isActive ? Icons.person : Icons.person_off,
@@ -1204,10 +1108,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                               child: Text(
                                 user['name']?.toString() ?? '',
                                 style: TextStyle(
-                                  color: onSurface,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                    color: onSurface,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                             if (browserIp.isNotEmpty)
@@ -1234,10 +1137,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                                         Text(
                                           browserIp,
                                           style: const TextStyle(
-                                            color: Colors.cyan,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                          ),
+                                              color: Colors.cyan,
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold),
                                         ),
                                       ],
                                     ),
@@ -1255,46 +1157,38 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                             if (profile.isNotEmpty)
                               Container(
                                 padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 5,
-                                ),
+                                    horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
                                   color: AppTheme.gold.withOpacity(0.12),
                                   borderRadius: BorderRadius.circular(999),
                                   border: Border.all(
-                                    color: AppTheme.gold.withOpacity(0.35),
-                                  ),
+                                      color: AppTheme.gold.withOpacity(0.35)),
                                 ),
                                 child: Text(
                                   'الباقة: $profile',
                                   style: const TextStyle(
-                                    color: AppTheme.gold,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold,
-                                  ),
+                                      color: AppTheme.gold,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold),
                                 ),
                               ),
                             Container(
                               padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 5,
-                              ),
+                                  horizontal: 10, vertical: 5),
                               decoration: BoxDecoration(
                                 color: (isPaid ? Colors.green : Colors.red)
                                     .withOpacity(0.12),
                                 borderRadius: BorderRadius.circular(999),
                                 border: Border.all(
-                                  color: (isPaid ? Colors.green : Colors.red)
-                                      .withOpacity(0.35),
-                                ),
+                                    color: (isPaid ? Colors.green : Colors.red)
+                                        .withOpacity(0.35)),
                               ),
                               child: Text(
                                 isPaid ? 'مدفوع' : 'غير مدفوع',
                                 style: TextStyle(
-                                  color: isPaid ? Colors.green : Colors.red,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                                    color: isPaid ? Colors.green : Colors.red,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold),
                               ),
                             ),
                           ],
@@ -1321,19 +1215,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   }
 
   Widget _buildFilters() {
-    final accounts = _buildAccounts();
-    final all = accounts.length;
-    final active = _countStatus(accounts, 'active');
-    final offline = _countStatus(accounts, 'offline');
-    final disabled = _countStatus(accounts, 'disabled');
-    final expired = _countStatus(accounts, 'expired');
-
+    // ✅ أرقام من _cachedAccounts مباشرة - لا يوجد إعادة حساب
     final chips = [
-      ('all', 'الكل', all),
-      ('active', 'متصل', active),
-      ('offline', 'غير متصل', offline),
-      ('disabled', 'معطل', disabled),
-      ('expired', 'منتهي', expired),
+      ('all', 'الكل', _countStatus('all')),
+      ('active', 'متصل', _countStatus('active')),
+      ('offline', 'غير متصل', _countStatus('offline')),
+      ('disabled', 'معطل', _countStatus('disabled')),
+      ('expired', 'منتهي', _countStatus('expired')),
     ];
 
     return SingleChildScrollView(
@@ -1373,15 +1261,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         title: const Text('البرودباند'),
         actions: [
           IconButton(
-            onPressed: _load,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'تحديث',
-          ),
+              onPressed: _load,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'تحديث'),
           IconButton(
-            onPressed: _addNewAccount,
-            icon: const Icon(Icons.person_add),
-            tooltip: 'إضافة مستخدم',
-          ),
+              onPressed: _addNewAccount,
+              icon: const Icon(Icons.person_add),
+              tooltip: 'إضافة مستخدم'),
         ],
       ),
       body: Column(
@@ -1405,9 +1291,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       filled: true,
                       fillColor: Theme.of(context).cardColor,
                       contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
+                          horizontal: 12, vertical: 12),
                     ),
                     style: TextStyle(color: onSurface, fontSize: 13),
                     onChanged: (v) => setState(() => _searchQuery = v),
@@ -1445,9 +1329,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                         Center(
                           child: Text(
                             'لا توجد حسابات مطابقة',
-                            style: TextStyle(
-                              color: onSurface.withOpacity(0.6),
-                            ),
+                            style: TextStyle(color: onSurface.withOpacity(0.6)),
                           ),
                         ),
                       ],
@@ -1456,9 +1338,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
                       itemCount: filteredList.length,
-                      itemBuilder: (_, i) {
-                        return _buildAccountCard(filteredList[i]);
-                      },
+                      itemBuilder: (_, i) => _buildAccountCard(filteredList[i]),
                     ),
             ),
           ),
