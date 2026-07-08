@@ -1520,4 +1520,29 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                         const SizedBox(height: 120),
                         Center(
                           child: Text(
-                           
+                            'لا توجد حسابات مطابقة',
+                            style: TextStyle(
+                              color: onSurface.withOpacity(0.6),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                      itemCount: filteredList.length,
+                      itemBuilder: (_, i) => _buildAccountCard(filteredList[i]),
+                    ),
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: AppTheme.gold,
+        onPressed: _addNewAccount,
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
