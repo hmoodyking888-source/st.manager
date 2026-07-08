@@ -8,18 +8,6 @@ import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-class _TrafficSnapshot {
-  final int bytesIn;
-  final int bytesOut;
-  final DateTime time;
-
-  const _TrafficSnapshot({
-    required this.bytesIn,
-    required this.bytesOut,
-    required this.time,
-  });
-}
-
 class _CommentData {
   final String phone;
   final String note;
@@ -62,10 +50,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   String? _lastExpirationCheckIso;
   Timer? _refreshTimer;
 
-  final Map<String, _TrafficSnapshot> _previousTraffic = {};
-  final Map<String, double> _rxSpeeds = {};
-  final Map<String, double> _txSpeeds = {};
-
   @override
   void initState() {
     super.initState();
@@ -87,14 +71,21 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     super.dispose();
   }
 
+  void _goBackToDashboard() {
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) {
+      return route.settings.name == '/dashboard' || route.isFirst;
+    });
+  }
+
   String _normalizeText(dynamic value) {
     return value?.toString().trim() ?? '';
   }
 
-  int _toInt(dynamic value) {
+  double _toDouble(dynamic value) {
     if (value == null) return 0;
-    if (value is num) return value.toInt();
-    return int.tryParse(value.toString()) ?? 0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0;
   }
 
   bool _isDisabled(Map<String, dynamic> user) {
@@ -105,8 +96,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return value == 'true' ||
         value == 'yes' ||
         value == '1' ||
-        value == 'on' ||
-        value == 'enabled';
+        value == 'on';
   }
 
   bool _isExpired(DateTime? expiryDate) {
@@ -268,6 +258,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         }
       }
     }
+
     return null;
   }
 
@@ -285,80 +276,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
 
     return null;
-  }
-
-  int _extractBytesIn(Map<String, dynamic> activeEntry) {
-    final bytesIn = _toInt(activeEntry['bytes-in']);
-    if (bytesIn > 0) return bytesIn;
-
-    final rxByte = _toInt(activeEntry['rx-byte']);
-    if (rxByte > 0) return rxByte;
-
-    final totalBytes = _toInt(activeEntry['total-bytes']);
-    if (totalBytes > 0) return totalBytes;
-
-    return 0;
-  }
-
-  int _extractBytesOut(Map<String, dynamic> activeEntry) {
-    final bytesOut = _toInt(activeEntry['bytes-out']);
-    if (bytesOut > 0) return bytesOut;
-
-    final txByte = _toInt(activeEntry['tx-byte']);
-    if (txByte > 0) return txByte;
-
-    final totalBytes = _toInt(activeEntry['total-bytes']);
-    if (totalBytes > 0) return totalBytes;
-
-    return 0;
-  }
-
-  void _updateTrafficSpeed(Map<String, Map<String, dynamic>> activeBySession) {
-    final now = DateTime.now();
-    final nextKeys = <String>{};
-
-    for (final entry in activeBySession.entries) {
-      final key = entry.key;
-      final activeEntry = entry.value;
-
-      final currentIn = _extractBytesIn(activeEntry);
-      final currentOut = _extractBytesOut(activeEntry);
-      final previous = _previousTraffic[key];
-
-      double rxMbps = 0;
-      double txMbps = 0;
-
-      if (previous != null) {
-        final elapsedSeconds =
-            now.difference(previous.time).inMilliseconds / 1000.0;
-
-        if (elapsedSeconds > 0) {
-          final diffIn = currentIn - previous.bytesIn;
-          final diffOut = currentOut - previous.bytesOut;
-
-          if (diffIn >= 0) {
-            rxMbps = (diffIn * 8) / elapsedSeconds / 1000000;
-          }
-
-          if (diffOut >= 0) {
-            txMbps = (diffOut * 8) / elapsedSeconds / 1000000;
-          }
-        }
-      }
-
-      _rxSpeeds[key] = rxMbps;
-      _txSpeeds[key] = txMbps;
-      _previousTraffic[key] = _TrafficSnapshot(
-        bytesIn: currentIn,
-        bytesOut: currentOut,
-        time: now,
-      );
-      nextKeys.add(key);
-    }
-
-    _previousTraffic.removeWhere((key, _) => !nextKeys.contains(key));
-    _rxSpeeds.removeWhere((key, _) => !nextKeys.contains(key));
-    _txSpeeds.removeWhere((key, _) => !nextKeys.contains(key));
   }
 
   Future<bool> _shouldRunExpirationCheck() async {
@@ -392,10 +309,11 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       useCache: false,
     );
 
-    final existing = profiles.where((p) {
-      return _normalizeText(p['name']).toLowerCase() ==
-          _expiredProfileName.toLowerCase();
-    }).toList();
+    final existing = profiles
+        .where((p) =>
+            _normalizeText(p['name']).toLowerCase() ==
+            _expiredProfileName.toLowerCase())
+        .toList();
 
     if (existing.isEmpty) {
       await widget.routerService!.sendCommand(
@@ -474,167 +392,188 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return changed;
   }
 
-  Future<void> _ensureSpeedProfile() async {
-    try {
-      await widget.routerService!.sendCommand(
-        '/ppp/profile/add',
-        params: {
-          'name': 'Speed',
-          'rate-limit': '',
-          'only-one': 'no',
-        },
-      );
-    } catch (_) {}
-  }
+  String _buildTrafficInterfaceName(Map<String, dynamic> activeSession) {
+    final service = _normalizeText(activeSession['service']).toLowerCase();
+    final name = _normalizeText(activeSession['name']);
+    final user = _normalizeText(activeSession['user']);
+    final username = _normalizeText(activeSession['username']);
+    final directInterface = _normalizeText(activeSession['interface']);
 
-  Future<void> _applySpeedProfile(Map<String, dynamic> user) async {
-    if (widget.routerService == null) return;
+    final base = name.isNotEmpty
+        ? name
+        : user.isNotEmpty
+            ? user
+            : username;
 
-    final secretId = user['.id']?.toString() ?? '';
-    final activeId = user['active-id']?.toString() ?? '';
-
-    await _ensureSpeedProfile();
-
-    if (secretId.isNotEmpty) {
-      await widget.routerService!.sendCommand(
-        '/ppp/secret/set',
-        params: {
-          'numbers': secretId,
-          'profile': 'Speed',
-        },
-      );
+    if (directInterface.isNotEmpty) {
+      return directInterface;
     }
 
-    if (user['active'] == true && activeId.isNotEmpty) {
-      await widget.routerService!.sendCommand(
-        '/ppp/active/remove',
-        params: {'numbers': activeId},
-      );
+    final candidates = <String>[];
+
+    if (service.isNotEmpty && base.isNotEmpty) {
+      candidates.add('$service-$base');
     }
 
-    _load();
-  }
+    if (service.isNotEmpty && user.isNotEmpty) {
+      candidates.add('$service-$user');
+    }
 
-  Future<void> _deleteAccount(Map<String, dynamic> user) async {
-    if (widget.routerService == null) return;
+    if (service.isNotEmpty && username.isNotEmpty) {
+      candidates.add('$service-$username');
+    }
 
-    final id = user['.id']?.toString() ?? '';
-    if (id.isEmpty) return;
+    if (base.isNotEmpty) {
+      candidates.add('pppoe-$base');
+      candidates.add(base);
+    }
 
-    await widget.routerService!.sendCommand(
-      '/ppp/secret/remove',
-      params: {'numbers': id},
+    if (user.isNotEmpty) {
+      candidates.add('pppoe-$user');
+      candidates.add(user);
+    }
+
+    if (username.isNotEmpty) {
+      candidates.add('pppoe-$username');
+      candidates.add(username);
+    }
+
+    return candidates.firstWhere(
+      (e) => e.trim().isNotEmpty,
+      orElse: () => '',
     );
-
-    _load();
   }
 
-  Future<void> _togglePaid(Map<String, dynamic> user) async {
-    if (widget.routerService == null) return;
-
-    final secretId = user['.id']?.toString() ?? '';
-    if (secretId.isEmpty) return;
-
-    final parsed = _parseComment(user['comment']?.toString() ?? '');
-    final newComment = _buildComment(parsed, paidOverride: !parsed.isPaid);
-
-    await widget.routerService!.sendCommand(
-      '/ppp/secret/set',
-      params: {
-        'numbers': secretId,
-        'comment': newComment,
-      },
-    );
-
-    _load();
-  }
-
-  Future<void> _openBrowser(Map<String, dynamic> user) async {
-    String ip = (user['browser-ip']?.toString().trim() ?? '');
-
-    if (ip.isEmpty) {
-      if (!mounted) return;
-
-      final controller = TextEditingController();
-      final result = await showDialog<String>(
-        context: context,
-        builder: (_) => AlertDialog(
-          backgroundColor: AppTheme.semiBlack,
-          title: const Text(
-            'أدخل IP العميل',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: TextField(
-            controller: controller,
-            style: const TextStyle(color: Colors.white),
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              hintText: 'مثال: 10.16.255.213',
-              hintStyle: TextStyle(color: Colors.white38),
-              filled: true,
-              fillColor: Colors.white10,
-            ),
-            autofocus: true,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text(
-                'إلغاء',
-                style: TextStyle(color: Colors.white54),
-              ),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, controller.text.trim()),
-              child: Text('فتح', style: TextStyle(color: AppTheme.gold)),
-            ),
-          ],
-        ),
-      );
-
-      if (result == null || result.isEmpty) return;
-      ip = result;
+  Future<Map<String, double>> _getSessionTraffic(
+    Map<String, dynamic> activeSession,
+  ) async {
+    if (widget.routerService == null) {
+      return {
+        'rx-bits-per-second': 0,
+        'tx-bits-per-second': 0,
+      };
     }
 
-    ip = ip.replaceAll(RegExp(r'^https?://'), '').trim();
+    final candidates = <String>[];
+    final directInterface = _normalizeText(activeSession['interface']);
+    final service = _normalizeText(activeSession['service']).toLowerCase();
+    final name = _normalizeText(activeSession['name']);
+    final user = _normalizeText(activeSession['user']);
+    final username = _normalizeText(activeSession['username']);
 
-    final ipPattern = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
-    if (!ipPattern.hasMatch(ip)) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('IP غير صالح: $ip'),
-          backgroundColor: Colors.red,
-        ),
-      );
-      return;
-    }
-
-    final url = Uri.parse('http://$ip/login.html');
-
-    try {
-      final launched = await launchUrl(
-        url,
-        mode: LaunchMode.externalApplication,
-      );
-
-      if (!launched && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('تعذر فتح المتصفح: http://$ip/login.html'),
-            backgroundColor: Colors.red,
-          ),
-        );
+    void addCandidate(String value) {
+      final v = value.trim();
+      if (v.isNotEmpty && !candidates.contains(v)) {
+        candidates.add(v);
       }
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('خطأ في فتح المتصفح: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
     }
+
+    addCandidate(directInterface);
+
+    final base = name.isNotEmpty
+        ? name
+        : user.isNotEmpty
+            ? user
+            : username;
+
+    if (service.isNotEmpty && base.isNotEmpty) {
+      addCandidate('$service-$base');
+    }
+
+    if (service.isNotEmpty && user.isNotEmpty) {
+      addCandidate('$service-$user');
+    }
+
+    if (service.isNotEmpty && username.isNotEmpty) {
+      addCandidate('$service-$username');
+    }
+
+    if (base.isNotEmpty) {
+      addCandidate('pppoe-$base');
+      addCandidate(base);
+    }
+
+    if (user.isNotEmpty) {
+      addCandidate('pppoe-$user');
+      addCandidate(user);
+    }
+
+    if (username.isNotEmpty) {
+      addCandidate('pppoe-$username');
+      addCandidate(username);
+    }
+
+    for (final iface in candidates) {
+      try {
+        final result = await widget.routerService!.sendCommand(
+          '/interface/monitor-traffic',
+          params: {
+            'interface': iface,
+            'once': '',
+          },
+          useCache: false,
+        );
+
+        if (result.isNotEmpty) {
+          final row = result.first;
+          final rxBits =
+              double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ??
+                  0;
+          final txBits =
+              double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ??
+                  0;
+
+          if (rxBits > 0 || txBits > 0) {
+            return {
+              'rx-bits-per-second': rxBits,
+              'tx-bits-per-second': txBits,
+            };
+          }
+        }
+      } catch (_) {
+        continue;
+      }
+    }
+
+    return {
+      'rx-bits-per-second': 0,
+      'tx-bits-per-second': 0,
+    };
+  }
+
+  Future<List<Map<String, dynamic>>> _attachLiveTrafficToActive(
+    List<Map<String, dynamic>> active,
+  ) async {
+    final trafficResults = await Future.wait(
+      active.map((a) async {
+        final traffic = await _getSessionTraffic(a);
+        return MapEntry(_sessionKey(a), traffic);
+      }),
+    );
+
+    final trafficBySession = Map<String, Map<String, double>>.fromEntries(
+      trafficResults,
+    );
+
+    return active.map((a) {
+      final traffic = trafficBySession[_sessionKey(a)] ??
+          {
+            'rx-bits-per-second': 0.0,
+            'tx-bits-per-second': 0.0,
+          };
+
+      final rxBits = _toDouble(traffic['rx-bits-per-second']);
+      final txBits = _toDouble(traffic['tx-bits-per-second']);
+      final chosenInterface = _buildTrafficInterfaceName(a);
+
+      return {
+        ...a,
+        'traffic-interface': chosenInterface,
+        'rx-speed': rxBits / 1000000,
+        'tx-speed': txBits / 1000000,
+        'speed-mbps': (rxBits + txBits) / 1000000,
+      };
+    }).toList();
   }
 
   Future<void> _load({bool initial = false}) async {
@@ -662,7 +601,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final rawActive = List<Map<String, dynamic>>.from(results[1]);
 
       final activeBySession = _buildActiveBySession(rawActive);
-      _updateTrafficSpeed(activeBySession);
+      final active = await _attachLiveTrafficToActive(rawActive);
 
       if (await _shouldRunExpirationCheck()) {
         await _applyExpirationRules(secrets, activeBySession);
@@ -702,8 +641,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final isExpired = _isExpired(parsed.expiryDate);
       final isActive = activeEntry != null;
 
-      final rxSpeed = sessionKey != null ? (_rxSpeeds[sessionKey] ?? 0) : 0;
-      final txSpeed = sessionKey != null ? (_txSpeeds[sessionKey] ?? 0) : 0;
+      final rxSpeed = sessionKey != null ? _toDouble(_findSpeed(sessionKey, true)) : 0;
+      final txSpeed = sessionKey != null ? _toDouble(_findSpeed(sessionKey, false)) : 0;
       final totalSpeed = rxSpeed + txSpeed;
       final uptime = _normalizeText(activeEntry?['uptime']);
 
@@ -718,11 +657,15 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         status = 'offline';
       }
 
-      final browserIp = _normalizeText(activeEntry?['address']).isNotEmpty
-          ? _normalizeText(activeEntry?['address'])
-          : _normalizeText(secret['remote-address']).isNotEmpty
-              ? _normalizeText(secret['remote-address'])
-              : _normalizeText(secret['local-address']);
+      final activeAddress = _normalizeText(activeEntry?['address']);
+      final secretRemoteAddress = _normalizeText(secret['remote-address']);
+      final secretLocalAddress = _normalizeText(secret['local-address']);
+
+      final browserIp = activeAddress.isNotEmpty
+          ? activeAddress
+          : secretRemoteAddress.isNotEmpty
+              ? secretRemoteAddress
+              : secretLocalAddress;
 
       return {
         ...secret,
@@ -749,6 +692,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }).toList();
 
     return list;
+  }
+
+  double _findSpeed(String sessionKey, bool rx) {
+    final active = _active.firstWhere(
+      (a) => _sessionKey(a) == sessionKey,
+      orElse: () => <String, dynamic>{},
+    );
+
+    if (active.isEmpty) return 0;
+
+    return rx
+        ? _toDouble(active['rx-speed'])
+        : _toDouble(active['tx-speed']);
   }
 
   int _parseUptimeToSeconds(String uptime) {
@@ -836,10 +792,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           if (!aActive && bActive) return 1;
 
           if (aActive && bActive) {
-            final aTotal = ((a['rx-speed'] as num?)?.toDouble() ?? 0) +
-                ((a['tx-speed'] as num?)?.toDouble() ?? 0);
-            final bTotal = ((b['rx-speed'] as num?)?.toDouble() ?? 0) +
-                ((b['tx-speed'] as num?)?.toDouble() ?? 0);
+            final aTotal = (_toDouble(a['rx-speed']) + _toDouble(a['tx-speed']));
+            final bTotal = (_toDouble(b['rx-speed']) + _toDouble(b['tx-speed']));
             if (bTotal != aTotal) return bTotal.compareTo(aTotal);
           }
 
@@ -900,6 +854,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           u['profile'],
           u['expiry-label'],
           u['status'],
+          u['browser-ip'],
         ].map((e) => e?.toString().toLowerCase() ?? '').join(' | ');
         return searchable.contains(q);
       }).toList();
@@ -1065,12 +1020,336 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     );
   }
 
+  Future<void> _ensureSpeedProfile() async {
+    try {
+      await widget.routerService!.sendCommand(
+        '/ppp/profile/add',
+        params: {
+          'name': 'Speed',
+          'rate-limit': '',
+          'only-one': 'no',
+        },
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _applySpeedProfile(Map<String, dynamic> user) async {
+    if (widget.routerService == null) return;
+
+    final secretId = user['.id']?.toString() ?? '';
+    final activeId = user['active-id']?.toString() ?? '';
+
+    await _ensureSpeedProfile();
+
+    if (secretId.isNotEmpty) {
+      await widget.routerService!.sendCommand(
+        '/ppp/secret/set',
+        params: {
+          'numbers': secretId,
+          'profile': 'Speed',
+        },
+      );
+    }
+
+    if (user['active'] == true && activeId.isNotEmpty) {
+      await widget.routerService!.sendCommand(
+        '/ppp/active/remove',
+        params: {'numbers': activeId},
+      );
+    }
+
+    _load();
+  }
+
+  Future<void> _deleteAccount(Map<String, dynamic> user) async {
+    if (widget.routerService == null) return;
+
+    final id = user['.id']?.toString() ?? '';
+    if (id.isEmpty) return;
+
+    await widget.routerService!.sendCommand(
+      '/ppp/secret/remove',
+      params: {'numbers': id},
+    );
+
+    _load();
+  }
+
+  Future<void> _togglePaid(Map<String, dynamic> user) async {
+    if (widget.routerService == null) return;
+
+    final secretId = user['.id']?.toString() ?? '';
+    if (secretId.isEmpty) return;
+
+    final parsed = _parseComment(user['comment']?.toString() ?? '');
+    final newComment = _buildComment(parsed, paidOverride: !parsed.isPaid);
+
+    await widget.routerService!.sendCommand(
+      '/ppp/secret/set',
+      params: {
+        'numbers': secretId,
+        'comment': newComment,
+      },
+    );
+
+    _load();
+  }
+
+  Future<void> _openBrowser(Map<String, dynamic> user) async {
+    String ip = (user['browser-ip']?.toString().trim() ?? '');
+
+    if (ip.isEmpty) {
+      if (!mounted) return;
+
+      final controller = TextEditingController();
+      final result = await showDialog<String>(
+        context: context,
+        builder: (_) => AlertDialog(
+          backgroundColor: AppTheme.semiBlack,
+          title: const Text(
+            'أدخل IP العميل',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: TextField(
+            controller: controller,
+            style: const TextStyle(color: Colors.white),
+            keyboardType: TextInputType.number,
+            decoration: const InputDecoration(
+              hintText: 'مثال: 10.16.255.213',
+              hintStyle: TextStyle(color: Colors.white38),
+              filled: true,
+              fillColor: Colors.white10,
+            ),
+            autofocus: true,
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text(
+                'إلغاء',
+                style: TextStyle(color: Colors.white54),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, controller.text.trim()),
+              child: Text('فتح', style: TextStyle(color: AppTheme.gold)),
+            ),
+          ],
+        ),
+      );
+
+      if (result == null || result.isEmpty) return;
+      ip = result;
+    }
+
+    ip = ip.replaceAll(RegExp(r'^https?://'), '').trim();
+
+    final ipPattern = RegExp(r'^\d{1,3}(\.\d{1,3}){3}$');
+    if (!ipPattern.hasMatch(ip)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('IP غير صالح: $ip'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final url = Uri.parse('http://$ip/login.html');
+
+    try {
+      final launched = await launchUrl(
+        url,
+        mode: LaunchMode.externalApplication,
+      );
+
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تعذر فتح المتصفح: http://$ip/login.html'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('خطأ في فتح المتصفح: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showActions(Map<String, dynamic> user) {
+    final isDisabled = user['status'] == 'disabled';
+    final isPaid = user['is-paid'] == true;
+    final browserIp = user['browser-ip']?.toString().trim() ?? '';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.semiBlack,
+      builder: (_) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.open_in_browser, color: Colors.cyan),
+              title: const Text(
+                'فتح في المتصفح',
+                style: TextStyle(color: Colors.white),
+              ),
+              subtitle: browserIp.isNotEmpty
+                  ? Text(
+                      'http://$browserIp/login.html',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                      ),
+                    )
+                  : null,
+              onTap: () {
+                Navigator.pop(context);
+                _openBrowser(user);
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                isPaid ? Icons.money_off : Icons.attach_money,
+                color: isPaid ? Colors.red : Colors.green,
+              ),
+              title: Text(
+                isPaid ? 'تغيير إلى: لم يتم الدفع' : 'تغيير إلى: تم الدفع',
+                style: const TextStyle(color: Colors.white),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                await _togglePaid(user);
+              },
+            ),
+            if (user['active'] == true)
+              ListTile(
+                leading: const Icon(Icons.link_off, color: Colors.red),
+                title: const Text(
+                  'قطع الاتصال',
+                  style: TextStyle(color: Colors.white),
+                ),
+                onTap: () async {
+                  Navigator.pop(context);
+                  final activeId = user['active-id']?.toString() ?? '';
+                  if (activeId.isNotEmpty) {
+                    await widget.routerService?.sendCommand(
+                      '/ppp/active/remove',
+                      params: {'numbers': activeId},
+                    );
+                    _load();
+                  }
+                },
+              ),
+            ListTile(
+              leading: const Icon(Icons.edit, color: AppTheme.gold),
+              title: const Text(
+                'تعديل',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PppUserScreen(
+                      routerService: widget.routerService,
+                      isEdit: true,
+                      initialData: user,
+                    ),
+                  ),
+                ).then((_) => _load());
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.block,
+                color: isDisabled ? Colors.green : Colors.orange,
+              ),
+              title: Text(
+                isDisabled ? 'تفعيل الحساب' : 'تعطيل الحساب',
+                style: const TextStyle(color: Colors.white),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+
+                final secretId = user['.id']?.toString() ?? '';
+                if (secretId.isEmpty) return;
+
+                if (!isDisabled && user['active'] == true) {
+                  final activeId = user['active-id']?.toString() ?? '';
+                  if (activeId.isNotEmpty) {
+                    await widget.routerService?.sendCommand(
+                      '/ppp/active/remove',
+                      params: {'numbers': activeId},
+                    );
+                  }
+                }
+
+                await widget.routerService?.sendCommand(
+                  '/ppp/secret/set',
+                  params: {
+                    'numbers': secretId,
+                    'disabled': isDisabled ? 'no' : 'yes',
+                  },
+                );
+
+                _load();
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.speed, color: AppTheme.gold),
+              title: const Text(
+                'فتح السرعة',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () {
+                Navigator.pop(context);
+                _applySpeedProfile(user);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_forever, color: Colors.red),
+              title: const Text(
+                'حذف الحساب',
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () async {
+                Navigator.pop(context);
+                await _deleteAccount(user);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _addNewAccount() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => PppUserScreen(
+          routerService: widget.routerService,
+          isEdit: false,
+        ),
+      ),
+    ).then((_) => _load());
+  }
+
   Widget _buildAccountCard(Map<String, dynamic> user) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final status = user['status']?.toString() ?? 'offline';
     final isActive = user['active'] == true;
-    final rxSpeed = (user['rx-speed'] as double?) ?? 0;
-    final txSpeed = (user['tx-speed'] as double?) ?? 0;
+    final isExpired = user['expired'] == true;
+    final rxSpeed = _toDouble(user['rx-speed']);
+    final txSpeed = _toDouble(user['tx-speed']);
     final note = user['note']?.toString() ?? '';
     final phone = user['phone']?.toString() ?? '';
     final expiryLabel = user['expiry-label']?.toString() ?? '';
@@ -1235,6 +1514,45 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               if (expiryLabel.isNotEmpty)
                 _buildInfoLine('الصلاحية', expiryLabel),
               if (note.isNotEmpty) _buildInfoLine('الكومنت', note),
+              const SizedBox(height: 8),
+              if (status == 'active')
+                Text(
+                  'متصل الآن',
+                  style: TextStyle(
+                    color: AppTheme.greenOnline,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+              else if (status == 'disabled')
+                Text(
+                  'معطل',
+                  style: TextStyle(
+                    color: Colors.red,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+              else if (status == 'expired')
+                Text(
+                  isActive
+                      ? 'منتهي - ما زال يعمل'
+                      : 'منتهي - سيُنقل إلى بروفايل Xpirer بسرعة 512K/512K',
+                  style: TextStyle(
+                    color: Colors.orange,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                )
+              else
+                Text(
+                  'غير متصل',
+                  style: TextStyle(
+                    color: Colors.blue,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
             ],
           ),
         ),
@@ -1278,270 +1596,124 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     );
   }
 
-  void _showActions(Map<String, dynamic> user) {
-    final isDisabled = user['status'] == 'disabled';
-    final isPaid = user['is-paid'] == true;
-    final browserIp = user['browser-ip']?.toString().trim() ?? '';
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.semiBlack,
-      builder: (_) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.open_in_browser, color: Colors.cyan),
-              title: const Text(
-                'فتح في المتصفح',
-                style: TextStyle(color: Colors.white),
-              ),
-              subtitle: browserIp.isNotEmpty
-                  ? Text(
-                      'http://$browserIp/login.html',
-                      style: const TextStyle(
-                        color: Colors.white38,
-                        fontSize: 11,
-                      ),
-                    )
-                  : null,
-              onTap: () {
-                Navigator.pop(context);
-                _openBrowser(user);
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                isPaid ? Icons.money_off : Icons.attach_money,
-                color: isPaid ? Colors.red : Colors.green,
-              ),
-              title: Text(
-                isPaid ? 'تغيير إلى: لم يتم الدفع' : 'تغيير إلى: تم الدفع',
-                style: const TextStyle(color: Colors.white),
-              ),
-              onTap: () async {
-                Navigator.pop(context);
-                await _togglePaid(user);
-              },
-            ),
-            if (user['active'] == true)
-              ListTile(
-                leading: const Icon(Icons.link_off, color: Colors.red),
-                title: const Text(
-                  'قطع الاتصال',
-                  style: TextStyle(color: Colors.white),
-                ),
-                onTap: () async {
-                  Navigator.pop(context);
-                  final activeId = user['active-id']?.toString() ?? '';
-                  if (activeId.isNotEmpty) {
-                    await widget.routerService?.sendCommand(
-                      '/ppp/active/remove',
-                      params: {'numbers': activeId},
-                    );
-                    _load();
-                  }
-                },
-              ),
-            ListTile(
-              leading: const Icon(Icons.edit, color: AppTheme.gold),
-              title: const Text(
-                'تعديل',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PppUserScreen(
-                      routerService: widget.routerService,
-                      isEdit: true,
-                      initialData: user,
-                    ),
-                  ),
-                ).then((_) => _load());
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                Icons.block,
-                color: isDisabled ? Colors.green : Colors.orange,
-              ),
-              title: Text(
-                isDisabled ? 'تفعيل الحساب' : 'تعطيل الحساب',
-                style: const TextStyle(color: Colors.white),
-              ),
-              onTap: () async {
-                Navigator.pop(context);
-
-                final secretId = user['.id']?.toString() ?? '';
-                if (secretId.isEmpty) return;
-
-                if (!isDisabled && user['active'] == true) {
-                  final activeId = user['active-id']?.toString() ?? '';
-                  if (activeId.isNotEmpty) {
-                    await widget.routerService?.sendCommand(
-                      '/ppp/active/remove',
-                      params: {'numbers': activeId},
-                    );
-                  }
-                }
-
-                await widget.routerService?.sendCommand(
-                  '/ppp/secret/set',
-                  params: {
-                    'numbers': secretId,
-                    'disabled': isDisabled ? 'no' : 'yes',
-                  },
-                );
-
-                _load();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.speed, color: AppTheme.gold),
-              title: const Text(
-                'فتح السرعة',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                _applySpeedProfile(user);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.delete_forever, color: Colors.red),
-              title: const Text(
-                'حذف الحساب',
-                style: TextStyle(color: Colors.white),
-              ),
-              onTap: () async {
-                Navigator.pop(context);
-                await _deleteAccount(user);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _addNewAccount() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => PppUserScreen(
-          routerService: widget.routerService,
-          isEdit: false,
-        ),
-      ),
-    ).then((_) => _load());
-  }
-
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final filteredList = filtered;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('البرودباند'),
-        actions: [
-          IconButton(
-            onPressed: _load,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'تحديث',
+    return WillPopScope(
+      onWillPop: () async {
+        _goBackToDashboard();
+        return false;
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: _goBackToDashboard,
           ),
-          IconButton(
-            onPressed: _addNewAccount,
-            icon: const Icon(Icons.person_add),
-            tooltip: 'إضافة مستخدم',
-          ),
-        ],
-      ),
-      body: Column(
-        children: [
-          if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
-          const SizedBox(height: 12),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _buildFilters(),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    decoration: InputDecoration(
-                      hintText: 'بحث...',
-                      prefixIcon: const Icon(Icons.search, color: AppTheme.gold),
-                      filled: true,
-                      fillColor: Theme.of(context).cardColor,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                    ),
-                    style: TextStyle(color: onSurface, fontSize: 13),
-                    onChanged: (v) => setState(() => _searchQuery = v),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                DropdownButton<String>(
-                  value: _sortBy,
-                  dropdownColor: Theme.of(context).cardColor,
-                  style: TextStyle(color: onSurface, fontSize: 12),
-                  underline: const SizedBox(),
-                  items: const [
-                    DropdownMenuItem(value: 'status', child: Text('الحالة')),
-                    DropdownMenuItem(value: 'name', child: Text('الاسم')),
-                    DropdownMenuItem(
-                      value: 'uptime',
-                      child: Text('وقت الاتصال'),
-                    ),
-                    DropdownMenuItem(value: 'usage', child: Text('الأعلى سحب')),
-                    DropdownMenuItem(value: 'profile', child: Text('الباقة')),
-                  ],
-                  onChanged: (v) {
-                    if (v != null) setState(() => _sortBy = v);
-                  },
-                ),
-              ],
+          title: const Text('البرودباند'),
+          actions: [
+            IconButton(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'تحديث',
             ),
-          ),
-          Expanded(
-            child: RefreshIndicator(
-              onRefresh: _load,
-              child: filteredList.isEmpty
-                  ? ListView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      children: [
-                        const SizedBox(height: 120),
-                        Center(
-                          child: Text(
-                            'لا توجد حسابات مطابقة',
-                            style: TextStyle(
-                              color: onSurface.withOpacity(0.6),
+            IconButton(
+              onPressed: _addNewAccount,
+              icon: const Icon(Icons.person_add),
+              tooltip: 'إضافة مستخدم',
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildFilters(),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'بحث...',
+                        prefixIcon:
+                            const Icon(Icons.search, color: AppTheme.gold),
+                        filled: true,
+                        fillColor: Theme.of(context).cardColor,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                      ),
+                      style: TextStyle(color: onSurface, fontSize: 13),
+                      onChanged: (v) => setState(() => _searchQuery = v),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  DropdownButton<String>(
+                    value: _sortBy,
+                    dropdownColor: Theme.of(context).cardColor,
+                    style: TextStyle(color: onSurface, fontSize: 12),
+                    underline: const SizedBox(),
+                    items: const [
+                      DropdownMenuItem(value: 'status', child: Text('الحالة')),
+                      DropdownMenuItem(value: 'name', child: Text('الاسم')),
+                      DropdownMenuItem(
+                        value: 'uptime',
+                        child: Text('وقت الاتصال'),
+                      ),
+                      DropdownMenuItem(
+                          value: 'usage', child: Text('الأعلى سحب')),
+                      DropdownMenuItem(value: 'profile', child: Text('الباقة')),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) setState(() => _sortBy = v);
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: filteredList.isEmpty
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: [
+                          const SizedBox(height: 120),
+                          Center(
+                            child: Text(
+                              'لا توجد حسابات مطابقة',
+                              style: TextStyle(
+                                color: onSurface.withOpacity(0.6),
+                              ),
                             ),
                           ),
+                        ],
+                      )
+                    : ListView.builder(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+                        itemCount: filteredList.length,
+                        itemBuilder: (_, i) => _buildAccountCard(
+                          filteredList[i],
                         ),
-                      ],
-                    )
-                  : ListView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-                      itemCount: filteredList.length,
-                      itemBuilder: (_, i) => _buildAccountCard(filteredList[i]),
-                    ),
+                      ),
+              ),
             ),
-          ),
-        ],
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppTheme.gold,
-        onPressed: _addNewAccount,
-        child: const Icon(Icons.add),
+          ],
+        ),
+        floatingActionButton: FloatingActionButton(
+          backgroundColor: AppTheme.gold,
+          onPressed: _addNewAccount,
+          child: const Icon(Icons.add),
+        ),
       ),
     );
   }
