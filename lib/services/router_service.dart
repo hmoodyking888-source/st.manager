@@ -10,9 +10,13 @@ class RouterService {
   bool _connected = false;
   RouterOSClient? _client;
 
+  Completer<bool>? _connectCompleter;
+
   final Map<String, dynamic> _cache = {};
   final Map<String, DateTime> _cacheTimestamps = {};
   static const Duration _cacheDuration = Duration(seconds: 120);
+  static const Duration _connectTimeout = Duration(seconds: 7);
+  static const Duration _commandTimeout = Duration(seconds: 10);
 
   RouterService({
     required this.host,
@@ -21,25 +25,75 @@ class RouterService {
     required this.password,
   });
 
-  Future<bool> connect() async {
-    for (int i = 0; i < 3; i++) {
-      try {
-        _client = RouterOSClient(
-          host: host,
-          user: username,
-          password: password,
-        );
-
-        await _client!.connect();
-        _connected = true;
-        return true;
-      } catch (_) {
-        await Future.delayed(Duration(seconds: i + 1));
-      }
+  Future<bool> connect({bool forceReconnect = false}) async {
+    if (!forceReconnect && _connected && _client != null) {
+      return true;
     }
 
-    _connected = false;
-    return false;
+    if (_connectCompleter != null) {
+      return _connectCompleter!.future;
+    }
+
+    _connectCompleter = Completer<bool>();
+
+    try {
+      if (forceReconnect) {
+        _client?.close();
+        _client = null;
+        _connected = false;
+      }
+
+      for (int i = 0; i < 3; i++) {
+        try {
+          _client?.close();
+          _client = RouterOSClient(
+            host: host,
+            user: username,
+            password: password,
+          );
+
+          await _client!.connect().timeout(_connectTimeout);
+
+          _connected = true;
+          if (!_connectCompleter!.isCompleted) {
+            _connectCompleter!.complete(true);
+          }
+          return true;
+        } catch (_) {
+          _connected = false;
+          await Future.delayed(Duration(seconds: i + 1));
+        }
+      }
+
+      _client?.close();
+      _client = null;
+      _connected = false;
+
+      if (!_connectCompleter!.isCompleted) {
+        _connectCompleter!.complete(false);
+      }
+      return false;
+    } catch (e) {
+      _connected = false;
+      _client?.close();
+      _client = null;
+
+      if (!_connectCompleter!.isCompleted) {
+        _connectCompleter!.completeError(e);
+      }
+      return false;
+    } finally {
+      _connectCompleter = null;
+    }
+  }
+
+  Future<void> _ensureConnected() async {
+    if (_connected && _client != null) return;
+
+    final ok = await connect();
+    if (!ok || _client == null) {
+      throw Exception('Not connected');
+    }
   }
 
   List<Map<String, dynamic>> _normalizeResponse(dynamic response) {
@@ -81,22 +135,20 @@ class RouterService {
       }
     }
 
-    if (!_connected || _client == null) {
-      throw Exception('Not connected');
-    }
+    await _ensureConnected();
 
     for (int i = 0; i < 3; i++) {
       try {
         dynamic response;
 
         if (params == null || params.isEmpty) {
-          response = await _client!.execute(command);
+          response = await _client!.execute(command).timeout(_commandTimeout);
         } else {
           final sentence = <String>[
             command,
             ...params.entries.map((e) => '=${e.key}=${e.value}'),
           ];
-          response = await _client!.talk(sentence);
+          response = await _client!.talk(sentence).timeout(_commandTimeout);
         }
 
         final converted = _normalizeResponse(response);
@@ -108,7 +160,12 @@ class RouterService {
 
         return converted;
       } catch (_) {
-        await Future.delayed(Duration(seconds: i + 1));
+        _connected = false;
+
+        if (i < 2) {
+          await connect(forceReconnect: true);
+          await Future.delayed(Duration(milliseconds: 300 * (i + 1)));
+        }
       }
     }
 
@@ -127,6 +184,7 @@ class RouterService {
         'interface': interfaceName,
         'once': '',
       },
+      useCache: false,
     );
 
     if (result.isNotEmpty) {
