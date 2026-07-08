@@ -25,6 +25,7 @@ class RouterService {
     required this.password,
   });
 
+  // ==================== الاتصال ====================
   Future<bool> connect({bool forceReconnect = false}) async {
     if (!forceReconnect && _connected && _client != null) {
       return true;
@@ -96,6 +97,7 @@ class RouterService {
     }
   }
 
+  // ==================== معالجة الردود ====================
   List<Map<String, dynamic>> _normalizeResponse(dynamic response) {
     if (response is List) {
       return response.map((row) {
@@ -118,10 +120,10 @@ class RouterService {
     return [];
   }
 
+  // ==================== إرسال الأوامر ====================
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, dynamic>? params,
-    bool usePost = false,
     bool useCache = false,
   }) async {
     final cacheKey = '$command${params?.toString() ?? ''}';
@@ -177,6 +179,7 @@ class RouterService {
     _cacheTimestamps.clear();
   }
 
+  // ==================== دوال مساعدة للحصول على بيانات محددة ====================
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
     final result = await sendCommand(
       '/interface/monitor-traffic',
@@ -190,20 +193,9 @@ class RouterService {
     if (result.isNotEmpty) {
       final row = result.first;
 
-      final rxBits = double.tryParse(
-            row['rx-bits-per-second']?.toString() ?? '',
-          ) ??
-          0;
-
-      final txBits = double.tryParse(
-            row['tx-bits-per-second']?.toString() ?? '',
-          ) ??
-          0;
-
-      final totalBits = double.tryParse(
-            row['bits-per-second']?.toString() ?? '',
-          ) ??
-          0;
+      final rxBits = double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ?? 0;
+      final txBits = double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ?? 0;
+      final totalBits = double.tryParse(row['bits-per-second']?.toString() ?? '') ?? 0;
 
       if (rxBits > 0 || txBits > 0) {
         return {
@@ -226,13 +218,12 @@ class RouterService {
     };
   }
 
+  // ==================== ستريمات المراقبة ====================
   Stream<double> monitorTrafficStream(String interface) async* {
     while (_connected && _client != null) {
       try {
         final data = await getPortCurrentRate(interface);
-        final totalMbps = ((data['rx-bits-per-second'] ?? 0) +
-                (data['tx-bits-per-second'] ?? 0)) /
-            1000000;
+        final totalMbps = ((data['rx-bits-per-second'] ?? 0) + (data['tx-bits-per-second'] ?? 0)) / 1000000;
         yield totalMbps;
       } catch (_) {
         yield 0;
@@ -241,8 +232,7 @@ class RouterService {
     }
   }
 
-  Stream<Map<String, double>> monitorTrafficDetailsStream(
-      String interface) async* {
+  Stream<Map<String, double>> monitorTrafficDetailsStream(String interface) async* {
     while (_connected && _client != null) {
       try {
         final data = await getPortCurrentRate(interface);
@@ -257,6 +247,7 @@ class RouterService {
     }
   }
 
+  // ==================== دوال جلب البيانات المختلفة ====================
   Future<List<Map<String, dynamic>>> getSystemHealth() =>
       sendCommand('/system/health/print', useCache: true);
 
@@ -293,6 +284,7 @@ class RouterService {
   Future<List<Map<String, dynamic>>> getUserManagerSessions() =>
       sendCommand('/tool/user-manager/session/print', useCache: true);
 
+  // ==================== الإنهاء ====================
   void disconnect() {
     _client?.close();
     _client = null;
