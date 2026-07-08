@@ -11,16 +11,23 @@ class RoutersScreen extends StatefulWidget {
 }
 
 class _RoutersScreenState extends State<RoutersScreen> {
+  static const String _licenseCachePhoneKey = 'license_cache_phone';
+  static const String _licenseCacheValueKey = 'license_cache_value';
+  static const String _licenseCacheCheckedAtKey = 'license_cache_checked_at';
+  static const Duration _licenseCacheDuration = Duration(hours: 12);
+
   final SecureStorageService _storage = SecureStorageService();
 
   List<Map<String, String>> _routers = [];
   int _remainingDays = 0;
   bool _loading = false;
+  bool _checkingRemainingDays = false;
 
   @override
   void initState() {
     super.initState();
-    _refreshData();
+    _loadRouters();
+    _checkRemainingDays();
   }
 
   Future<void> _refreshData() async {
@@ -36,32 +43,91 @@ class _RoutersScreenState extends State<RoutersScreen> {
     setState(() => _routers = routers);
   }
 
+  Future<bool?> _readCachedLicense(String phone) async {
+    final cachedPhone = await _storage.read(_licenseCachePhoneKey);
+    final cachedValue = await _storage.read(_licenseCacheValueKey);
+    final cachedAt = await _storage.read(_licenseCacheCheckedAtKey);
+
+    if (cachedPhone == null ||
+        cachedValue == null ||
+        cachedAt == null ||
+        cachedPhone.trim() != phone.trim()) {
+      return null;
+    }
+
+    final parsedAt = DateTime.tryParse(cachedAt);
+    if (parsedAt == null) return null;
+
+    if (DateTime.now().difference(parsedAt) > _licenseCacheDuration) {
+      return null;
+    }
+
+    return cachedValue == 'true';
+  }
+
+  Future<void> _saveCachedLicense(String phone, bool licensed) async {
+    await _storage.write(_licenseCachePhoneKey, phone);
+    await _storage.write(_licenseCacheValueKey, licensed ? 'true' : 'false');
+    await _storage.write(
+      _licenseCacheCheckedAtKey,
+      DateTime.now().toIso8601String(),
+    );
+  }
+
   Future<void> _checkRemainingDays() async {
-    final phone = await _storage.getPhone();
-    if (!mounted) return;
-
-    if (phone == null) {
-      setState(() => _remainingDays = 0);
-      return;
+    if (mounted) {
+      setState(() => _checkingRemainingDays = true);
     }
 
-    final licensed = await FirebaseService.checkLicense(phone);
-    if (!mounted) return;
+    try {
+      final phone = await _storage.getPhone();
+      if (!mounted) return;
 
-    if (licensed) {
-      setState(() => _remainingDays = 30);
-      return;
-    }
+      if (phone == null || phone.trim().isEmpty) {
+        setState(() => _remainingDays = 0);
+        return;
+      }
 
-    final firstLaunch = await _storage.getFirstLaunch();
-    if (!mounted) return;
+      final cachedLicense = await _readCachedLicense(phone);
+      bool? licensed = cachedLicense;
 
-    if (firstLaunch != null) {
-      final trialEnd = DateTime.parse(firstLaunch).add(const Duration(days: 3));
-      final diff = trialEnd.difference(DateTime.now()).inDays;
-      setState(() => _remainingDays = diff > 0 ? diff : 0);
-    } else {
-      setState(() => _remainingDays = 3);
+      if (licensed == null) {
+        try {
+          licensed = await FirebaseService.checkLicense(phone).timeout(
+            const Duration(seconds: 10),
+          );
+          await _saveCachedLicense(phone, licensed);
+        } catch (_) {
+          final fallback = await _readCachedLicense(phone);
+          if (fallback != null) {
+            licensed = fallback;
+          } else {
+            licensed = false;
+          }
+        }
+      }
+
+      if (!mounted) return;
+
+      if (licensed) {
+        setState(() => _remainingDays = 30);
+        return;
+      }
+
+      final firstLaunch = await _storage.getFirstLaunch();
+      if (!mounted) return;
+
+      if (firstLaunch != null) {
+        final trialEnd = DateTime.parse(firstLaunch).add(const Duration(days: 3));
+        final diff = trialEnd.difference(DateTime.now()).inDays;
+        setState(() => _remainingDays = diff > 0 ? diff : 0);
+      } else {
+        setState(() => _remainingDays = 3);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _checkingRemainingDays = false);
+      }
     }
   }
 
@@ -253,6 +319,8 @@ class _RoutersScreenState extends State<RoutersScreen> {
   }
 
   Widget _buildSummaryCard() {
+    final remainingText = _checkingRemainingDays ? '...' : '$_remainingDays يوم';
+
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(16),
@@ -299,7 +367,7 @@ class _RoutersScreenState extends State<RoutersScreen> {
               ),
               const SizedBox(height: 4),
               Text(
-                '$_remainingDays يوم',
+                remainingText,
                 style: const TextStyle(
                   color: AppTheme.gold,
                   fontSize: 16,
