@@ -12,6 +12,11 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static const String _licenseCachePhoneKey = 'license_cache_phone';
+  static const String _licenseCacheValueKey = 'license_cache_value';
+  static const String _licenseCacheCheckedAtKey = 'license_cache_checked_at';
+  static const Duration _licenseCacheDuration = Duration(hours: 12);
+
   final _phoneController = TextEditingController();
   final _pinController = TextEditingController();
   final _pinConfirmController = TextEditingController();
@@ -46,6 +51,54 @@ class _LoginScreenState extends State<LoginScreen> {
         _phoneController.text = phone;
         _isPinSet = true;
       });
+    }
+  }
+
+  Future<bool?> _readCachedLicense(String phone) async {
+    final cachedPhone = await _storage.read(_licenseCachePhoneKey);
+    final cachedValue = await _storage.read(_licenseCacheValueKey);
+    final cachedAt = await _storage.read(_licenseCacheCheckedAtKey);
+
+    if (cachedPhone == null ||
+        cachedValue == null ||
+        cachedAt == null ||
+        cachedPhone.trim() != phone.trim()) {
+      return null;
+    }
+
+    final parsedAt = DateTime.tryParse(cachedAt);
+    if (parsedAt == null) return null;
+
+    if (DateTime.now().difference(parsedAt) > _licenseCacheDuration) {
+      return null;
+    }
+
+    return cachedValue == 'true';
+  }
+
+  Future<void> _saveCachedLicense(String phone, bool licensed) async {
+    await _storage.write(_licenseCachePhoneKey, phone);
+    await _storage.write(_licenseCacheValueKey, licensed ? 'true' : 'false');
+    await _storage.write(
+      _licenseCacheCheckedAtKey,
+      DateTime.now().toIso8601String(),
+    );
+  }
+
+  Future<bool> _resolveLicense(String phone) async {
+    final cached = await _readCachedLicense(phone);
+    if (cached != null) return cached;
+
+    try {
+      final licensed = await FirebaseService.checkLicense(phone).timeout(
+        const Duration(seconds: 10),
+      );
+      await _saveCachedLicense(phone, licensed);
+      return licensed;
+    } catch (_) {
+      final fallback = await _readCachedLicense(phone);
+      if (fallback != null) return fallback;
+      rethrow;
     }
   }
 
@@ -100,7 +153,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
       }
 
-      final licensed = await FirebaseService.checkLicense(phone);
+      final licensed = await _resolveLicense(phone);
 
       if (licensed) {
         _navigateTo('/routers');
