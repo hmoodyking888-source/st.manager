@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:routeros_api/routeros_api.dart';
 
+/// خدمة للتواصل مع جهاز RouterOS عبر واجهة API.
+/// تدعم إعادة المحاولة، التخزين المؤقت، والمراقبة الفورية للحركة.
 class RouterService {
   final String host;
   final int port;
@@ -120,14 +122,18 @@ class RouterService {
     return [];
   }
 
-  // ==================== إرسال الأوامر ====================
+  // ==================== إرسال الأوامر الأساسي ====================
+  /// إرسال أمر إلى RouterOS مع دعم إعادة المحاولة والتخزين المؤقت.
+  /// - [usePost] محجوز للتوافق مع الإصدارات السابقة (لا يُستخدم حالياً).
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, dynamic>? params,
+    bool usePost = false, // محجوز للتوافق مع side_drawer وغيره
     bool useCache = false,
   }) async {
     final cacheKey = '$command${params?.toString() ?? ''}';
 
+    // التحقق من الكاش
     if (useCache &&
         _cache.containsKey(cacheKey) &&
         _cacheTimestamps.containsKey(cacheKey)) {
@@ -139,6 +145,7 @@ class RouterService {
 
     await _ensureConnected();
 
+    // حلقة إعادة المحاولة (3 مرات)
     for (int i = 0; i < 3; i++) {
       try {
         dynamic response;
@@ -174,12 +181,14 @@ class RouterService {
     throw Exception('Failed after retries');
   }
 
+  /// مسح الكاش بالكامل.
   void clearCache() {
     _cache.clear();
     _cacheTimestamps.clear();
   }
 
-  // ==================== دوال مساعدة للحصول على بيانات محددة ====================
+  // ==================== دوال مساعدة ====================
+  /// الحصول على سرعةRX/TX الحالية لواجهة معينة (بالـ bits-per-second).
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
     final result = await sendCommand(
       '/interface/monitor-traffic',
@@ -193,9 +202,20 @@ class RouterService {
     if (result.isNotEmpty) {
       final row = result.first;
 
-      final rxBits = double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ?? 0;
-      final txBits = double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ?? 0;
-      final totalBits = double.tryParse(row['bits-per-second']?.toString() ?? '') ?? 0;
+      final rxBits = double.tryParse(
+            row['rx-bits-per-second']?.toString() ?? '',
+          ) ??
+          0;
+
+      final txBits = double.tryParse(
+            row['tx-bits-per-second']?.toString() ?? '',
+          ) ??
+          0;
+
+      final totalBits = double.tryParse(
+            row['bits-per-second']?.toString() ?? '',
+          ) ??
+          0;
 
       if (rxBits > 0 || txBits > 0) {
         return {
@@ -219,11 +239,14 @@ class RouterService {
   }
 
   // ==================== ستريمات المراقبة ====================
+  /// ستريم يبث إجمالي الاستخدام (Mbps) كل ثانية.
   Stream<double> monitorTrafficStream(String interface) async* {
     while (_connected && _client != null) {
       try {
         final data = await getPortCurrentRate(interface);
-        final totalMbps = ((data['rx-bits-per-second'] ?? 0) + (data['tx-bits-per-second'] ?? 0)) / 1000000;
+        final totalMbps = ((data['rx-bits-per-second'] ?? 0) +
+                (data['tx-bits-per-second'] ?? 0)) /
+            1000000;
         yield totalMbps;
       } catch (_) {
         yield 0;
@@ -232,7 +255,9 @@ class RouterService {
     }
   }
 
-  Stream<Map<String, double>> monitorTrafficDetailsStream(String interface) async* {
+  /// ستريم يبث تفاصيل RX/TX (bits-per-second) كل ثانية.
+  Stream<Map<String, double>> monitorTrafficDetailsStream(
+      String interface) async* {
     while (_connected && _client != null) {
       try {
         final data = await getPortCurrentRate(interface);
@@ -284,7 +309,7 @@ class RouterService {
   Future<List<Map<String, dynamic>>> getUserManagerSessions() =>
       sendCommand('/tool/user-manager/session/print', useCache: true);
 
-  // ==================== الإنهاء ====================
+  // ==================== إنهاء الخدمة ====================
   void disconnect() {
     _client?.close();
     _client = null;
