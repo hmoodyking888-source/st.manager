@@ -42,8 +42,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   final SecureStorageService _storage = SecureStorageService();
 
   List<Map<String, dynamic>> _accounts = [];
-  bool _loading = false;
+  List<Map<String, dynamic>> _lastSecrets = [];
+  List<Map<String, dynamic>> _lastActive = [];
 
+  bool _loading = false;
   String _searchQuery = '';
   String _sortBy = 'status';
   String _filter = 'all';
@@ -112,13 +114,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     _CommentData parsed,
   ) {
     if (isActive || isDisabled || isExpired) return false;
+
     final lastLoggedOut = _normalizeText(secret['last-logged-out']);
     if (lastLoggedOut.isNotEmpty) return false;
 
     final lastLoggedIn = _normalizeText(secret['last-logged-in']);
     if (lastLoggedIn.isNotEmpty) return false;
 
-    if (parsed.expiryDate != null) return false;
     return true;
   }
 
@@ -198,14 +200,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   }
 
   String _sessionKey(Map<String, dynamic> item) {
-    for (final key in [
-      '.id',
-      'name',
-      'user',
-      'username',
-      'caller-id',
-      'address'
-    ]) {
+    for (final key in ['.id', 'name', 'user', 'username', 'caller-id', 'address']) {
       final v = _normalizeText(item[key]);
       if (v.isNotEmpty) return v;
     }
@@ -419,17 +414,25 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
     _isFetchingTraffic = true;
     try {
-      final entries = await Future.wait(
-        activeList.map((active) async {
-          final key = _sessionKey(active);
-          final traffic = await _getSessionTraffic(active);
-          return MapEntry(key, traffic);
-        }),
-      );
+      const batchSize = 6;
+      final trafficBySession = <String, Map<String, double>>{};
 
-      final trafficBySession = Map<String, Map<String, double>>.fromEntries(
-        entries,
-      );
+      for (var i = 0; i < activeList.length; i += batchSize) {
+        final end = (i + batchSize < activeList.length) ? i + batchSize : activeList.length;
+        final batch = activeList.sublist(i, end);
+
+        final entries = await Future.wait(
+          batch.map((active) async {
+            final key = _sessionKey(active);
+            final traffic = await _getSessionTraffic(active);
+            return MapEntry(key, traffic);
+          }),
+        );
+
+        for (final entry in entries) {
+          trafficBySession[entry.key] = entry.value;
+        }
+      }
 
       if (!mounted) return;
 
@@ -493,6 +496,21 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return total;
   }
 
+  Future<List<Map<String, dynamic>>?> _safeFetchList(String command) async {
+    if (widget.routerService == null) return null;
+
+    try {
+      final result = await widget.routerService!
+          .sendCommand(command, useCache: false)
+          .timeout(_dataFetchTimeout);
+      return List<Map<String, dynamic>>.from(result);
+    } on TimeoutException {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _load({bool initial = false, bool background = false}) async {
     if (_isLoading) return;
     if (widget.routerService == null) return;
@@ -504,16 +522,22 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
     try {
       final results = await Future.wait([
-        widget.routerService!
-            .sendCommand('/ppp/secret/print', useCache: false)
-            .timeout(_dataFetchTimeout),
-        widget.routerService!
-            .sendCommand('/ppp/active/print', useCache: false)
-            .timeout(_dataFetchTimeout),
+        _safeFetchList('/ppp/secret/print'),
+        _safeFetchList('/ppp/active/print'),
       ]);
 
-      final secrets = List<Map<String, dynamic>>.from(results[0]);
-      final activeList = List<Map<String, dynamic>>.from(results[1]);
+      final secretsResult = results[0] as List<Map<String, dynamic>>?;
+      final activeResult = results[1] as List<Map<String, dynamic>>?;
+
+      if (secretsResult != null) {
+        _lastSecrets = secretsResult;
+      }
+      if (activeResult != null) {
+        _lastActive = activeResult;
+      }
+
+      final secrets = secretsResult ?? _lastSecrets;
+      final activeList = activeResult ?? _lastActive;
       final activeBySession = _buildActiveBySession(activeList);
 
       if (await _shouldRunExpirationCheck()) {
@@ -538,12 +562,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       _fetchTrafficInBackground(activeBySession.values.toList());
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('فشل التحميل: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
         setState(() => _loading = false);
       }
     } finally {
@@ -586,6 +604,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         status = 'expired';
       } else if (isActive) {
         status = 'active';
+      } else if (isNew) {
+        status = 'new';
       } else {
         status = 'offline';
       }
@@ -829,7 +849,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       case 'offline':
         return Colors.blue;
       case 'new':
-        return Colors.deepPurpleAccent;
+        return Colors.amber;
       default:
         return AppTheme.gold;
     }
@@ -896,9 +916,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   Widget _buildSpeedBadge(
     double rxSpeed,
-    double txSpeed, {
-    required String uptime,
-  }) {
+    double txSpeed,
+  ) {
     final primaryLabel = _showRxFirst ? 'RX' : 'TX';
     final primaryValue = _showRxFirst ? rxSpeed : txSpeed;
     final secondaryLabel = _showRxFirst ? 'TX' : 'RX';
@@ -943,15 +962,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 style: const TextStyle(
                   color: Colors.white70,
                   fontSize: 9,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'مدة الاتصال: ${_formatUptime(uptime)}',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
                 ),
               ),
             ],
@@ -1359,13 +1369,16 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final browserIp = _normalizeText(user['browser-ip']);
     final isNew = user['is-new'] == true;
     final uptime = _normalizeText(user['uptime']);
+    final cardAccent = isNew ? Colors.amber : _statusColor(status);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: isNew
+            ? Colors.amber.withOpacity(0.08)
+            : Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: _statusColor(status).withOpacity(0.45)),
+        border: Border.all(color: cardAccent.withOpacity(0.45)),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(24),
@@ -1383,14 +1396,16 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                     height: 48,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: _statusColor(status).withOpacity(0.12),
+                      color: cardAccent.withOpacity(0.12),
                       border: Border.all(
-                        color: _statusColor(status).withOpacity(0.4),
+                        color: cardAccent.withOpacity(0.4),
                       ),
                     ),
                     child: Icon(
-                      isActive ? Icons.person : Icons.person_off,
-                      color: _statusColor(status),
+                      isNew
+                          ? Icons.fiber_new
+                          : (isActive ? Icons.person : Icons.person_off),
+                      color: cardAccent,
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -1460,7 +1475,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                             if (isNew)
                               _buildPill(
                                 'جديد',
-                                Colors.deepPurpleAccent,
+                                Colors.amber,
                                 icon: Icons.fiber_new,
                               ),
                             if (profile.isNotEmpty)
@@ -1483,29 +1498,36 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                   ),
                   if (isActive) ...[
                     const SizedBox(width: 8),
-                    _buildSpeedBadge(
-                      rx,
-                      tx,
-                      uptime: uptime,
-                    ),
+                    _buildSpeedBadge(rx, tx),
                   ],
                 ],
               ),
+              if (isActive) ...[
+                const SizedBox(height: 8),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Icon(
+                      Icons.access_time_rounded,
+                      size: 12,
+                      color: onSurface.withOpacity(0.65),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      _formatUptime(uptime),
+                      style: TextStyle(
+                        color: onSurface.withOpacity(0.8),
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 12),
               if (phone.isNotEmpty) _buildInfoLine('الهاتف', phone),
               if (expiry.isNotEmpty) _buildInfoLine('الصلاحية', expiry),
               if (note.isNotEmpty) _buildInfoLine('الكومنت', note),
-              if (isActive) ...[
-                const SizedBox(height: 8),
-                Text(
-                  'مدة الاتصال: ${_formatUptime(uptime)}',
-                  style: TextStyle(
-                    color: onSurface.withOpacity(0.78),
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ],
               const SizedBox(height: 8),
               if (status == 'active')
                 Text(
@@ -1540,7 +1562,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 Text(
                   'حساب جديد لم يتصل بعد',
                   style: TextStyle(
-                    color: Colors.deepPurpleAccent,
+                    color: Colors.amber,
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1588,8 +1610,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               selectedColor: AppTheme.gold,
               backgroundColor: Theme.of(context).cardColor,
               labelStyle: TextStyle(
-                color:
-                    selected ? Colors.black : Theme.of(context).colorScheme.onSurface,
+                color: selected
+                    ? Colors.black
+                    : Theme.of(context).colorScheme.onSurface,
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
               ),
@@ -1679,7 +1702,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       DropdownMenuItem(value: 'status', child: Text('الحالة')),
                       DropdownMenuItem(value: 'new', child: Text('الجديدة')),
                       DropdownMenuItem(value: 'name', child: Text('الاسم')),
-                      DropdownMenuItem(value: 'uptime', child: Text('مدة الاتصال')),
+                      DropdownMenuItem(value: 'uptime', child: Text('الوقت')),
                       DropdownMenuItem(value: 'usage', child: Text('الاستخدام')),
                       DropdownMenuItem(value: 'profile', child: Text('الباقة')),
                     ],
