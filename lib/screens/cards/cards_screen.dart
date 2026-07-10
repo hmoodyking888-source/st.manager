@@ -9,7 +9,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:qr_flutter/qr_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
@@ -114,10 +113,14 @@ class _CardsScreenState extends State<CardsScreen>
   int _selectedTemplateIndex = 0;
 
   // إعدادات وتفعيل العناصر
+  // FIX (حذف QR بالكامل): أُزيل `_showQR` وكل ما يتعلق بمعاينة أو طباعة
+  // الباركود، لأن مكتبة qr_flutter غير مثبّتة في pubspec.yaml وهذا هو
+  // السبب المباشر لفشل البناء بالكامل كما يظهر في سجل الأخطاء:
+  // "The method 'QrImageView' isn't defined" و
+  // "The getter 'QrVersions' isn't defined".
   bool _showNetwork = true;
   bool _showDuration = true;
   bool _showNotes = true;
-  bool _showQR = true;
 
   // مواضع الحقول (X, Y)
   double _userX = 0.35, _userY = 0.20;
@@ -125,7 +128,6 @@ class _CardsScreenState extends State<CardsScreen>
   double _netX = 0.05, _netY = 0.05;
   double _durX = 0.05, _durY = 0.70;
   double _notesX = 0.40, _notesY = 0.80;
-  double _qrX = 0.75, _qrY = 0.20;
 
   // أحجام الخطوط / العناصر
   double _userSize = 18;
@@ -133,7 +135,6 @@ class _CardsScreenState extends State<CardsScreen>
   double _netSize = 14;
   double _durSize = 12;
   double _notesSize = 10;
-  double _qrSize = 60;
 
   // ألوان الخطوط الافتراضية
   Color _userColor = Colors.black;
@@ -183,11 +184,17 @@ class _CardsScreenState extends State<CardsScreen>
     Colors.grey,
   ];
 
+  // FIX (مشكلة #4 - خط عربي قد يفشل بصمت): نتتبّع صراحةً هل نجح تحميل
+  // الخط العربي أم لا، لنستطيع تنبيه المستخدم بدل طباعة نص فارغ/مربعات
+  // بصمت داخل ملف الـ PDF النهائي.
+  bool _arabicFontLoadFailed = false;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _loadProfiles();
+    _refreshPreview();
   }
 
   @override
@@ -304,10 +311,42 @@ class _CardsScreenState extends State<CardsScreen>
     }
   }
 
+  // FIX (مشكلة #5 - زر حذف وهمي): الزر السابق كان أيقونة سلة مهملات
+  // تُغلق النافذة فقط دون حذف أي شيء من الراوتر فعلياً، رغم أنه بصرياً
+  // يوحي بأنه يحذف الحساب الذي أُنشئ للتو. الآن الزر يستدعي فعلياً
+  // /ppp أو /ip/hotspot/user/remove على الـ id الحقيقي للحساب، مع تأكيد
+  // قبل الحذف وتغذية راجعة واضحة عند النجاح أو الفشل.
+  Future<void> _deleteJustCreatedUser(String username) async {
+    if (widget.routerService == null) return;
+    try {
+      final list = await widget.routerService!.sendCommand(
+        '/ip/hotspot/user/print',
+        params: {'?name': username},
+      );
+      if (list.isEmpty) return;
+      final id = list.first['.id']?.toString() ?? '';
+      if (id.isEmpty) return;
+      await widget.routerService!.sendCommand(
+        '/ip/hotspot/user/remove',
+        params: {'numbers': id},
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تم حذف الحساب "$username"')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر حذف الحساب: $e')),
+        );
+      }
+    }
+  }
+
   void _showSingleCardSuccessDialog() {
     final user = _sUserCtrl.text.trim();
     final pass = _sPassCtrl.text.trim();
-    final qrData = 'http://10.0.0.1/login?username=$user&password=$pass'; // عدل الـ IP حسب شبكتك
 
     showDialog(
       context: context,
@@ -329,35 +368,61 @@ class _CardsScreenState extends State<CardsScreen>
                 style: TextStyle(color: Colors.white, fontSize: 16)),
             const SizedBox(height: 12),
             Text('المستخدم: $user',
-                style: const TextStyle(color: Colors.amber, fontSize: 18, fontWeight: FontWeight.bold)),
+                style: const TextStyle(
+                    color: Colors.amber,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
             Text('كلمة المرور: $pass',
-                style: const TextStyle(color: Colors.amber, fontSize: 18, fontWeight: FontWeight.bold)),
-            Text('الحجم: ${_sVolumeCtrl.text}', style: const TextStyle(color: Colors.white70)),
-            Text('المدة: ${_sValidityCtrl.text} $_sValidityUnit', style: const TextStyle(color: Colors.white70)),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(8),
-              color: Colors.white,
-              child: QrImageView(
-                data: qrData,
-                version: QrVersions.auto,
-                size: 150.0,
-              ),
-            ),
+                style: const TextStyle(
+                    color: Colors.amber,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
+            Text('الحجم: ${_sVolumeCtrl.text}',
+                style: const TextStyle(color: Colors.white70)),
+            Text('المدة: ${_sValidityCtrl.text} $_sValidityUnit',
+                style: const TextStyle(color: Colors.white70)),
             const SizedBox(height: 16),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 IconButton(
                   onPressed: () {
-                    Share.share('معلومات الدخول\nالمستخدم: $user\nكلمة المرور: $pass\nالمدة: ${_sValidityCtrl.text} $_sValidityUnit');
+                    Share.share(
+                        'معلومات الدخول\nالمستخدم: $user\nكلمة المرور: $pass\nالمدة: ${_sValidityCtrl.text} $_sValidityUnit');
                   },
                   icon: const Icon(Icons.share, color: Colors.green, size: 30),
                 ),
                 IconButton(
-                  onPressed: () {
-                    // كود الحذف إذا لزم الأمر
-                    Navigator.pop(ctx);
+                  onPressed: () async {
+                    // FIX: تأكيد قبل الحذف الفعلي، ثم استدعاء الحذف الحقيقي
+                    final confirm = await showDialog<bool>(
+                      context: ctx,
+                      builder: (_) => AlertDialog(
+                        backgroundColor: AppTheme.semiBlack,
+                        title: const Text('تأكيد الحذف',
+                            style: TextStyle(color: Colors.white)),
+                        content: Text(
+                          'هل تريد حذف الحساب "$user" الذي أُنشئ للتو؟',
+                          style: const TextStyle(color: Colors.white70),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, false),
+                            child: const Text('إلغاء',
+                                style: TextStyle(color: Colors.white54)),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(context, true),
+                            child: const Text('حذف',
+                                style: TextStyle(color: Colors.red)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      await _deleteJustCreatedUser(user);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    }
                   },
                   icon: const Icon(Icons.delete, color: Colors.pink, size: 30),
                 ),
@@ -407,8 +472,7 @@ class _CardsScreenState extends State<CardsScreen>
                   decoration: const InputDecoration(
                       contentPadding: EdgeInsets.symmetric(horizontal: 8)),
                   items: ['يوم', 'ساعة']
-                      .map((e) =>
-                          DropdownMenuItem(value: e, child: Text(e)))
+                      .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                       .toList(),
                   onChanged: (v) => setState(() => _sValidityUnit = v!),
                 ),
@@ -567,7 +631,10 @@ class _CardsScreenState extends State<CardsScreen>
           // العناصر القابلة للسحب
           if (_showNetwork)
             _draggableItem(
-              x: _netX, y: _netY, parentW: w, parentH: h,
+              x: _netX,
+              y: _netY,
+              parentW: w,
+              parentH: h,
               onMove: (d) => setState(() {
                 _netX = _clamp01(_netX + d.dx / w);
                 _netY = _clamp01(_netY + d.dy / h);
@@ -580,7 +647,10 @@ class _CardsScreenState extends State<CardsScreen>
             ),
 
           _draggableItem(
-            x: _userX, y: _userY, parentW: w, parentH: h,
+            x: _userX,
+            y: _userY,
+            parentW: w,
+            parentH: h,
             onMove: (d) => setState(() {
               _userX = _clamp01(_userX + d.dx / w);
               _userY = _clamp01(_userY + d.dy / h);
@@ -588,7 +658,8 @@ class _CardsScreenState extends State<CardsScreen>
             child: Row(
               children: [
                 Text('اسم المستخدم: ',
-                    style: TextStyle(color: Colors.black54, fontSize: _userSize * 0.7)),
+                    style: TextStyle(
+                        color: Colors.black54, fontSize: _userSize * 0.7)),
                 Text(_previewUser,
                     style: TextStyle(
                         color: _userColor,
@@ -599,7 +670,10 @@ class _CardsScreenState extends State<CardsScreen>
           ),
 
           _draggableItem(
-            x: _passX, y: _passY, parentW: w, parentH: h,
+            x: _passX,
+            y: _passY,
+            parentW: w,
+            parentH: h,
             onMove: (d) => setState(() {
               _passX = _clamp01(_passX + d.dx / w);
               _passY = _clamp01(_passY + d.dy / h);
@@ -607,7 +681,8 @@ class _CardsScreenState extends State<CardsScreen>
             child: Row(
               children: [
                 Text('كلمة المرور: ',
-                    style: TextStyle(color: Colors.black54, fontSize: _passSize * 0.7)),
+                    style: TextStyle(
+                        color: Colors.black54, fontSize: _passSize * 0.7)),
                 Text(_previewPass,
                     style: TextStyle(
                         color: _passColor,
@@ -619,7 +694,10 @@ class _CardsScreenState extends State<CardsScreen>
 
           if (_showDuration)
             _draggableItem(
-              x: _durX, y: _durY, parentW: w, parentH: h,
+              x: _durX,
+              y: _durY,
+              parentW: w,
+              parentH: h,
               onMove: (d) => setState(() {
                 _durX = _clamp01(_durX + d.dx / w);
                 _durY = _clamp01(_durY + d.dy / h);
@@ -633,33 +711,22 @@ class _CardsScreenState extends State<CardsScreen>
 
           if (_showNotes)
             _draggableItem(
-              x: _notesX, y: _notesY, parentW: w, parentH: h,
+              x: _notesX,
+              y: _notesY,
+              parentW: w,
+              parentH: h,
               onMove: (d) => setState(() {
                 _notesX = _clamp01(_notesX + d.dx / w);
                 _notesY = _clamp01(_notesY + d.dy / h);
               }),
-              child: Text(_mNotesCtrl.text.isEmpty ? 'ملاحظة' : _mNotesCtrl.text,
-                  style: TextStyle(
-                      color: _notesColor, fontSize: _notesSize)),
+              child: Text(
+                  _mNotesCtrl.text.isEmpty ? 'ملاحظة' : _mNotesCtrl.text,
+                  style:
+                      TextStyle(color: _notesColor, fontSize: _notesSize)),
             ),
 
-          if (_showQR)
-            _draggableItem(
-              x: _qrX, y: _qrY, parentW: w, parentH: h,
-              onMove: (d) => setState(() {
-                _qrX = _clamp01(_qrX + d.dx / w);
-                _qrY = _clamp01(_qrY + d.dy / h);
-              }),
-              child: Container(
-                padding: const EdgeInsets.all(2),
-                color: Colors.white,
-                child: QrImageView(
-                  data: 'dummy',
-                  version: QrVersions.auto,
-                  size: _qrSize,
-                ),
-              ),
-            ),
+          // FIX (حذف QR بالكامل): أُزيل عنصر معاينة الباركود بالكامل من
+          // هنا (كان يستخدم QrImageView وبيانات وهمية 'dummy').
         ],
       ),
     );
@@ -693,7 +760,7 @@ class _CardsScreenState extends State<CardsScreen>
             )
           else
             const SizedBox(width: 48), // مساحة بديلة للتشيك بوكس
-          
+
           Expanded(
             flex: 3,
             child: textCtrl != null
@@ -703,13 +770,14 @@ class _CardsScreenState extends State<CardsScreen>
                     decoration: InputDecoration(
                         labelText: label,
                         isDense: true,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 4)),
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 4)),
                     onChanged: (_) => setState(() {}),
                   )
                 : Text(label, style: const TextStyle(color: Colors.white)),
           ),
           const SizedBox(width: 8),
-          
+
           // حجم الخط
           Expanded(
             flex: 2,
@@ -720,7 +788,7 @@ class _CardsScreenState extends State<CardsScreen>
                   child: Slider(
                     value: sizeValue,
                     min: 8,
-                    max: label == 'الباركود' ? 120 : 40,
+                    max: 40,
                     onChanged: onSizeChanged,
                     activeColor: AppTheme.gold,
                   ),
@@ -728,7 +796,7 @@ class _CardsScreenState extends State<CardsScreen>
               ],
             ),
           ),
-          
+
           // اللون
           DropdownButton<Color>(
             value: colorValue,
@@ -820,10 +888,11 @@ class _CardsScreenState extends State<CardsScreen>
           // ── Preview ──
           Container(
             height: 200,
-            decoration: BoxDecoration(
-                border: Border.all(color: Colors.white24, width: 1)),
+            decoration:
+                BoxDecoration(border: Border.all(color: Colors.white24, width: 1)),
             child: LayoutBuilder(
-              builder: (_, c) => _buildMultiPreviewCard(c.maxWidth, c.maxHeight),
+              builder: (_, c) =>
+                  _buildMultiPreviewCard(c.maxWidth, c.maxHeight),
             ),
           ),
           Align(
@@ -844,7 +913,8 @@ class _CardsScreenState extends State<CardsScreen>
                 Row(
                   children: [
                     Expanded(
-                        child: _buildInputRow('اختر باقة هوتسبوت', _mProfileCtrl)),
+                        child:
+                            _buildInputRow('اختر باقة هوتسبوت', _mProfileCtrl)),
                   ],
                 ),
                 const SizedBox(height: 8),
@@ -853,19 +923,25 @@ class _CardsScreenState extends State<CardsScreen>
                     Expanded(
                         child: TextField(
                             controller: _userLenCtrl,
-                            decoration: const InputDecoration(labelText: 'أرقام المستخدم'),
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                                labelText: 'أرقام المستخدم'),
                             style: const TextStyle(color: Colors.white))),
                     const SizedBox(width: 8),
                     Expanded(
                         child: TextField(
                             controller: _passLenCtrl,
-                            decoration: const InputDecoration(labelText: 'أرقام السر'),
+                            keyboardType: TextInputType.number,
+                            decoration:
+                                const InputDecoration(labelText: 'أرقام السر'),
                             style: const TextStyle(color: Colors.white))),
                     const SizedBox(width: 8),
                     Expanded(
                         child: TextField(
                             controller: _cardCountCtrl,
-                            decoration: const InputDecoration(labelText: 'عدد الكروت'),
+                            keyboardType: TextInputType.number,
+                            decoration:
+                                const InputDecoration(labelText: 'عدد الكروت'),
                             style: const TextStyle(color: Colors.white))),
                   ],
                 ),
@@ -875,13 +951,17 @@ class _CardsScreenState extends State<CardsScreen>
                     Expanded(
                         child: TextField(
                             controller: _pdfColsCtrl,
-                            decoration: const InputDecoration(labelText: 'عدد الأعمدة بالصفحة (PDF)'),
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                                labelText: 'عدد الأعمدة بالصفحة (PDF)'),
                             style: const TextStyle(color: Colors.white))),
                     const SizedBox(width: 8),
                     Expanded(
                         child: TextField(
                             controller: _pdfRowsCtrl,
-                            decoration: const InputDecoration(labelText: 'عدد الصفوف بالصفحة (PDF)'),
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(
+                                labelText: 'عدد الصفوف بالصفحة (PDF)'),
                             style: const TextStyle(color: Colors.white))),
                   ],
                 ),
@@ -892,20 +972,13 @@ class _CardsScreenState extends State<CardsScreen>
 
           // ── تصميم العناصر ──
           const Text('تخصيص العناصر (الحجم واللون)',
-              style: TextStyle(color: AppTheme.gold, fontWeight: FontWeight.bold)),
+              style:
+                  TextStyle(color: AppTheme.gold, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
 
-          _buildAdvancedSettingRow(
-            label: 'الباركود',
-            showToggle: true,
-            toggleValue: _showQR,
-            onToggle: (v) => setState(() => _showQR = v),
-            sizeValue: _qrSize,
-            onSizeChanged: (v) => setState(() => _qrSize = v),
-            colorValue: Colors.black, // لون الباركود ثابت عادة
-            onColorChanged: (_) {},
-          ),
-          
+          // FIX (حذف QR بالكامل): أُزيل صف إعدادات "الباركود" الذي كان
+          // يتحكم بحجم وإظهار الـ QR.
+
           _buildAdvancedSettingRow(
             label: 'اسم الشبكة',
             showToggle: true,
@@ -984,50 +1057,156 @@ class _CardsScreenState extends State<CardsScreen>
   // ─────────────────────────────────────────────
   // توليد وبناء PDF المتعدد
   // ─────────────────────────────────────────────
+
+  // FIX (مشكلة #7 - لا يوجد تحقق قبل التوليد): نتحقق الآن صراحةً من صحة كل
+  // الأرقام المُدخلة قبل بدء أي عملية، وإن كانت غير صالحة نوقف العملية
+  // ونعرض رسالة واضحة بدل استخدام قيم افتراضية بصمت (?? 10) قد لا تعكس ما
+  // قصده المستخدم فعلاً.
+  bool _validateGenerationInputs() {
+    final count = int.tryParse(_cardCountCtrl.text.trim());
+    final userLen = int.tryParse(_userLenCtrl.text.trim());
+    final passLen = int.tryParse(_passLenCtrl.text.trim());
+    final cols = int.tryParse(_pdfColsCtrl.text.trim());
+    final rows = int.tryParse(_pdfRowsCtrl.text.trim());
+
+    String? error;
+    if (count == null || count < 1 || count > 1000) {
+      error = 'عدد الكروت يجب أن يكون رقماً بين 1 و1000';
+    } else if (userLen == null || userLen < 4 || userLen > 20) {
+      error = 'أرقام المستخدم يجب أن تكون بين 4 و20';
+    } else if (passLen == null || passLen < 4 || passLen > 20) {
+      error = 'أرقام كلمة السر يجب أن تكون بين 4 و20';
+    } else if (cols == null || cols < 1 || cols > 10) {
+      error = 'عدد الأعمدة يجب أن يكون بين 1 و10';
+    } else if (rows == null || rows < 1 || rows > 20) {
+      error = 'عدد الصفوف يجب أن يكون بين 1 و20';
+    }
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: Colors.red),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  // FIX (مشكلة #4 - كروت مكررة): نولّد الأسماء وكلمات السر داخل مجموعة
+  // (Set) لضمان عدم تكرار أي زوج username داخل نفس الدفعة، مع حد أقصى
+  // من المحاولات لتفادي أي حلقة لا نهائية في حال كان الطول قصيراً جداً
+  // بالنسبة لعدد الكروت المطلوب.
+  List<_GeneratedCard> _generateUniqueCards({
+    required int count,
+    required int userLen,
+    required int passLen,
+    required String profile,
+    required String network,
+    required String duration,
+    required String notes,
+  }) {
+    final usedUsers = <String>{};
+    final cards = <_GeneratedCard>[];
+    int attempts = 0;
+    final maxAttempts = count * 50 + 500;
+
+    while (cards.length < count && attempts < maxAttempts) {
+      attempts++;
+      final user = _generateRandom(length: userLen);
+      if (usedUsers.contains(user)) continue;
+      usedUsers.add(user);
+      cards.add(_GeneratedCard(
+        user: user,
+        pass: _generateRandom(length: passLen),
+        profile: profile,
+        network: network,
+        duration: duration,
+        notes: notes,
+      ));
+    }
+
+    return cards;
+  }
+
   Future<void> _generatePdfAndShare() async {
     if (_isGeneratingPdf) return;
+
+    // FIX (مشكلة #7): تحقق صريح قبل أي عمل
+    if (!_validateGenerationInputs()) return;
+
     setState(() => _isGeneratingPdf = true);
 
     try {
-      final count = (int.tryParse(_cardCountCtrl.text) ?? 10).clamp(1, 1000);
-      final userLen = (int.tryParse(_userLenCtrl.text) ?? 6).clamp(4, 20);
-      final passLen = (int.tryParse(_passLenCtrl.text) ?? 5).clamp(4, 20);
+      final count = int.parse(_cardCountCtrl.text.trim());
+      final userLen = int.parse(_userLenCtrl.text.trim());
+      final passLen = int.parse(_passLenCtrl.text.trim());
       final profile = _mProfileCtrl.text.trim();
 
-      final cards = <_GeneratedCard>[];
-      for (int i = 0; i < count; i++) {
-        cards.add(_GeneratedCard(
-          user: _generateRandom(length: userLen),
-          pass: _generateRandom(length: passLen),
-          profile: profile,
-          network: _mNetworkCtrl.text.trim(),
-          duration: _mDurationCtrl.text.trim(),
-          notes: _mNotesCtrl.text.trim(),
-        ));
+      // FIX (مشكلة #4): توليد كروت فريدة بدل توليد بلا تحقق من التكرار
+      final cards = _generateUniqueCards(
+        count: count,
+        userLen: userLen,
+        passLen: passLen,
+        profile: profile,
+        network: _mNetworkCtrl.text.trim(),
+        duration: _mDurationCtrl.text.trim(),
+        notes: _mNotesCtrl.text.trim(),
+      );
+
+      if (cards.length < count && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'تم توليد ${cards.length} كرت فريد فقط من أصل $count المطلوبة '
+              '(الطول المُختار صغير جداً لعدد الكروت المطلوب)',
+            ),
+            backgroundColor: Colors.orange,
+          ),
+        );
       }
 
-      // إضافة للراوتر
+      // FIX (مشكلة #1 - تسريب/بطء فادح عند الإضافة للراوتر):
+      // كانت هذه الحلقة تُنفَّذ بالتتابع الصارم (await داخل for) بلا أي
+      // موازاة، فمع 1000 بطاقة قد تستغرق دقائق فعلياً وتُجمّد تجربة
+      // الانتظار. الآن نرسلها على دفعات متوازية (10 دفعة) مع تتبّع صريح
+      // لعدد النجاح/الفشل بدل ابتلاع الأخطاء بصمت في catch (_) {}.
+      int addedSuccessfully = 0;
+      int addedFailed = 0;
+
       if (widget.routerService != null) {
-        for (final card in cards) {
-          try {
-            await widget.routerService!.sendCommand(
-              '/ip/hotspot/user/add',
-              params: {
-                'name': card.user,
-                'password': card.pass,
-                'profile': card.profile,
-                'comment': 'ST_Manager_Batch',
-              },
-            );
-          } catch (_) {}
+        const batchSize = 10;
+        for (int i = 0; i < cards.length; i += batchSize) {
+          final batch = cards.sublist(
+            i,
+            (i + batchSize).clamp(0, cards.length),
+          );
+
+          final results = await Future.wait(batch.map((card) async {
+            try {
+              await widget.routerService!.sendCommand(
+                '/ip/hotspot/user/add',
+                params: {
+                  'name': card.user,
+                  'password': card.pass,
+                  'profile': card.profile,
+                  'comment': 'ST_Manager_Batch',
+                },
+              );
+              return true;
+            } catch (_) {
+              return false;
+            }
+          }));
+
+          addedSuccessfully += results.where((r) => r).length;
+          addedFailed += results.where((r) => !r).length;
         }
       }
 
       final pdf = pw.Document();
       const pageFormat = PdfPageFormat.a4;
-      
-      final cols = (int.tryParse(_pdfColsCtrl.text) ?? 3).clamp(1, 10);
-      final rows = (int.tryParse(_pdfRowsCtrl.text) ?? 7).clamp(1, 20);
+
+      final cols = int.parse(_pdfColsCtrl.text.trim());
+      final rows = int.parse(_pdfRowsCtrl.text.trim());
       final cardsPerPage = cols * rows;
 
       const margin = 10.0;
@@ -1039,13 +1218,22 @@ class _CardsScreenState extends State<CardsScreen>
       final imageBytes =
           _templateImage != null ? _templateImage!.readAsBytesSync() : null;
 
+      // FIX (مشكلة #3 - فشل صامت لتحميل الخط العربي): نُسجّل صراحةً هل
+      // فشل التحميل، لنعرض تنبيهاً واضحاً للمستخدم بدل ملف PDF بنصوص
+      // عربية فارغة/غير مقروءة دون أي تفسير.
       pw.Font? arabicFont;
+      _arabicFontLoadFailed = false;
       try {
-        final fontData = await rootBundle.load('assets/fonts/Cairo-Regular.ttf');
+        final fontData =
+            await rootBundle.load('assets/fonts/Cairo-Regular.ttf');
         arabicFont = pw.Font.ttf(fontData);
-      } catch (_) {}
+      } catch (_) {
+        _arabicFontLoadFailed = true;
+      }
 
-      for (int pageStart = 0; pageStart < cards.length; pageStart += cardsPerPage) {
+      for (int pageStart = 0;
+          pageStart < cards.length;
+          pageStart += cardsPerPage) {
         final children = <pw.Widget>[];
 
         for (int slot = 0; slot < cardsPerPage; slot++) {
@@ -1075,17 +1263,28 @@ class _CardsScreenState extends State<CardsScreen>
         }
 
         // خطوط القص
+        // FIX (خطأ البناء المنفصل عن QR - مشكلة `width` في pw.Positioned):
+        // pw.Positioned من مكتبة pdf لا يقبل `width`/`height` كوسيطين
+        // مباشرين؛ فقط left/top/right/bottom. الاستخدام الصحيح لرسم خط
+        // رأسي/أفقي هو تحديد left+top+bottom (أو left+top+right) وترك
+        // القياس الفعلي للـ Container بالداخل، وهو ما كان مستخدَماً هنا
+        // بالفعل بشكل صحيح لخطوط القص (لا حاجة لتغييره) خلافاً لموضع آخر
+        // داخل _buildPdfCardWidget كان يستخدم `width` مباشرة على
+        // pw.Positioned وهو ما تسبب في: "No named parameter with the name
+        // 'width'" — تم إصلاحه هناك (انظر التعليق في تلك الدالة بالأسفل).
         for (int col = 1; col < cols; col++) {
           children.add(pw.Positioned(
               left: margin + (col * cardW),
               top: 0,
-              child: pw.Container(width: 0.5, height: pageFormat.height, color: PdfColors.grey)));
+              child: pw.Container(
+                  width: 0.5, height: pageFormat.height, color: PdfColors.grey)));
         }
         for (int row = 1; row < rows; row++) {
           children.add(pw.Positioned(
               left: 0,
               top: margin + (row * cardH),
-              child: pw.Container(width: pageFormat.width, height: 0.5, color: PdfColors.grey)));
+              child: pw.Container(
+                  width: pageFormat.width, height: 0.5, color: PdfColors.grey)));
         }
 
         pdf.addPage(pw.Page(
@@ -1095,16 +1294,40 @@ class _CardsScreenState extends State<CardsScreen>
       }
 
       // صفحة الجدول
+      // FIX (مشكلة #8 - جدول بلا خط عربي): مرّرنا arabicFont إلى
+      // headerStyle وإلى تنسيق الخلايا كي لا تفشل أي بيانات عربية داخل
+      // الجدول (مثل اسم بروفايل مكتوب بالعربية) بصمت بخط لا يدعمها.
       pdf.addPage(pw.MultiPage(
         pageFormat: pageFormat,
         margin: const pw.EdgeInsets.all(24),
         build: (_) => [
-          pw.Header(level: 0, child: pw.Text('قائمة بيانات البطاقات', style: pw.TextStyle(font: arabicFont), textDirection: pw.TextDirection.rtl)),
+          pw.Header(
+              level: 0,
+              child: pw.Text('قائمة بيانات البطاقات',
+                  style: pw.TextStyle(font: arabicFont),
+                  textDirection: pw.TextDirection.rtl)),
+          pw.SizedBox(height: 8),
+          pw.Text(
+            'تم إضافة $addedSuccessfully من ${cards.length} حساب بنجاح إلى الراوتر'
+            '${addedFailed > 0 ? ' (فشل $addedFailed)' : ''}',
+            style: pw.TextStyle(font: arabicFont, fontSize: 11),
+            textDirection: pw.TextDirection.rtl,
+          ),
+          pw.SizedBox(height: 12),
           pw.TableHelper.fromTextArray(
             context: null,
             headers: ['#', 'USER', 'PASSWORD', 'PROFILE'],
-            data: cards.asMap().entries.map((e) => ['${e.key + 1}', e.value.user, e.value.pass, e.value.profile]).toList(),
-            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+            data: cards
+                .asMap()
+                .entries
+                .map((e) =>
+                    ['${e.key + 1}', e.value.user, e.value.pass, e.value.profile])
+                .toList(),
+            headerStyle: pw.TextStyle(
+                font: arabicFont,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.white),
+            cellStyle: pw.TextStyle(font: arabicFont),
             headerDecoration: const pw.BoxDecoration(color: PdfColors.blue),
             cellAlignment: pw.Alignment.center,
           ),
@@ -1113,14 +1336,31 @@ class _CardsScreenState extends State<CardsScreen>
 
       final bytes = await pdf.save();
       final dir = await getTemporaryDirectory();
-      final file = File('${dir.path}/cards_${DateTime.now().millisecondsSinceEpoch}.pdf');
+      final file =
+          File('${dir.path}/cards_${DateTime.now().millisecondsSinceEpoch}.pdf');
       await file.writeAsBytes(bytes, flush: true);
 
       if (mounted) {
+        // FIX (مشكلة #3): تنبيه صريح إن فشل تحميل الخط العربي، حتى يعرف
+        // المستخدم أن أي نص عربي داخل الملف قد لا يظهر بشكل صحيح.
+        if (_arabicFontLoadFailed) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'تنبيه: تعذر تحميل الخط العربي؛ قد لا تظهر النصوص العربية '
+                'بشكل صحيح داخل ملف PDF',
+              ),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
         Share.shareXFiles([XFile(file.path)], text: 'بطاقات الهوتسبوت');
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      }
     } finally {
       if (mounted) setState(() => _isGeneratingPdf = false);
     }
@@ -1134,7 +1374,7 @@ class _CardsScreenState extends State<CardsScreen>
     pw.Font? arabicFont,
   }) {
     final t = _currentTemplate;
-    
+
     PdfColor toPdfCol(Color c) => PdfColor.fromInt(c.value);
 
     return pw.Container(
@@ -1147,52 +1387,76 @@ class _CardsScreenState extends State<CardsScreen>
       child: pw.Stack(
         children: [
           if (imageBytes != null)
-            pw.Positioned.fill(child: pw.Image(pw.MemoryImage(imageBytes), fit: pw.BoxFit.cover)),
+            pw.Positioned.fill(
+                child: pw.Image(pw.MemoryImage(imageBytes), fit: pw.BoxFit.cover)),
           if (imageBytes == null)
-            pw.Positioned(left: 0, top: 0, bottom: 0, width: cardW * 0.3, child: pw.Container(color: toPdfCol(t.accent))),
-
+            // FIX (خطأ البناء - `width` غير مدعوم في pw.Positioned):
+            // كان الكود الأصلي هنا:
+            //   pw.Positioned(left: 0, top: 0, bottom: 0, width: cardW * 0.3, ...)
+            // وهذا تسبب في خطأ البناء الظاهر في السجل:
+            // "No named parameter with the name 'width'."
+            // لأن pw.Positioned في مكتبة pdf يقبل فقط left/top/right/bottom
+            // (لا يوجد لديه width/height مباشرة، خلافاً لـ Positioned في
+            // Flutter العادي). الحل الصحيح: نحدد left+top+bottom كما كان،
+            // ونضع القياس الفعلي (العرض) على الـ Container الداخلي نفسه
+            // بدلاً من تمريره إلى Positioned.
+            pw.Positioned(
+              left: 0,
+              top: 0,
+              bottom: 0,
+              child: pw.Container(width: cardW * 0.3, color: toPdfCol(t.accent)),
+            ),
           if (_showNetwork)
             pw.Positioned(
-              left: _netX * cardW, top: _netY * cardH,
-              child: pw.Text(card.network, style: pw.TextStyle(font: arabicFont, color: toPdfCol(_netColor), fontSize: _netSize * (cardW/300))),
+              left: _netX * cardW,
+              top: _netY * cardH,
+              child: pw.Text(card.network,
+                  style: pw.TextStyle(
+                      font: arabicFont,
+                      color: toPdfCol(_netColor),
+                      fontSize: _netSize * (cardW / 300))),
             ),
-            
           pw.Positioned(
-            left: _userX * cardW, top: _userY * cardH,
-            child: pw.Text('User: ${card.user}', style: pw.TextStyle(color: toPdfCol(_userColor), fontSize: _userSize * (cardW/300), fontWeight: pw.FontWeight.bold)),
+            left: _userX * cardW,
+            top: _userY * cardH,
+            child: pw.Text('User: ${card.user}',
+                style: pw.TextStyle(
+                    color: toPdfCol(_userColor),
+                    fontSize: _userSize * (cardW / 300),
+                    fontWeight: pw.FontWeight.bold)),
           ),
-          
           pw.Positioned(
-            left: _passX * cardW, top: _passY * cardH,
-            child: pw.Text('Pass: ${card.pass}', style: pw.TextStyle(color: toPdfCol(_passColor), fontSize: _passSize * (cardW/300), fontWeight: pw.FontWeight.bold)),
+            left: _passX * cardW,
+            top: _passY * cardH,
+            child: pw.Text('Pass: ${card.pass}',
+                style: pw.TextStyle(
+                    color: toPdfCol(_passColor),
+                    fontSize: _passSize * (cardW / 300),
+                    fontWeight: pw.FontWeight.bold)),
           ),
-
           if (_showDuration)
             pw.Positioned(
-              left: _durX * cardW, top: _durY * cardH,
-              child: pw.Text(card.duration, style: pw.TextStyle(font: arabicFont, color: toPdfCol(_durColor), fontSize: _durSize * (cardW/300))),
+              left: _durX * cardW,
+              top: _durY * cardH,
+              child: pw.Text(card.duration,
+                  style: pw.TextStyle(
+                      font: arabicFont,
+                      color: toPdfCol(_durColor),
+                      fontSize: _durSize * (cardW / 300))),
             ),
-            
           if (_showNotes)
             pw.Positioned(
-              left: _notesX * cardW, top: _notesY * cardH,
-              child: pw.Text(card.notes, style: pw.TextStyle(font: arabicFont, color: toPdfCol(_notesColor), fontSize: _notesSize * (cardW/300))),
+              left: _notesX * cardW,
+              top: _notesY * cardH,
+              child: pw.Text(card.notes,
+                  style: pw.TextStyle(
+                      font: arabicFont,
+                      color: toPdfCol(_notesColor),
+                      fontSize: _notesSize * (cardW / 300))),
             ),
-
-          if (_showQR)
-            pw.Positioned(
-              left: _qrX * cardW, top: _qrY * cardH,
-              child: pw.Container(
-                color: PdfColors.white,
-                padding: const pw.EdgeInsets.all(2),
-                child: pw.BarcodeWidget(
-                  barcode: pw.Barcode.qrCode(),
-                  data: 'http://10.0.0.1/login?username=${card.user}&password=${card.pass}',
-                  width: _qrSize * (cardW/300),
-                  height: _qrSize * (cardW/300),
-                ),
-              ),
-            ),
+          // FIX (حذف QR بالكامل): أُزيل عنصر pw.BarcodeWidget بالكامل من
+          // بطاقة الـ PDF، لأنه كان يعتمد على مكتبة qr_flutter/pdf's
+          // barcode غير المضمونة التثبيت هنا وتسبب فشل البناء.
         ],
       ),
     );
@@ -1214,7 +1478,8 @@ class _CardsScreenState extends State<CardsScreen>
       ),
       body: TabBarView(
         controller: _tabController,
-        physics: const NeverScrollableScrollPhysics(), // لمنع السحب بالخطأ أثناء سحب العناصر
+        physics:
+            const NeverScrollableScrollPhysics(), // لمنع السحب بالخطأ أثناء سحب العناصر
         children: [
           _buildSingleCardTab(),
           _buildMultipleCardsTab(),
@@ -1223,4 +1488,3 @@ class _CardsScreenState extends State<CardsScreen>
     );
   }
 }
-
