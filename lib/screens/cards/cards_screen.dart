@@ -319,7 +319,7 @@ class _CardsScreenState extends State<CardsScreen>
       'letters' => letters,
       _ => '$numbers$letters',
     };
-    return List.generate(length, () => chars[_random.nextInt(chars.length)])
+    return List.generate(length, (_) => chars[_random.nextInt(chars.length)])
         .join();
   }
 
