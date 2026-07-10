@@ -106,6 +106,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return DateTime.now().isAfter(end);
   }
 
+  // تم إصلاح الدالة للتحقق من الحسابات الجديدة بشكل دقيق
   bool _isNewAccount(
     Map<String, dynamic> secret,
     bool isActive,
@@ -115,13 +116,16 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   ) {
     if (isActive || isDisabled || isExpired) return false;
 
-    final lastLoggedOut = _normalizeText(secret['last-logged-out']);
-    if (lastLoggedOut.isNotEmpty) return false;
+    final lastLoggedOut = _normalizeText(secret['last-logged-out']).toLowerCase();
+    
+    // المايكروتيك إما أن يترك الحقل فارغاً، أو يضع تاريخ البداية 1970 للحسابات التي لم تتصل أبداً
+    if (lastLoggedOut.isNotEmpty && 
+        !lastLoggedOut.contains('jan/01/1970') && 
+        !lastLoggedOut.contains('1970-01-01')) {
+      return false; // الحساب سجل خروج مسبقاً (ليس جديداً)
+    }
 
-    final lastLoggedIn = _normalizeText(secret['last-logged-in']);
-    if (lastLoggedIn.isNotEmpty) return false;
-
-    return true;
+    return true; // الحساب لم يتصل أبداً
   }
 
   String _dateOnlyString(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
@@ -356,19 +360,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return allSucceeded;
   }
 
+  // تم إصلاح دالة بناء اسم الواجهة لتتطابق مع صيغة مايكروتيك <pppoe-username>
   String _buildTrafficInterfaceName(Map<String, dynamic> active) {
-    final direct = _normalizeText(active['interface']);
-    if (direct.isNotEmpty) return direct;
-
     final service = _normalizeText(active['service']).toLowerCase();
-    final name = _normalizeText(active['name']);
-    final user = _normalizeText(active['user']);
-    final username = _normalizeText(active['username']);
-    final base = name.isNotEmpty ? name : (user.isNotEmpty ? user : username);
+    final name = _normalizeText(active['name']); // اسم المستخدم المتصل
+    
+    if (name.isEmpty) return '';
 
-    if (service.isNotEmpty && base.isNotEmpty) return '$service-$base';
-    if (base.isNotEmpty) return 'pppoe-$base';
-    return '';
+    // الصيغة الرسمية في المايكروتيك للانترفيس الدايناميك هي بين قوسين < >
+    if (service.isNotEmpty) {
+      return '<$service-$name>';
+    }
+    
+    return '<pppoe-$name>'; // افتراضي إذا لم يتوفر نوع الخدمة
   }
 
   Future<Map<String, double>> _getSessionTraffic(
