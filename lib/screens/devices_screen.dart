@@ -2,16 +2,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
 
-/// نموذج البيانات النقي والموحد لكل قطة أو جهاز على الشبكة
+/// نموذج البيانات الشامل والنقي لقطع الشبكة والمضيفين
 class NetworkDevice {
   final String id;
-  final String name;       // اسم العميل أو اسم القطعة (رعد عبدالله مثلاً)
+  final String name;       // اسم العميل أو اسم القطعة (مثل: رعد عبدالله)
   final String ip;         // عنوان IP
   final String mac;        // عنوان MAC
-  final String interface;  // المنفذ (مثل: ايثرنت 3)
-  final String model;      // موديل الجهاز (LiteBeam M5, PowerBeam)
-  final String type;       // الفرز: 'مستقبل', 'مرسل', 'هوتسبوت', 'بنية تحتية'
-  final String status;     // حالة الاتصال الافتراضية
+  final String interface;  // المنفذ الفيزيائي (مثل: مدخل ايثرنت 3)
+  final String model;      // موديل اللوحة (مثل: LiteBeam M5)
+  final String type;       // الفرز التلقائي: 'مستقبل', 'مرسل', 'هوتسبوت', 'بنية تحتية'
+  final String status;     // حالة المضيف داخل الهوتسبوت
+  final String uptime;     // وقت الاتصال الحالي بالجلسة
 
   NetworkDevice({
     required this.id,
@@ -22,6 +23,7 @@ class NetworkDevice {
     required this.model,
     required this.type,
     required this.status,
+    required this.uptime,
   });
 }
 
@@ -40,9 +42,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
   bool _isLoading = true;
   String? _errorMessage;
   String _searchQuery = '';
-  String _selectedFilter = 'الكل'; // الفلاتر: الكل، مستقبل، مرسل، هوتسبوت
+  String _selectedFilter = 'الكل'; 
 
-  // الألوان المعتمدة للهوية البصرية الفاخرة والنقية (Black & Gold)
+  // ألوان النمط الفاخر والنقي (Black & Gold Aesthetic)
   final Color _bgColor = const Color(0xFF0A0A0A);
   final Color _cardColor = const Color(0xFF141414);
   final Color _goldColor = const Color(0xFFFFD700);
@@ -55,7 +57,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     _fetchNetworkData();
   }
 
-  /// تحليل ذكي لموديل الجهاز وتحديد ما إذا كان مرسل أم مستقبل
+  /// فرز ذكي لنوع القطعة بناءً على الموديل البرمجي للوحة
   String _determineDeviceType(String board) {
     final b = board.toLowerCase();
     if (b.contains('litebeam') || b.contains('powerbeam') || b.contains('nanobeam') || b.contains('loco') || b.contains('sxt') || b.contains('lhg') || b.contains('cpe')) {
@@ -68,7 +70,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     return 'هوتسبوت';
   }
 
-  /// تنظيف وتنسيق أسماء المنافذ لتصبح واضحة ومفهومة باللغة العربية
+  /// تنسيق المداخل والواجهات لتظهر بعبارات عربية واضحة ومباشرة
   String _formatInterface(String iface) {
     String clean = iface.toLowerCase();
     if (clean.startsWith('ether')) {
@@ -81,7 +83,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     return iface;
   }
 
-  /// جلب البيانات المدمجة (Neighbor Discovery + Hotspot Host)
+  /// حل مشكلة الانهيار الجذري عن طريق عزل الاستعلامات بالكامل داخل بلوكات Try-Catch مستقلة
   Future<void> _fetchNetworkData() async {
     if (widget.routerService == null) {
       setState(() {
@@ -96,21 +98,31 @@ class _DevicesScreenState extends State<DevicesScreen> {
       _errorMessage = null;
     });
 
+    List<dynamic> neighbors = [];
+    List<dynamic> hotspotHosts = [];
+
+    // جلب بيانات الجيران بأمان تام
     try {
-      // جلب الجيران والمضيفين في نفس الوقت لسرعة فائقة وأداء خفيف
-      final results = await Future.wait([
-        widget.routerService!.sendCommand('/ip/neighbor/print'),
-        widget.routerService!.sendCommand('/ip/hotspot/host/print').catchError((_) => []),
-      ]);
+      final res = await widget.routerService!.sendCommand('/ip/neighbor/print');
+      if (res is List) neighbors = res;
+    } catch (_) {
+      neighbors = []; // في حال الفشل نضمن البقاء على مصفوفة فارغة دون انهيار
+    }
 
-      final List<dynamic> neighbors = results[0] ?? [];
-      final List<dynamic> hotspotHosts = results[1] ?? [];
+    // جلب بيانات مضيفي الهوتسبوت بأمان تام
+    try {
+      final res = await widget.routerService!.sendCommand('/ip/hotspot/host/print');
+      if (res is List) hotspotHosts = res;
+    } catch (_) {
+      hotspotHosts = [];
+    }
 
-      // خريطة وسيطة لدمج الأجهزة بناءً على الماك أدرس منعاً للتكرار
+    try {
       final Map<String, Map<String, dynamic>> mergedMap = {};
 
-      // 1. معالجة بيانات الـ Neighbors (البنية التحتية والقطع اللاسلكية)
+      // 1. معالجة بيانات الـ Neighbors
       for (var n in neighbors) {
+        if (n is! Map) continue;
         final mac = n['mac-address']?.toString() ?? '';
         if (mac.isEmpty) continue;
 
@@ -127,11 +139,13 @@ class _DevicesScreenState extends State<DevicesScreen> {
           'model': board,
           'type': _determineDeviceType(board),
           'status': 'online',
+          'uptime': '-',
         };
       }
 
-      // 2. معالجة بيانات الـ Hotspot Host ودمجها أو إضافتها
+      // 2. دمج وحقن بيانات الـ Hotspot Host للحصول على اسم المشترك الفعلي ووقت الاتصال
       for (var h in hotspotHosts) {
+        if (h is! Map) continue;
         final mac = h['mac-address']?.toString() ?? '';
         if (mac.isEmpty) continue;
 
@@ -139,8 +153,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
         final server = h['server']?.toString() ?? 'hotspot';
         final comment = h['comment']?.toString() ?? '';
         final user = h['user']?.toString() ?? '';
-        
-        // اختيار الاسم الأفضل: التعليق (اسم المشترك) أولاً، ثم اليوزر، ثم الماك
+        final uptime = h['uptime']?.toString() ?? 'نشط حديثاً';
+
         String hostName = mac;
         if (comment.isNotEmpty) {
           hostName = comment;
@@ -149,15 +163,14 @@ class _DevicesScreenState extends State<DevicesScreen> {
         }
 
         if (mergedMap.containsKey(mac)) {
-          // إذا كان الجهاز معروفاً كـ LiteBeam مثلاً، نحتفظ بنوعه وموديله ونحدث الاسم ليكون اسم المشترك
           if (comment.isNotEmpty || user.isNotEmpty) {
             mergedMap[mac]!['name'] = hostName;
           }
           if (mergedMap[mac]!['ip'].toString().isEmpty) {
             mergedMap[mac]!['ip'] = ip;
           }
+          mergedMap[mac]!['uptime'] = uptime;
         } else {
-          // إذا كان جهاز موبايل أو كمبيوتر عميل عادي في الهوتسبوت
           mergedMap[mac] = {
             'name': hostName,
             'ip': ip,
@@ -166,11 +179,11 @@ class _DevicesScreenState extends State<DevicesScreen> {
             'model': h['bypassed']?.toString() == 'true' ? 'بث مباشر (Bypass)' : 'جهاز عميل',
             'type': 'هوتسبوت',
             'status': h['authorized']?.toString() == 'true' ? 'online' : 'pending',
+            'uptime': uptime,
           };
         }
       }
 
-      // تحويل الخريطة المدمجة إلى القائمة النهائية للموديل
       List<NetworkDevice> loadedDevices = [];
       mergedMap.forEach((mac, data) {
         loadedDevices.add(NetworkDevice(
@@ -182,10 +195,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
           model: data['model'],
           type: data['type'],
           status: data['status'],
+          uptime: data['uptime'],
         ));
       });
 
-      // ترتيب عرض الأجهزة (مستقبلات ثم مرسلات ثم هوتسبوت)
       loadedDevices.sort((a, b) => a.type.compareTo(b.type));
 
       if (mounted) {
@@ -198,7 +211,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _errorMessage = 'فشل جلب وتحليل بيانات المضيفين: $e';
+          _errorMessage = 'حدث خطأ غير متوقع أثناء الفرز: $e';
           _isLoading = false;
         });
       }
@@ -219,6 +232,162 @@ class _DevicesScreenState extends State<DevicesScreen> {
     });
   }
 
+  /// هروب النصوص البرمجية لضمان حقن السكربت داخل الميكروتك بدون مشاكل في الرموز
+  String _escapeRosString(String input) {
+    return input.replaceAll(r'\', r'\\').replaceAll('"', r'\"');
+  }
+
+  /// بناء سكربت تلجرام احترافي متوافق بالكامل مع ميكروتك وسيرفر Netwatch
+  String _buildTelegramScript({
+    required bool isUp,
+    required String botToken,
+    required String chatId,
+    required NetworkDevice device,
+    required String identity,
+  }) {
+    final statusEmoji = isUp ? '🟢' : '🔴';
+    final statusText = isUp ? 'متصل الآن' : 'انقطع الاتصال (داون)';
+    
+    final safeToken = _escapeRosString(botToken);
+    final safeChatId = _escapeRosString(chatId);
+    final safeName = _escapeRosString(device.name);
+    final safeModel = _escapeRosString(device.model);
+    final safeIp = _escapeRosString(device.ip);
+    final safeInterface = _escapeRosString(device.interface);
+    final safeIdentity = _escapeRosString(identity);
+
+    return '''
+:do {
+  :local botToken "$safeToken";
+  :local chatId "$safeChatId";
+  :local d [/system clock get date];
+  :local t [/system clock get time];
+  :local msg "$statusEmoji <b>$statusText</b>%0A👤 <b>الاسم:</b> $safeName%0A📦 <b>النوع:</b> $safeModel%0A🌐 <b>IP:</b> $safeIp%0A🔌 <b>المنفذ:</b> $safeInterface%0A📍 <b>السيرفر:</b> \$d \$t%0A⚡ <i>S-Manager Bot</i>";
+  /tool fetch keep-result=no check-certificate=no url=("https://api.telegram.org/bot" . \$botToken . "/sendMessage?chat_id=" . \$chatId . "&parse_mode=HTML&text=" . \$msg);
+} on-error={}
+'''.trim();
+  }
+
+  /// فتح نافذة التفعيل وحقن السكربت داخل الميكروتك مباشرة
+  void _openTelegramConfigDialog(NetworkDevice device) {
+    if (device.ip.isEmpty || device.ip.contains('لا يوجد')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('لا يمكن مراقبة قطعة لا تمتلك عنوان IP صالح'), backgroundColor: Colors.redAccent),
+      );
+      return;
+    }
+
+    final botTokenController = TextEditingController();
+    final chatIdController = TextEditingController();
+    bool isSubmitting = false;
+
+    showDialog(
+      context: context,
+      barrierDismissible: !isSubmitting,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: _cardColor,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: _goldColor.withValues(alpha: 0.3))),
+          title: Text('تفعيل مراقبة وتنبيهات القطعة', style: TextStyle(color: _goldColor, fontSize: 16, fontWeight: FontWeight.bold), textAlign: TextAlign.right),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('القطعة: ${device.name}', style: TextStyle(color: _textColor, fontSize: 13)),
+              const SizedBox(height: 16),
+              TextField(
+                controller: botTokenController,
+                style: TextStyle(color: _textColor, fontSize: 13),
+                decoration: InputDecoration(
+                  labelText: 'توكن بوت التلجرام (Bot Token)',
+                  labelStyle: TextStyle(color: _subTextColor),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _subTextColor)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _goldColor)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: chatIdController,
+                style: TextStyle(color: _textColor, fontSize: 13),
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'معرف الشات (Chat ID)',
+                  labelStyle: TextStyle(color: _subTextColor),
+                  enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: _subTextColor)),
+                  focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: _goldColor)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSubmitting ? null : () => Navigator.pop(context),
+              child: Text('إلغاء', style: TextStyle(color: _subTextColor)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: _goldColor, foregroundColor: _bgColor),
+              onPressed: isSubmitting ? null : () async {
+                final token = botTokenController.text.trim();
+                final chat = chatIdController.text.trim();
+                if (token.isEmpty || chat.isEmpty) return;
+
+                setDialogState(() => isSubmitting = true);
+
+                try {
+                  // جلب اسم الهوية الحالي للميكروتك
+                  final identityRes = await widget.routerService?.sendCommand('/system/identity/print');
+                  String routerIdentity = 'MikroTik';
+                  if (identityRes is List && identityRes.isNotEmpty) {
+                    routerIdentity = identityRes.first['name']?.toString() ?? 'MikroTik';
+                  }
+
+                  // بناء السكربت للاتصال والانفصال
+                  final upScript = _buildTelegramScript(isUp: true, botToken: token, chatId: chat, device: device, identity: routerIdentity);
+                  final downScript = _buildTelegramScript(isUp: false, botToken: token, chatId: chat, device: device, identity: routerIdentity);
+
+                  // التحقق أولاً إذا كانت القطعة موجودة مسبقاً في الـ Netwatch لحذفها وتحديثها
+                  final existing = await widget.routerService?.sendCommand('/tool/netwatch/print', params: {'?host': device.ip});
+                  if (existing is List && existing.isNotEmpty) {
+                    final rosId = existing.first['.id']?.toString();
+                    if (rosId != null) {
+                      await widget.routerService?.sendCommand('/tool/netwatch/remove', params: {'numbers': rosId});
+                    }
+                  }
+
+                  // حقن وإضافة القطعة لجدول المراقبة الذكي بمعدل فحص مستقر كل دقيقة
+                  await widget.routerService?.sendCommand('/tool/netwatch/add', params: {
+                    'host': device.ip,
+                    'interval': '00:01:00',
+                    'comment': 'S-Manager: ${device.name}',
+                    'up-script': upScript,
+                    'down-script': downScript,
+                  });
+
+                  if (mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('تم تفعيل وحقن سكربت التنبيهات للقطعة ${device.name} بنجاح!'), backgroundColor: Colors.green),
+                    );
+                  }
+                } catch (err) {
+                  if (mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('فشل الحقن البرمجي: $err'), backgroundColor: Colors.redAccent),
+                    );
+                  }
+                }
+              },
+              child: isSubmitting 
+                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black))
+                : const Text('تفعيل وحقن', style: TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   IconData _getTypeIcon(String type) {
     switch (type) {
       case 'مستقبل': return Icons.wifi_tethering;
@@ -236,15 +405,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
         backgroundColor: _cardColor,
         elevation: 0,
         centerTitle: true,
-        title: Text(
-          'استكشاف الأجهزة والمضيفين',
-          style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold),
-        ),
+        title: Text('استكشاف الأجهزة والمضيفين', style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold)),
         actions: [
-          IconButton(
-            icon: Icon(Icons.sync, color: _goldColor),
-            onPressed: _isLoading ? null : _fetchNetworkData,
-          )
+          IconButton(icon: Icon(Icons.sync, color: _goldColor), onPressed: _isLoading ? null : _fetchNetworkData)
         ],
       ),
       body: Column(
@@ -346,9 +509,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
 
     if (_filteredDevices.isEmpty) {
-      return Center(
-        child: Text('لا توجد قطع أو مضيفين مطابقين حالياً', style: TextStyle(color: _subTextColor)),
-      );
+      return Center(child: Text('لا توجد قطع أو مضيفين مطابقين حالياً', style: TextStyle(color: _subTextColor)));
     }
 
     return ListView.builder(
@@ -365,7 +526,6 @@ class _DevicesScreenState extends State<DevicesScreen> {
           ),
           child: ListTile(
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            // الأيقونة الجانبية الفاخرة التي توضح نوع القطعة
             leading: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -375,39 +535,51 @@ class _DevicesScreenState extends State<DevicesScreen> {
               ),
               child: Icon(_getTypeIcon(device.type), color: _goldColor, size: 24),
             ),
-            // اسم العميل أو اسم القطعة الأساسي (رعد عبدالله)
-            title: Text(
-              device.name,
-              style: TextStyle(color: _textColor, fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-            // تفاصيل القطعة المباشرة بدون حشو (الموديل والمنفذ)
+            title: Text(device.name, style: TextStyle(color: _textColor, fontWeight: FontWeight.bold, fontSize: 15)),
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 6.0),
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(device.model, style: TextStyle(color: _goldColor, fontSize: 12, fontWeight: FontWeight.w500)),
-                  const SizedBox(width: 8),
-                  Text('•', style: TextStyle(color: _subTextColor)),
-                  const SizedBox(width: 8),
-                  Icon(Icons.lan_outlined, size: 12, color: _subTextColor),
-                  const SizedBox(width: 4),
-                  Text(device.interface, style: TextStyle(color: _subTextColor, fontSize: 12)),
+                  Row(
+                    children: [
+                      Text(device.model, style: TextStyle(color: _goldColor, fontSize: 11, fontWeight: FontWeight.w500)),
+                      const SizedBox(width: 8),
+                      Text('•', style: TextStyle(color: _subTextColor)),
+                      const SizedBox(width: 8),
+                      Icon(Icons.lan_outlined, size: 12, color: _subTextColor),
+                      const SizedBox(width: 4),
+                      Text(device.interface, style: TextStyle(color: _subTextColor, fontSize: 11)),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      Icon(Icons.access_time_rounded, size: 12, color: _goldColor.withValues(alpha: 0.7)),
+                      const SizedBox(width: 4),
+                      Text('وقت الاتصال: ${device.uptime}', style: TextStyle(color: _textColor.withValues(alpha: 0.7), fontSize: 11)),
+                    ],
+                  ),
                 ],
               ),
             ),
-            // الآيبي والماك منسقين في الجانب الأيسر بشكل خفيف ونظيف
-            trailing: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.end,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  device.ip,
-                  style: TextStyle(color: _textColor, fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold),
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(device.ip, style: TextStyle(color: _textColor, fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 4),
+                    Text(device.mac, style: TextStyle(color: _subTextColor, fontSize: 9, fontFamily: 'monospace')),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  device.mac,
-                  style: TextStyle(color: _subTextColor, fontSize: 10, fontFamily: 'monospace'),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: Icon(Icons.notifications_active_outlined, color: _goldColor, size: 20),
+                  tooltip: 'تفعيل إشعارات القطعة',
+                  onPressed: () => _openTelegramConfigDialog(device),
                 ),
               ],
             ),
