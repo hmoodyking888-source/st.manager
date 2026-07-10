@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
@@ -33,6 +34,7 @@ class PppUserScreen extends StatefulWidget {
 }
 
 class _PppUserScreenState extends State<PppUserScreen> {
+  final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _passController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -176,9 +178,15 @@ class _PppUserScreenState extends State<PppUserScreen> {
           _loadingProfiles = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         setState(() => _loadingProfiles = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('فشل جلب البروفايلات: يُرجى التحقق من الاتصال بالراوتر'),
+            backgroundColor: Colors.red,
+          ),
+        );
       }
     }
   }
@@ -204,6 +212,7 @@ class _PppUserScreenState extends State<PppUserScreen> {
   }
 
   Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
     if (widget.routerService == null) return;
 
     final name = _nameController.text.trim();
@@ -225,7 +234,11 @@ class _PppUserScreenState extends State<PppUserScreen> {
       }
 
       if (widget.isEdit && widget.initialData != null) {
-        params['numbers'] = widget.initialData!['.id']?.toString() ?? '';
+        // حماية في حال عدم رجوع الـ .id من المايكروتيك
+        final id = widget.initialData!['.id']?.toString();
+        final nameFallback = widget.initialData!['name']?.toString();
+        params['numbers'] = (id != null && id.isNotEmpty) ? id : (nameFallback ?? '');
+        
         await widget.routerService!.sendCommand(
           '/ppp/secret/set',
           params: params,
@@ -241,7 +254,10 @@ class _PppUserScreenState extends State<PppUserScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('فشل الحفظ: $e')),
+          SnackBar(
+            content: Text('فشل الحفظ: $e'),
+            backgroundColor: Colors.red,
+          ),
         );
       }
     } finally {
@@ -368,89 +384,101 @@ class _PppUserScreenState extends State<PppUserScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
-        child: SingleChildScrollView(
-          child: Column(
-            children: [
-              TextField(
-                controller: _nameController,
-                decoration: InputDecoration(
-                  labelText: 'اسم المستخدم',
-                  filled: true,
-                  fillColor: Theme.of(context).cardColor,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  decoration: InputDecoration(
+                    labelText: 'اسم المستخدم',
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                  ),
+                  style: TextStyle(color: onSurface),
+                  validator: (value) {
+                    if (value == null || value.trim().isEmpty) {
+                      return 'يرجى إدخال اسم المستخدم';
+                    }
+                    return null;
+                  },
                 ),
-                style: TextStyle(color: onSurface),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passController,
-                decoration: InputDecoration(
-                  labelText: 'كلمة المرور',
-                  filled: true,
-                  fillColor: Theme.of(context).cardColor,
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _passController,
+                  decoration: InputDecoration(
+                    labelText: 'كلمة المرور',
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                  ),
+                  style: TextStyle(color: onSurface),
+                  obscureText: true,
                 ),
-                style: TextStyle(color: onSurface),
-                obscureText: true,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _phoneController,
-                decoration: InputDecoration(
-                  labelText: 'رقم هاتف الزبون (للإشعارات)',
-                  hintText: 'مثلاً 963xxxxxxxxx',
-                  filled: true,
-                  fillColor: Theme.of(context).cardColor,
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _phoneController,
+                  decoration: InputDecoration(
+                    labelText: 'رقم هاتف الزبون (للإشعارات)',
+                    hintText: 'مثلاً 963xxxxxxxxx',
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                  ),
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
+                  ],
+                  style: TextStyle(color: onSurface),
                 ),
-                keyboardType: TextInputType.phone,
-                style: TextStyle(color: onSurface),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _commentController,
-                decoration: InputDecoration(
-                  labelText: 'تعليق / ملاحظات',
-                  hintText: 'أي ملاحظات إضافية',
-                  filled: true,
-                  fillColor: Theme.of(context).cardColor,
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _commentController,
+                  decoration: InputDecoration(
+                    labelText: 'تعليق / ملاحظات',
+                    hintText: 'أي ملاحظات إضافية',
+                    filled: true,
+                    fillColor: Theme.of(context).cardColor,
+                  ),
+                  style: TextStyle(color: onSurface),
                 ),
-                style: TextStyle(color: onSurface),
-              ),
-              const SizedBox(height: 12),
-              _buildExpiryCard(),
-              const SizedBox(height: 12),
-              _buildProfileField(),
-              const SizedBox(height: 12),
-              SwitchListTile(
-                title: const Text('تم دفع الاشتراك'),
-                value: _isPaid,
-                activeColor: AppTheme.gold,
-                tileColor: Theme.of(context).cardColor,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
+                const SizedBox(height: 12),
+                _buildExpiryCard(),
+                const SizedBox(height: 12),
+                _buildProfileField(),
+                const SizedBox(height: 12),
+                SwitchListTile(
+                  title: const Text('تم دفع الاشتراك'),
+                  value: _isPaid,
+                  activeColor: AppTheme.gold,
+                  tileColor: Theme.of(context).cardColor,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  onChanged: (val) {
+                    setState(() {
+                      _isPaid = val;
+                    });
+                  },
                 ),
-                onChanged: (val) {
-                  setState(() {
-                    _isPaid = val;
-                  });
-                },
-              ),
-              const SizedBox(height: 24),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _loading ? null : _save,
-                  child: _loading
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.black,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text('حفظ'),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _loading ? null : _save,
+                    child: _loading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              color: Colors.black,
+                              strokeWidth: 2,
+                            ),
+                          )
+                        : const Text('حفظ'),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
