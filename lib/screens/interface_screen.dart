@@ -22,8 +22,9 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
   /// علم للتحقق مما إذا تم التخلص من الـ Widget
   bool _disposed = false;
 
-  /// خريطة لتخزين بيانات السرعة لكل واجهة
-  /// المفتاح: اسم الواجهة، القيمة: {rxSpeed, txSpeed, lastRxBytes, lastTxBytes, lastTime}
+  /// خريطة لتخزين بيانات السرعة والاستهلاك لكل واجهة
+  /// المفتاح: اسم الواجهة
+  /// القيمة: {rxSpeed, txSpeed, lastRxBytes, lastTxBytes, lastTime, totalRxBytes, totalTxBytes}
   final Map<String, Map<String, dynamic>> _trafficData = {};
 
   @override
@@ -102,7 +103,7 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
     }
   }
 
-  /// بدء مراقبة السرعة — قراءة أولية فورية ثم أول حساب بعد 1 ثانية ثم كل 5 ثوانٍ
+  /// بدء مراقبة السرعة — قراءة أولية فورية ثم أول حساب بعد 1 ثانية ثم كل 3 ثوانٍ
   void _startTrafficMonitoring() {
     _trafficTimer?.cancel();
 
@@ -114,10 +115,10 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
           if (_disposed) return;
           await _updateTrafficSpeeds();
 
-          /// بعدها: بدء التحديث الدوري كل 5 ثوانٍ
+          /// بعدها: بدء التحديث الدوري كل 3 ثوانٍ لتحديث أسرع
           if (!_disposed) {
             _trafficTimer = Timer.periodic(
-              const Duration(seconds: 5),
+              const Duration(seconds: 3),
               (_) => _updateTrafficSpeeds(),
             );
           }
@@ -149,14 +150,18 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
           'lastRxBytes': rxBytes,
           'lastTxBytes': txBytes,
           'lastTime': now,
+          'totalRxBytes': rxBytes,
+          'totalTxBytes': txBytes,
         };
       }
+
+      if (mounted && !_disposed) setState(() {});
     } catch (_) {
       /// نتجاهل أخطاء القراءة الأولية
     }
   }
 
-  /// حساب السرعة لكل واجهة
+  /// حساب السرعة لكل واجهة وتحديث الاستهلاك الإجمالي
   Future<void> _updateTrafficSpeeds() async {
     if (widget.routerService == null || _disposed) return;
 
@@ -196,6 +201,8 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
               'lastRxBytes': rxBytes,
               'lastTxBytes': txBytes,
               'lastTime': now,
+              'totalRxBytes': rxBytes,
+              'totalTxBytes': txBytes,
             };
           }
         } else {
@@ -206,6 +213,8 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
             'lastRxBytes': rxBytes,
             'lastTxBytes': txBytes,
             'lastTime': now,
+            'totalRxBytes': rxBytes,
+            'totalTxBytes': txBytes,
           };
         }
       }
@@ -216,8 +225,7 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
     }
   }
 
-  /// تنسيق الاستهلاك الإجمالي (MB / GB)
-  /// تعرض القيمة بأقرب وحدة مناسبة: B, KB, MB, GB
+  /// تنسيق الاستهلاك الإجمالي (B / KB / MB / GB / TB)
   String _formatBytes(dynamic byteValue) {
     final bytes = int.tryParse(byteValue?.toString() ?? '0') ?? 0;
     if (bytes < 0) return '0 B';
@@ -226,7 +234,10 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
     if (bytes < 1024 * 1024 * 1024) {
       return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     }
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    if (bytes < 1024 * 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024 * 1024)).toStringAsFixed(2)} TB';
   }
 
   /// تنسيق السرعة (bps -> Kbps / Mbps / Gbps)
@@ -262,13 +273,15 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
                       final speed = iface['speed']?.toString() ??
                           iface['rate']?.toString() ??
                           'غير معروف';
-                      final rxByte = iface['rx-byte'];
-                      final txByte = iface['tx-byte'];
 
-                      /// بيانات السرعة المحسوبة
+                      /// بيانات السرعة والاستهلاك المحسوبة
                       final traffic = _trafficData[name];
                       final rxSpeed = traffic?['rxSpeed'] as int? ?? 0;
                       final txSpeed = traffic?['txSpeed'] as int? ?? 0;
+                      final totalRx = traffic?['totalRxBytes'] as int? ??
+                          (int.tryParse(iface['rx-byte']?.toString() ?? '0') ?? 0);
+                      final totalTx = traffic?['totalTxBytes'] as int? ??
+                          (int.tryParse(iface['tx-byte']?.toString() ?? '0') ?? 0);
 
                       return Card(
                         margin: const EdgeInsets.symmetric(
@@ -293,20 +306,12 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              /// مربع عداد السرعة RX (أخضر فاتح شبه شفاف)
+                              /// مربع السرعة والاستهلاك — واحد فقط يقلب بين TX و RX
                               _SpeedBox(
-                                label: 'RX',
-                                speed: rxSpeed,
-                                formattedSpeed: _formatSpeed(rxSpeed),
-                                totalBytes: _formatBytes(rxByte),
-                              ),
-                              const SizedBox(width: 8),
-                              /// مربع عداد السرعة TX (أخضر فاتح شبه شفاف)
-                              _SpeedBox(
-                                label: 'TX',
-                                speed: txSpeed,
-                                formattedSpeed: _formatSpeed(txSpeed),
-                                totalBytes: _formatBytes(txByte),
+                                rxSpeed: rxSpeed,
+                                txSpeed: txSpeed,
+                                totalRx: _formatBytes(totalRx),
+                                totalTx: _formatBytes(totalTx),
                               ),
                             ],
                           ),
@@ -347,80 +352,126 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
   }
 }
 
-/// مربع عداد السرعة - أخضر فاتح شبه شفاف
-class _SpeedBox extends StatelessWidget {
-  final String label;
-  final int speed;
-  final String formattedSpeed;
-  final String totalBytes;
+/// مربع السرعة — مربع واحد يقلب بين TX و RX عند الضغط
+/// يعرض: اللabel (TX/RX) + السرعة اللحظية + الاستهلاك الإجمالي
+class _SpeedBox extends StatefulWidget {
+  final int rxSpeed;
+  final int txSpeed;
+  final String totalRx;
+  final String totalTx;
 
   const _SpeedBox({
-    required this.label,
-    required this.speed,
-    required this.formattedSpeed,
-    required this.totalBytes,
+    required this.rxSpeed,
+    required this.txSpeed,
+    required this.totalRx,
+    required this.totalTx,
   });
 
   @override
+  State<_SpeedBox> createState() => _SpeedBoxState();
+}
+
+class _SpeedBoxState extends State<_SpeedBox> {
+  /// هل نعرض TX أم RX؟ افتراضياً TX
+  bool _showTx = true;
+
+  void _toggle() {
+    setState(() {
+      _showTx = !_showTx;
+    });
+  }
+
+  String _formatSpeed(int bps) {
+    if (bps < 0) bps = 0;
+    if (bps < 1000) return '${bps}bps';
+    if (bps < 1000 * 1000) return '${(bps / 1000).toStringAsFixed(1)} Kbps';
+    if (bps < 1000 * 1000 * 1000) {
+      return '${(bps / (1000 * 1000)).toStringAsFixed(1)} Mbps';
+    }
+    return '${(bps / (1000 * 1000 * 1000)).toStringAsFixed(2)} Gbps';
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final label = _showTx ? 'TX' : 'RX';
+    final speed = _showTx ? widget.txSpeed : widget.rxSpeed;
+    final total = _showTx ? widget.totalTx : widget.totalRx;
+
     /// لون أخضر فاتح شبه شفاف يتغير حسب شدة السرعة
     final baseColor = Colors.green.shade400;
     final opacity = speed > 0
         ? 0.15 + (speed.clamp(0, 100000000) / 100000000) * 0.35
         : 0.08;
 
-    return Tooltip(
-      message: '$label إجمالي: $totalBytes',
-      child: Container(
-        width: 72,
-        height: 48,
-        decoration: BoxDecoration(
-          color: baseColor.withValues(alpha: opacity),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: baseColor.withValues(alpha: 0.4),
-            width: 1.2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: baseColor.withValues(alpha: 0.15),
-              blurRadius: 6,
-              spreadRadius: 0.5,
+    return GestureDetector(
+      onTap: _toggle,
+      child: Tooltip(
+        message: 'اضغط للتبديل | الإجمالي: $total',
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          width: 80,
+          height: 56,
+          decoration: BoxDecoration(
+            color: baseColor.withValues(alpha: opacity),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: baseColor.withValues(alpha: 0.4),
+              width: 1.2,
             ),
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(
-              label,
-              style: TextStyle(
-                color: Colors.green.shade700,
-                fontSize: 10,
-                fontWeight: FontWeight.bold,
+            boxShadow: [
+              BoxShadow(
+                color: baseColor.withValues(alpha: 0.15),
+                blurRadius: 6,
+                spreadRadius: 0.5,
               ),
-            ),
-            const SizedBox(height: 2),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 400),
-              transitionBuilder: (child, animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: child,
-                );
-              },
-              child: Text(
-                formattedSpeed,
-                key: ValueKey<String>(formattedSpeed),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              /// TX / RX label
+              Text(
+                label,
                 style: TextStyle(
-                  color: Colors.green.shade800,
-                  fontSize: 11,
+                  color: Colors.green.shade700,
+                  fontSize: 10,
                   fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 2),
+              /// السرعة اللحظية
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 400),
+                transitionBuilder: (child, animation) {
+                  return FadeTransition(
+                    opacity: animation,
+                    child: child,
+                  );
+                },
+                child: Text(
+                  _formatSpeed(speed),
+                  key: ValueKey<String>('${label}_${_formatSpeed(speed)}'),
+                  style: TextStyle(
+                    color: Colors.green.shade800,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    fontFamily: 'monospace',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 1),
+              /// الاستهلاك الإجمالي
+              Text(
+                total,
+                style: TextStyle(
+                  color: Colors.green.shade600,
+                  fontSize: 9,
+                  fontWeight: FontWeight.w500,
                   fontFamily: 'monospace',
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
