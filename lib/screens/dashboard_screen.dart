@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
@@ -46,6 +45,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   StreamSubscription<Map<String, double>>? _speedSubscription;
   Timer? _statsTimer;
+  int _currentIndex = 0;
 
   @override
   void initState() {
@@ -272,754 +272,770 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '${(speed * 1000).toStringAsFixed(0)} Kbps';
   }
 
-  // ═══════════════════════════════════════════
-  // BUILD
-  // ═══════════════════════════════════════════
+  // ──────────────────────────────────────────
+  // الشريط السفلي - التنقل
+  // ──────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.black,
-      appBar: _buildAppBar(),
-      drawer: SideDrawer(routerService: _routerService),
-      body: _buildBody(),
-    );
-  }
-
-  // ═══════════════════════════════════════════
-  // AppBar جديد
-  // ═══════════════════════════════════════════
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
-      backgroundColor: AppTheme.black,
-      elevation: 0,
-      automaticallyImplyLeading: false,
-      leading: IconButton(
-        icon: const Icon(Icons.settings_rounded, color: Colors.white, size: 24),
-        onPressed: () => Navigator.pushNamed(context, '/settings'),
-      ),
-      title: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            'ST_Manager',
-            style: TextStyle(
-              color: AppTheme.gold,
-              fontSize: 20,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Icon(Icons.verified, color: AppTheme.gold, size: 22),
-        ],
-      ),
-      centerTitle: true,
-      actions: [
-        Builder(
-          builder: (context) => IconButton(
-            icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 26),
-            onPressed: () => Scaffold.of(context).openDrawer(),
-          ),
-        ),
-        const SizedBox(width: 4),
-      ],
-    );
-  }
-
-  // ═══════════════════════════════════════════
-  // Body
-  // ═══════════════════════════════════════════
-  Widget _buildBody() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildWelcomeBanner(),
-          const SizedBox(height: 16),
-          _buildBridgeSelector(),
-          const SizedBox(height: 12),
-          _buildBentoTitle(),
-          const SizedBox(height: 12),
-          _buildBentoGrid(),
-          const SizedBox(height: 20),
-          _buildSectionTitle('لوحة التحكم وإدارة العملاء'),
-          const SizedBox(height: 12),
-          _buildHorizontalCards(),
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════
-  // Banner ترحيبي
-  // ═══════════════════════════════════════════
-  Widget _buildWelcomeBanner() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            const Color(0xFF2A2400),
-            const Color(0xFF1A1800),
-            AppTheme.black,
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: AppTheme.gold.withOpacity(0.25),
-          width: 1,
-        ),
-      ),
-      child: Row(
-        children: [
-          // أيقونة واي فاي
-          Container(
-            width: 70,
-            height: 70,
-            decoration: BoxDecoration(
-              gradient: RadialGradient(
-                colors: [
-                  AppTheme.gold.withOpacity(0.3),
-                  AppTheme.gold.withOpacity(0.05),
-                ],
-              ),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              Icons.wifi_tethering_rounded,
-              color: AppTheme.gold.withOpacity(0.9),
-              size: 36,
-            ),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'أهلاً بك في نظام ST_Manager الذكي',
-                  style: TextStyle(
-                    color: AppTheme.gold,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'الراوتر النشط : ${widget.routerData['name'] ?? 'ST_Manager'}',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  '«تحكم متكامل في راوتري ميكروتك بنقرة واحدة لتحقيق',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
-                    fontSize: 11,
-                  ),
-                ),
-                Text(
-                  'أفضل أداء لعملائك»',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.55),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ═══════════════════════════════════════════
-  // Bridge Selector
-  // ═══════════════════════════════════════════
-  Widget _buildBridgeSelector() {
-    return GestureDetector(
-      onTap: _showInterfacePicker,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppTheme.gold.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: AppTheme.gold.withOpacity(0.25),
-          ),
-        ),
-        child: Row(
+      appBar: AppBar(
+        title: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            Text(widget.routerData['name'] ?? 'ST_Manager'),
             Text(
-              'منفذ ${_selectedInterface ?? '---'}',
-              style: TextStyle(
-                color: AppTheme.gold,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Icon(
-              Icons.swap_horiz_rounded,
-              color: AppTheme.gold,
-              size: 18,
+              'ربطك بالعالم بسرعة وثقة',
+              style:
+                  Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10),
             ),
           ],
         ),
+        actions: [
+          Builder(
+            builder: (context) => IconButton(
+              icon: const Icon(Icons.menu),
+              onPressed: () => Scaffold.of(context).openDrawer(),
+            ),
+          ),
+        ],
+      ),
+      drawer: SideDrawer(routerService: _routerService),
+      body: _buildBody(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        type: BottomNavigationBarType.fixed,
+        backgroundColor: AppTheme.semiBlack,
+        selectedItemColor: AppTheme.gold,
+        unselectedItemColor: Colors.white38,
+        selectedFontSize: 11,
+        unselectedFontSize: 10,
+        onTap: (index) {
+          if (index == 4) {
+            // الإعدادات: نفتحها كصفحة منفصلة ثم نرجع للرئيسية
+            Navigator.pushNamed(context, '/settings').then((_) {
+              if (mounted) setState(() => _currentIndex = 0);
+            });
+            return;
+          }
+          setState(() => _currentIndex = index);
+        },
+        items: [
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.home_rounded),
+            label: 'الرئيسية',
+          ),
+          // ✅ البرودباند مباشرة في الشريط
+          BottomNavigationBarItem(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.router_rounded),
+                if (_pppActive > 0)
+                  Positioned(
+                    top: -4,
+                    right: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: AppTheme.greenOnline,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '$_pppActive',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: 'برودباند',
+          ),
+          // ✅ الهوتسبوت مباشرة في الشريط
+          BottomNavigationBarItem(
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.wifi_rounded),
+                if (_activeUsers > 0)
+                  Positioned(
+                    top: -4,
+                    right: -6,
+                    child: Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: const BoxDecoration(
+                        color: Colors.blue,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(
+                        '$_activeUsers',
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: 'هوتسبوت',
+          ),
+          // ✅ الإشعارات
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.notifications_rounded),
+            label: 'الإشعارات',
+          ),
+          // ✅ الإعدادات
+          const BottomNavigationBarItem(
+            icon: Icon(Icons.settings_rounded),
+            label: 'الإعدادات',
+          ),
+        ],
       ),
     );
   }
 
-  // ═══════════════════════════════════════════
-  // عنوان Bento
-  // ═══════════════════════════════════════════
-  Widget _buildBentoTitle() {
-    return Text(
-      'مؤشرات الأداء المباشرة (Bento)',
-      style: TextStyle(
-        color: Colors.white.withOpacity(0.9),
-        fontSize: 16,
-        fontWeight: FontWeight.bold,
-      ),
-    );
+  Widget _buildBody() {
+    switch (_currentIndex) {
+      case 0:
+        return _buildDashboardContent();
+
+      // ✅ البرودباند - شاشة كاملة مدمجة
+      case 1:
+        return PppActiveScreen(routerService: _routerService);
+
+      // ✅ الهوتسبوت - شاشة كاملة مدمجة
+      case 2:
+        return HotspotActiveUsersScreen(routerService: _routerService);
+
+      // ✅ الإشعارات - شاشة مخصصة
+      case 3:
+        return _buildNotificationsTab();
+
+      // ✅ الإعدادات - لا يصل هنا لأنه يُعالج في onTap
+      default:
+        return _buildDashboardContent();
+    }
   }
 
-  // ═══════════════════════════════════════════
-  // Bento Grid
-  // ═══════════════════════════════════════════
-  Widget _buildBentoGrid() {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  // ──────────────────────────────────────────
+  // ✅ تبويب الإشعارات
+  // ──────────────────────────────────────────
+  Widget _buildNotificationsTab() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    // قائمة أحداث تُبنى من البيانات الحية
+    final events = <Map<String, dynamic>>[];
+
+    if (_pppActive > 0) {
+      events.add({
+        'icon': Icons.router_rounded,
+        'color': AppTheme.greenOnline,
+        'title': 'برودباند نشط',
+        'body': '$_pppActive مستخدم متصل من أصل $_pppTotal',
+        'time': 'الآن',
+      });
+    }
+
+    if (_activeUsers > 0) {
+      events.add({
+        'icon': Icons.wifi_rounded,
+        'color': Colors.blue,
+        'title': 'هوتسبوت نشط',
+        'body': '$_activeUsers مستخدم متصل من أصل $_totalUsers',
+        'time': 'الآن',
+      });
+    }
+
+    if (_cpuLoad > 80) {
+      events.add({
+        'icon': Icons.warning_amber_rounded,
+        'color': Colors.orange,
+        'title': 'تحذير: حمل معالج مرتفع',
+        'body': 'المعالج عند ${_cpuLoad.toStringAsFixed(1)}%',
+        'time': 'الآن',
+      });
+    }
+
+    if (_temperature > 70) {
+      events.add({
+        'icon': Icons.thermostat,
+        'color': Colors.red,
+        'title': 'تحذير: درجة حرارة مرتفعة',
+        'body': 'الحرارة عند ${_temperature.toStringAsFixed(1)}°C',
+        'time': 'الآن',
+      });
+    }
+
+    return Column(
       children: [
-        // الجانب الأيسر: 2x2 بطاقات صغيرة
-        Expanded(
-          flex: 5,
-          child: Column(
+        // ── رأس التبويب ──
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+          color: AppTheme.semiBlack,
+          child: Row(
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildBentoSmallCard(
-                      icon: Icons.bolt_rounded,
-                      iconColor: AppTheme.gold,
-                      value: '${_voltage.toStringAsFixed(1)}V',
-                      label: 'سحب طاقة واط',
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _buildBentoSmallCard(
-                      icon: Icons.thermostat_rounded,
-                      iconColor: Colors.redAccent,
-                      value: '${_temperature.toStringAsFixed(1)}°',
-                      label: 'حرارة المعالج',
-                    ),
-                  ),
-                ],
+              const Icon(Icons.notifications_rounded,
+                  color: AppTheme.gold, size: 20),
+              const SizedBox(width: 8),
+              const Text(
+                'الإشعارات والتنبيهات',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 15,
+                    fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 8),
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildBentoSmallCard(
-                      icon: Icons.speed_rounded,
-                      iconColor: Colors.blueAccent,
-                      value: _formatSpeed(_rxSpeed + _txSpeed),
-                      label: 'السرعة الإجمالية',
-                    ),
+              const Spacer(),
+              if (events.isNotEmpty)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.gold,
+                    borderRadius: BorderRadius.circular(999),
                   ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _buildBentoSmallCard(
-                      icon: Icons.memory_rounded,
-                      iconColor: Colors.orangeAccent,
-                      value: '${_cpuLoad.toStringAsFixed(0)}%',
-                      label: 'استهلاك CPU',
-                    ),
+                  child: Text(
+                    '${events.length}',
+                    style: const TextStyle(
+                        color: Colors.black,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold),
                   ),
-                ],
+                ),
+            ],
+          ),
+        ),
+
+        // ── الإحصائيات السريعة ──
+        Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              _buildStatPill(Icons.router_rounded, AppTheme.greenOnline,
+                  '$_pppActive/$_pppTotal', 'برودباند'),
+              const SizedBox(width: 8),
+              _buildStatPill(Icons.wifi_rounded, Colors.blue,
+                  '$_activeUsers/$_totalUsers', 'هوتسبوت'),
+              const SizedBox(width: 8),
+              _buildStatPill(
+                  Icons.memory_rounded,
+                  _cpuLoad > 80 ? Colors.red : Colors.green,
+                  '${_cpuLoad.toStringAsFixed(0)}%',
+                  'CPU'),
+              const SizedBox(width: 8),
+              _buildStatPill(
+                  Icons.thermostat,
+                  _temperature > 70 ? Colors.red : Colors.green,
+                  '${_temperature.toStringAsFixed(0)}°',
+                  'حرارة'),
+            ],
+          ),
+        ),
+
+        const Divider(height: 1, color: Colors.white12),
+
+        // ── قائمة الأحداث ──
+        Expanded(
+          child: events.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.check_circle_outline,
+                          color: AppTheme.greenOnline, size: 48),
+                      const SizedBox(height: 12),
+                      Text(
+                        'كل شيء يعمل بشكل طبيعي',
+                        style: TextStyle(
+                            color: onSurface.withOpacity(0.6), fontSize: 14),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: events.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 8),
+                  itemBuilder: (_, i) {
+                    final e = events[i];
+                    return Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: (e['color'] as Color).withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: (e['color'] as Color).withOpacity(0.3),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: (e['color'] as Color).withOpacity(0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              e['icon'] as IconData,
+                              color: e['color'] as Color,
+                              size: 20,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  e['title'] as String,
+                                  style: TextStyle(
+                                      color: onSurface,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  e['body'] as String,
+                                  style: TextStyle(
+                                      color: onSurface.withOpacity(0.6),
+                                      fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            e['time'] as String,
+                            style: const TextStyle(
+                                color: Colors.white38, fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+
+        // ── تلميح إعداد التلجرام ──
+        Container(
+          margin: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: const Color(0xFF29B6F6).withOpacity(0.08),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: const Color(0xFF29B6F6).withOpacity(0.3)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.telegram, color: Color(0xFF29B6F6), size: 20),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text(
+                  'فعّل بوت التلجرام لاستقبال الإشعارات تلقائياً',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Scaffold.of(context).openDrawer(),
+                child: const Text('إعداد',
+                    style: TextStyle(
+                        color: Color(0xFF29B6F6),
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
               ),
             ],
           ),
         ),
-        const SizedBox(width: 10),
-        // الجانب الأيمن: بطاقة السرعة الكبيرة مع العداد الدائري
-        Expanded(
-          flex: 5,
-          child: _buildSpeedGaugeCard(),
-        ),
       ],
     );
   }
 
-  Widget _buildBentoSmallCard({
-    required IconData icon,
-    required Color iconColor,
-    required String value,
-    required String label,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.06),
+  Widget _buildStatPill(
+      IconData icon, Color color, String value, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(height: 4),
+            Text(value,
+                style: TextStyle(
+                    color: color, fontSize: 11, fontWeight: FontWeight.bold)),
+            Text(label,
+                style: const TextStyle(color: Colors.white38, fontSize: 9)),
+          ],
         ),
       ),
+    );
+  }
+
+  // ──────────────────────────────────────────
+  // محتوى الداشبورد الرئيسي
+  // ──────────────────────────────────────────
+  Widget _buildDashboardContent() {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: iconColor, size: 20),
-          const SizedBox(height: 10),
-          Text(
-            value,
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
+          GridView.count(
+            crossAxisCount: 4,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildSmallCard('المعالج', '${_cpuLoad.toStringAsFixed(1)}%'),
+              _buildSmallCard(
+                  'الحرارة', '${_temperature.toStringAsFixed(1)}°C'),
+              _buildSmallCard('الفولت', '${_voltage.toStringAsFixed(1)}V'),
+              _buildSmallCard('الواجهات', '$_interfaceCount'),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _buildSpeedCard(onSurface),
+          const SizedBox(height: 14),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    _routerModel,
+                    style: TextStyle(
+                      color: onSurface,
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Uptime: $_uptime',
+                    style: TextStyle(
+                      color: onSurface.withOpacity(0.7),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.45),
-              fontSize: 10,
-            ),
+          const SizedBox(height: 16),
+          GridView.count(
+            crossAxisCount: 3,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            children: [
+              _buildMenuButtonWithCounter(
+                'هوتسبوت',
+                Icons.wifi_rounded,
+                '$_totalUsers/$_activeUsers',
+                () => setState(() => _currentIndex = 2),
+              ),
+              _buildMenuButtonWithCounter(
+                'برودباند',
+                Icons.router_rounded,
+                '$_pppTotal/$_pppActive',
+                () => setState(() => _currentIndex = 1),
+              ),
+              _buildMenuButton('بطاقات', Icons.credit_card, () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CardsScreen(routerService: _routerService),
+                  ),
+                );
+              }),
+              _buildMenuButton('نسخ/استعادة', Icons.backup, () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        BackupRestoreScreen(routerService: _routerService),
+                  ),
+                );
+              }),
+              _buildMenuButton('الأجهزة', Icons.cell_tower, () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        DevicesScreen(routerService: _routerService),
+                  ),
+                );
+              }),
+              _buildMenuButton('الواجهات', Icons.settings_ethernet, () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        InterfaceScreen(routerService: _routerService),
+                  ),
+                );
+              }),
+              _buildMenuButton(
+                  'قياس السرعة', Icons.speed, _showInterfacePicker),
+              _buildMenuButton('Simple Queue', Icons.queue, () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        SimpleQueueScreen(routerService: _routerService),
+                  ),
+                );
+              }),
+              _buildMenuButton('User Manager', Icons.manage_accounts, () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        UserManagerScreen(routerService: _routerService),
+                  ),
+                );
+              }),
+            ],
           ),
         ],
       ),
     );
   }
 
-  // ═══════════════════════════════════════════
-  // عداد السرعة الدائري
-  // ═══════════════════════════════════════════
-  Widget _buildSpeedGaugeCard() {
-    final speed = _showRxMain ? _rxSpeed : _txSpeed;
-    final label = _showRxMain ? 'RX' : 'TX';
+  Widget _buildSpeedCard(Color onSurface) {
+    final primary = _showRxMain ? _rxSpeed : _txSpeed;
     final secondary = _showRxMain ? _txSpeed : _rxSpeed;
+    final primaryLabel = _showRxMain ? 'RX' : 'TX';
     final secondaryLabel = _showRxMain ? 'TX' : 'RX';
 
     return Container(
+      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A1A1A),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.06),
+        gradient: LinearGradient(
+          colors: [AppTheme.black, AppTheme.darkGrey, AppTheme.semiBlack],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(
+          color: AppTheme.gold.withOpacity(0.35),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.gold.withOpacity(0.08),
+            blurRadius: 24,
+            spreadRadius: 1,
+            offset: const Offset(0, 10),
+          ),
+        ],
       ),
       child: Column(
         children: [
-          Text(
-            'سرعة السحب',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
-              fontSize: 12,
-              fontWeight: FontWeight.w500,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'السرعة اللحظية',
+                style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500),
+              ),
+              GestureDetector(
+                onTap: _showInterfacePicker,
+                child: Row(
+                  children: [
+                    Text(
+                      _selectedInterface ?? '---',
+                      style: const TextStyle(
+                          color: AppTheme.gold,
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 4),
+                    const Icon(Icons.expand_more,
+                        color: AppTheme.gold, size: 16),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
-          // العداد الدائري
-          GestureDetector(
-            onTap: _toggleSpeedView,
-            child: SizedBox(
-              width: 110,
-              height: 110,
-              child: CustomPaint(
-                painter: _GaugePainter(
-                  value: speed,
-                  maxValue: math.max(100, speed * 1.5),
-                  color: AppTheme.gold,
-                ),
-                child: Center(
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 18, horizontal: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white12),
+                  ),
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        speed >= 1 ? speed.toStringAsFixed(1) : (speed * 1000).toStringAsFixed(0),
+                        primaryLabel,
                         style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 26,
-                          fontWeight: FontWeight.bold,
+                            color: AppTheme.gold,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 8),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _formatSpeed(primary),
+                          style: TextStyle(
+                              color: onSurface,
+                              fontSize: 34,
+                              fontWeight: FontWeight.bold,
+                              height: 1),
                         ),
                       ),
+                      const SizedBox(height: 6),
                       Text(
-                        speed >= 1 ? 'Mbps' : 'Kbps',
+                        'الأولوية الآن: $primaryLabel',
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.5),
-                          fontSize: 11,
-                        ),
+                            color: onSurface.withOpacity(0.72), fontSize: 12),
                       ),
                     ],
                   ),
                 ),
               ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          // الواجهة
-          GestureDetector(
-            onTap: _showInterfacePicker,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  '${_selectedInterface ?? '---'}',
-                  style: TextStyle(
-                    color: AppTheme.gold,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                  ),
+              const SizedBox(width: 12),
+              SizedBox(
+                width: 84,
+                child: Column(
+                  children: [
+                    ElevatedButton(
+                      onPressed: _toggleSpeedView,
+                      style: ElevatedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 10),
+                        minimumSize: const Size.fromHeight(40),
+                      ),
+                      child: const Icon(Icons.swap_vert, size: 18),
+                    ),
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.04),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            secondaryLabel,
+                            style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            _formatSpeed(secondary),
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                height: 1),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-                Text(
-                  ' | ${_formatSpeed(secondary)}',
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.6),
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            'Gigabit Fiber',
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.35),
-              fontSize: 10,
-            ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  // ═══════════════════════════════════════════
-  // عنوان القسم
-  // ═══════════════════════════════════════════
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: TextStyle(
-        color: Colors.white.withOpacity(0.9),
-        fontSize: 16,
-        fontWeight: FontWeight.bold,
+  Widget _buildSmallCard(String title, String value) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(title,
+                style: const TextStyle(color: AppTheme.gold, fontSize: 12)),
+            const SizedBox(height: 4),
+            Text(value,
+                style: TextStyle(
+                    color: onSurface,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold)),
+          ],
+        ),
       ),
     );
   }
 
-  // ═══════════════════════════════════════════
-  // البطاقات الأفقية
-  // ═══════════════════════════════════════════
-  Widget _buildHorizontalCards() {
-    return Column(
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'هوتسبوت',
-                titleEn: 'Hotspot',
-                subtitle: 'تعديل، تجميد وسرعات',
-                icon: Icons.wifi_tethering_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => HotspotActiveUsersScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'برودباند',
-                titleEn: 'PPPoE',
-                subtitle: 'جميع الحسابات والبروفايلات',
-                icon: Icons.router_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PppActiveScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'بطاقات',
-                titleEn: '',
-                subtitle: 'توليد كرت مستخدم فردي تعليق',
-                icon: Icons.credit_card_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CardsScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'نسخ/استعادة',
-                titleEn: '',
-                subtitle: 'طباعة و PDF تخصيص خط',
-                icon: Icons.backup_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => BackupRestoreScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'الأجهزة',
-                titleEn: '',
-                subtitle: 'إدارة الأجهزة المتصلة',
-                icon: Icons.devices_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => DevicesScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'الواجهات',
-                titleEn: '',
-                subtitle: 'إدارة واجهات الشبكة',
-                icon: Icons.settings_ethernet_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => InterfaceScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'قياس السرعة',
-                titleEn: '',
-                subtitle: 'اختيار الواجهة وعرض السرعة',
-                icon: Icons.speed_rounded,
-                onTap: _showInterfacePicker,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'Simple Queue',
-                titleEn: '',
-                subtitle: 'إدارة قوائم التحكم',
-                icon: Icons.queue_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SimpleQueueScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: 'User Manager',
-                titleEn: '',
-                subtitle: 'إدارة المستخدمين',
-                icon: Icons.manage_accounts_rounded,
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => UserManagerScreen(routerService: _routerService),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 10),
-            // بطاقة الموديل والأبتايم
-            Expanded(
-              child: _buildHorizontalCard(
-                titleAr: _routerModel,
-                titleEn: '',
-                subtitle: 'Uptime: $_uptime',
-                icon: Icons.router_rounded,
-                onTap: () {},
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildHorizontalCard({
-    required String titleAr,
-    required String titleEn,
-    required String subtitle,
-    required IconData icon,
-    required VoidCallback onTap,
-  }) {
+  Widget _buildMenuButton(String label, IconData icon, VoidCallback onTap) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(20),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A1A1A),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(
-            color: Colors.white.withOpacity(0.06),
-          ),
-        ),
+      child: Card(
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // أيقونة
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: AppTheme.gold.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(
-                icon,
-                color: AppTheme.gold,
-                size: 24,
-              ),
-            ),
-            const SizedBox(height: 14),
-            // العنوان
-            Row(
-              children: [
-                Text(
-                  titleAr,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (titleEn.isNotEmpty) ...[
-                  const SizedBox(width: 6),
-                  Text(
-                    titleEn,
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.6),
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+            Icon(icon, color: AppTheme.gold, size: 28),
             const SizedBox(height: 6),
-            // وصف
-            Text(
-              subtitle,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.4),
-                fontSize: 11,
-              ),
-            ),
+            Text(label,
+                style: TextStyle(color: onSurface, fontSize: 12),
+                textAlign: TextAlign.center),
           ],
         ),
       ),
     );
   }
-}
 
-// ═══════════════════════════════════════════
-// Custom Painter للعداد الدائري
-// ═══════════════════════════════════════════
-class _GaugePainter extends CustomPainter {
-  final double value;
-  final double maxValue;
-  final Color color;
-
-  _GaugePainter({
-    required this.value,
-    required this.maxValue,
-    required this.color,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = math.min(size.width, size.height) / 2 - 6;
-    final strokeWidth = 8.0;
-
-    // الخلفية الرمادية
-    final bgPaint = Paint()
-      ..color = Colors.white.withOpacity(0.08)
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      math.pi * 0.75,
-      math.pi * 1.5,
-      false,
-      bgPaint,
+  Widget _buildMenuButtonWithCounter(
+    String label,
+    IconData icon,
+    String counter,
+    VoidCallback onTap,
+  ) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    return InkWell(
+      onTap: onTap,
+      child: Card(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: AppTheme.gold, size: 28),
+            const SizedBox(height: 2),
+            Text(label,
+                style: TextStyle(color: onSurface, fontSize: 12),
+                textAlign: TextAlign.center),
+            const SizedBox(height: 2),
+            Text(counter,
+                style:
+                    const TextStyle(color: AppTheme.greenOnline, fontSize: 10)),
+          ],
+        ),
+      ),
     );
-
-    // القيمة
-    final progress = math.min(value / maxValue, 1.0);
-    final progressPaint = Paint()
-      ..color = color
-      ..strokeWidth = strokeWidth
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius),
-      math.pi * 0.75,
-      math.pi * 1.5 * progress,
-      false,
-      progressPaint,
-    );
-  }
-
-  @override
-  bool shouldRepaint(covariant _GaugePainter oldDelegate) {
-    return oldDelegate.value != value || oldDelegate.maxValue != maxValue;
   }
 }
