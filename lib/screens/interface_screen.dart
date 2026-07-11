@@ -21,6 +21,9 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
 
   /// علم للتحقق مما إذا تم التخلص من الـ Widget
   bool _disposed = false;
+  
+  /// علم لمنع تداخل طلبات الـ API إذا تأخر الراوتر في الرد
+  bool _isFetchingTraffic = false;
 
   /// خريطة لتخزين بيانات السرعة والاستهلاك لكل واجهة
   /// المفتاح: اسم الواجهة
@@ -56,7 +59,7 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
     return matchAny(['ether', 'bridge', 'sfp', 'wlan', 'bond']);
   }
 
-  /// تحميل قائمة الواجهات
+  /// تحميل قائمة الواجهات والقراءات الأولية
   Future<void> _loadInterfaces() async {
     if (widget.routerService == null) {
       if (mounted && !_disposed) {
@@ -78,12 +81,33 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
     try {
       final data = await widget.routerService!.getInterfaceList();
       final filtered = data.where(_isPortOrBridge).toList();
+      final now = DateTime.now();
+
+      // تسجيل القراءات الأولية للعدادات لتجنب السرعة 0 في الثواني الأولى
+      for (final iface in data) {
+        final name = iface['name']?.toString() ?? '';
+        if (name.isEmpty) continue;
+
+        // دعم اختلاف التسميات بين إصدارات المايكروتك (مفرد/جمع)
+        final rxBytes = int.tryParse(iface['rx-byte']?.toString() ?? iface['rx-bytes']?.toString() ?? '0') ?? 0;
+        final txBytes = int.tryParse(iface['tx-byte']?.toString() ?? iface['tx-bytes']?.toString() ?? '0') ?? 0;
+
+        _trafficData[name] = {
+          'rxSpeed': 0,
+          'txSpeed': 0,
+          'lastRxBytes': rxBytes,
+          'lastTxBytes': txBytes,
+          'lastTime': now,
+          'totalRxBytes': rxBytes,
+          'totalTxBytes': txBytes,
+        };
+      }
 
       if (mounted && !_disposed) {
         setState(() => _interfaces = filtered);
       }
 
-      /// بدء مراقبة السرعة بعد تحميل الواجهات
+      /// بدء مراقبة السرعة والتحديثات
       _startTrafficMonitoring();
     } catch (e) {
       if (mounted && !_disposed) {
@@ -103,33 +127,31 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
     }
   }
 
-  /// بدء مراقبة السرعة — قراءة أولية فورية ثم أول حساب بعد 1 ثانية ثم كل 3 ثوانٍ
+  /// بدء المراقبة عبر جدولة التحديثات بطريقة متسلسلة لمنع تراكم الطلبات
   void _startTrafficMonitoring() {
     _trafficTimer?.cancel();
+    _scheduleNextTrafficUpdate(const Duration(seconds: 1));
+  }
 
-    /// أولاً: قراءة أولية لتخزين القيم الأساسية (بدون حساب سرعة)
-    _captureInitialTraffic().then((_) {
-      /// بعد ثانية واحدة: قراءة ثانية لحساب السرعة الأولى وعرضها فوراً
-      if (!_disposed) {
-        _trafficTimer = Timer(const Duration(seconds: 1), () async {
-          if (_disposed) return;
-          await _updateTrafficSpeeds();
-
-          /// بعدها: بدء التحديث الدوري كل 3 ثوانٍ لتحديث أسرع
-          if (!_disposed) {
-            _trafficTimer = Timer.periodic(
-              const Duration(seconds: 3),
-              (_) => _updateTrafficSpeeds(),
-            );
-          }
-        });
-      }
+  /// جدولة الطلب القادم بذكاء
+  void _scheduleNextTrafficUpdate(Duration delay) {
+    if (_disposed) return;
+    
+    _trafficTimer = Timer(delay, () async {
+      if (_disposed) return;
+      
+      await _updateTrafficSpeeds();
+      
+      // جدولة النبضة القادمة بعد 3 ثوانٍ من انتهاء الطلب الحالي
+      _scheduleNextTrafficUpdate(const Duration(seconds: 3));
     });
   }
 
-  /// قراءة أولية لتخزين قيم البايتس بدون حساب سرعة
-  Future<void> _captureInitialTraffic() async {
-    if (widget.routerService == null || _disposed) return;
+  /// حساب السرعة لكل واجهة وتحديث القائمة والاستهلاك الإجمالي
+  Future<void> _updateTrafficSpeeds() async {
+    if (widget.routerService == null || _disposed || _isFetchingTraffic) return;
+
+    _isFetchingTraffic = true;
 
     try {
       final data = await widget.routerService!.getInterfaceList();
@@ -137,16 +159,44 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
 
       if (_disposed) return;
 
+      final filtered = data.where(_isPortOrBridge).toList();
+
       for (final iface in data) {
         final name = iface['name']?.toString() ?? '';
         if (name.isEmpty) continue;
 
-        final rxBytes = int.tryParse(iface['rx-byte']?.toString() ?? '0') ?? 0;
-        final txBytes = int.tryParse(iface['tx-byte']?.toString() ?? '0') ?? 0;
+        final rxBytes = int.tryParse(iface['rx-byte']?.toString() ?? iface['rx-bytes']?.toString() ?? '0') ?? 0;
+        final txBytes = int.tryParse(iface['tx-byte']?.toString() ?? iface['tx-bytes']?.toString() ?? '0') ?? 0;
+
+        final prev = _trafficData[name];
+        
+        int rxSpeed = 0;
+        int txSpeed = 0;
+
+        if (prev != null) {
+          final prevRx = prev['lastRxBytes'] as int;
+          final prevTx = prev['lastTxBytes'] as int;
+          final prevTime = prev['lastTime'] as DateTime;
+
+          final durationSec = now.difference(prevTime).inMilliseconds / 1000.0;
+
+          if (durationSec > 0) {
+            int rxDiff = rxBytes - prevRx;
+            int txDiff = txBytes - prevTx;
+
+            // معالجة حالة إعادة التشغيل أو تصفير العداد في الراوتر
+            if (rxDiff < 0) rxDiff = rxBytes;
+            if (txDiff < 0) txDiff = txBytes;
+
+            /// السرعة بالبت في الثانية (bps)
+            rxSpeed = (rxDiff * 8 / durationSec).round();
+            txSpeed = (txDiff * 8 / durationSec).round();
+          }
+        }
 
         _trafficData[name] = {
-          'rxSpeed': 0,
-          'txSpeed': 0,
+          'rxSpeed': rxSpeed,
+          'txSpeed': txSpeed,
           'lastRxBytes': rxBytes,
           'lastTxBytes': txBytes,
           'lastTime': now,
@@ -155,73 +205,16 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
         };
       }
 
-      if (mounted && !_disposed) setState(() {});
-    } catch (_) {
-      /// نتجاهل أخطاء القراءة الأولية
-    }
-  }
-
-  /// حساب السرعة لكل واجهة وتحديث الاستهلاك الإجمالي
-  Future<void> _updateTrafficSpeeds() async {
-    if (widget.routerService == null || _disposed) return;
-
-    try {
-      final data = await widget.routerService!.getInterfaceList();
-      final now = DateTime.now();
-
-      if (_disposed) return;
-
-      for (final iface in data) {
-        final name = iface['name']?.toString() ?? '';
-        if (name.isEmpty) continue;
-
-        final rxBytes = int.tryParse(iface['rx-byte']?.toString() ?? '0') ?? 0;
-        final txBytes = int.tryParse(iface['tx-byte']?.toString() ?? '0') ?? 0;
-
-        final prev = _trafficData[name];
-
-        if (prev != null) {
-          final prevRx = prev['lastRxBytes'] as int;
-          final prevTx = prev['lastTxBytes'] as int;
-          final prevTime = prev['lastTime'] as DateTime;
-
-          final durationSec = now.difference(prevTime).inMilliseconds / 1000;
-
-          if (durationSec > 0) {
-            final rxDiff = rxBytes - prevRx;
-            final txDiff = txBytes - prevTx;
-
-            /// السرعة بالبت في الثانية (bps)
-            final rxSpeed = (rxDiff * 8 / durationSec).round();
-            final txSpeed = (txDiff * 8 / durationSec).round();
-
-            _trafficData[name] = {
-              'rxSpeed': rxSpeed,
-              'txSpeed': txSpeed,
-              'lastRxBytes': rxBytes,
-              'lastTxBytes': txBytes,
-              'lastTime': now,
-              'totalRxBytes': rxBytes,
-              'totalTxBytes': txBytes,
-            };
-          }
-        } else {
-          /// أول مرة لهذه الواجهة - نخزن القيم فقط بدون حساب سرعة
-          _trafficData[name] = {
-            'rxSpeed': 0,
-            'txSpeed': 0,
-            'lastRxBytes': rxBytes,
-            'lastTxBytes': txBytes,
-            'lastTime': now,
-            'totalRxBytes': rxBytes,
-            'totalTxBytes': txBytes,
-          };
-        }
+      // تحديث قائمة الواجهات (لتحديث حالة الاتصال وسرعة المنفذ) مع القراءات الجديدة
+      if (mounted && !_disposed) {
+        setState(() {
+          _interfaces = filtered;
+        });
       }
-
-      if (mounted && !_disposed) setState(() {});
     } catch (_) {
       /// نتجاهل أخطاء تحديث السرعة لعدم إزعاج المستخدم
+    } finally {
+      _isFetchingTraffic = false;
     }
   }
 
@@ -238,17 +231,6 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
       return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
     }
     return '${(bytes / (1024 * 1024 * 1024 * 1024)).toStringAsFixed(2)} TB';
-  }
-
-  /// تنسيق السرعة (bps -> Kbps / Mbps / Gbps)
-  String _formatSpeed(int bps) {
-    if (bps < 0) bps = 0;
-    if (bps < 1000) return '${bps}bps';
-    if (bps < 1000 * 1000) return '${(bps / 1000).toStringAsFixed(1)} Kbps';
-    if (bps < 1000 * 1000 * 1000) {
-      return '${(bps / (1000 * 1000)).toStringAsFixed(1)} Mbps';
-    }
-    return '${(bps / (1000 * 1000 * 1000)).toStringAsFixed(2)} Gbps';
   }
 
   @override
@@ -278,10 +260,12 @@ class _InterfaceScreenState extends State<InterfaceScreen> {
                       final traffic = _trafficData[name];
                       final rxSpeed = traffic?['rxSpeed'] as int? ?? 0;
                       final txSpeed = traffic?['txSpeed'] as int? ?? 0;
+                      
+                      // استخدم الاستهلاك من trafficData ليكون محدثاً دائماً
                       final totalRx = traffic?['totalRxBytes'] as int? ??
-                          (int.tryParse(iface['rx-byte']?.toString() ?? '0') ?? 0);
+                          (int.tryParse(iface['rx-byte']?.toString() ?? iface['rx-bytes']?.toString() ?? '0') ?? 0);
                       final totalTx = traffic?['totalTxBytes'] as int? ??
-                          (int.tryParse(iface['tx-byte']?.toString() ?? '0') ?? 0);
+                          (int.tryParse(iface['tx-byte']?.toString() ?? iface['tx-bytes']?.toString() ?? '0') ?? 0);
 
                       return Card(
                         margin: const EdgeInsets.symmetric(
@@ -361,6 +345,7 @@ class _SpeedBox extends StatefulWidget {
   final String totalTx;
 
   const _SpeedBox({
+    super.key,
     required this.rxSpeed,
     required this.txSpeed,
     required this.totalRx,
