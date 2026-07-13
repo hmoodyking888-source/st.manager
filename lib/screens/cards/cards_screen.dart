@@ -348,16 +348,19 @@ class _CardsScreenState extends State<CardsScreen>
 
     setState(() => _sIsGenerating = true);
     try {
-      final comment =
-          'Price:${_sPriceCtrl.text} | Note:${_sNotesCtrl.text}';
+      final comment = 'Price:${_sPriceCtrl.text} | Note:${_sNotesCtrl.text}';
       
       final uptime = _getMikrotikUptime(_sValidityCtrl.text, _sValidityUnit);
       final bytes = _getMikrotikBytes(_sVolumeCtrl.text, _sVolumeUnit);
+
+      // تحديد وتضمين الإيميل ليمثل عدد الأيام كجزء من الطلب
+      final emailValue = '${_sValidityCtrl.text}@nobind.com';
 
       final params = {
         'name': _sUserCtrl.text.trim(),
         'password': _sPassCtrl.text.trim(),
         'profile': _sProfile,
+        'email': emailValue,
         'comment': comment,
       };
 
@@ -1334,7 +1337,7 @@ class _CardsScreenState extends State<CardsScreen>
       final count = int.parse(_cardCountCtrl.text.trim());
       final userLen = int.parse(_userLenCtrl.text.trim());
       final passLen = int.parse(_passLenCtrl.text.trim());
-      final profile = _mProfile; // مأخوذة من القائمة المنسدلة الآن
+      final profile = _mProfile;
 
       final cards = _generateUniqueCards(
         count: count,
@@ -1374,10 +1377,14 @@ class _CardsScreenState extends State<CardsScreen>
 
           final results = await Future.wait(batch.map((card) async {
             try {
+              // تحديد الإيميل كقيمة لعدد الأيام للدفعة
+              final emailValue = '${_mValidityCtrl.text}@nobind.com';
+
               final params = {
                 'name': card.user,
                 'password': card.pass,
                 'profile': card.profile,
+                'email': emailValue, // الإضافة هنا
                 'comment': 'ST_Manager_Batch',
               };
               if (uptime != null) params['limit-uptime'] = uptime;
@@ -1476,8 +1483,6 @@ class _CardsScreenState extends State<CardsScreen>
             build: (_) => pw.Stack(children: children)));
       }
       
-      // تم حذف صفحة قائمة بيانات البطاقات بناءً على طلبك
-
       final bytes = await pdf.save();
       final dir = await getTemporaryDirectory();
       final file = File(
@@ -1542,7 +1547,7 @@ class _CardsScreenState extends State<CardsScreen>
               left: _netX * cardW,
               top: _netY * cardH,
               child: pw.Text(card.network,
-                  textDirection: pw.TextDirection.rtl, // هام جداً للغة العربية
+                  textDirection: pw.TextDirection.rtl,
                   style: pw.TextStyle(
                       font: arabicFont,
                       color: toPdfCol(_netColor),
@@ -1571,7 +1576,7 @@ class _CardsScreenState extends State<CardsScreen>
               left: _durX * cardW,
               top: _durY * cardH,
               child: pw.Text(card.duration,
-                  textDirection: pw.TextDirection.rtl, // هام جداً للغة العربية
+                  textDirection: pw.TextDirection.rtl,
                   style: pw.TextStyle(
                       font: arabicFont,
                       color: toPdfCol(_durColor),
@@ -1582,7 +1587,7 @@ class _CardsScreenState extends State<CardsScreen>
               left: _notesX * cardW,
               top: _notesY * cardH,
               child: pw.Text(card.notes,
-                  textDirection: pw.TextDirection.rtl, // هام جداً للغة العربية
+                  textDirection: pw.TextDirection.rtl,
                   style: pw.TextStyle(
                       font: arabicFont,
                       color: toPdfCol(_notesColor),
@@ -1598,6 +1603,17 @@ class _CardsScreenState extends State<CardsScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('بطاقات الهوتسبوت'),
+        // إضافة زر الرجوع ليعود إلى الداشبورد حصراً وبشكل قطعي (مع إزالة ما قبله من المكدس)
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () {
+            Navigator.pushNamedAndRemoveUntil(
+              context,
+              '/dashboard', // تأكد أن هذا هو المسار (Route) الصحيح لشاشة الداشبورد في مشروعك
+              (route) => false,
+            );
+          },
+        ),
         bottom: TabBar(
           controller: _tabController,
           indicatorColor: AppTheme.gold,
