@@ -26,6 +26,7 @@ class _CardTemplate {
   final Color border;
   final Color text;
   final Color mutedText;
+  final int shapeType; // 0: مستطيل, 1: سهم مثلث, 2: دائري منحني
 
   const _CardTemplate({
     required this.name,
@@ -37,6 +38,7 @@ class _CardTemplate {
     required this.border,
     required this.text,
     required this.mutedText,
+    this.shapeType = 0,
   });
 }
 
@@ -151,62 +153,127 @@ class _CardsScreenState extends State<CardsScreen>
   String _previewUser = '123456';
   String _previewPass = '12345';
 
-  // النماذج المحدثة والجديدة
+  // النماذج المحدثة والجديدة المطابقة للصور
   final List<_CardTemplate> _templates = const [
     _CardTemplate(
-      name: 'أزرق حديث',
-      subtitle: 'كلاسيكي متطور',
-      background: Color(0xFFF0F4F8),
-      backgroundSoft: Color(0xFFD9E2EC),
-      accent: Color(0xFF102A43),
-      accentSoft: Color(0x66102A43),
-      border: Color(0xFF334E68),
-      text: Color(0xFF102A43),
-      mutedText: Color(0xFF486581),
+      name: 'سماوي سهم',
+      subtitle: 'عصري',
+      background: Color(0xFFE0F7FA),
+      backgroundSoft: Color(0xFFB2EBF2),
+      accent: Color(0xFF00BCD4),
+      accentSoft: Color(0x6600BCD4),
+      border: Color(0xFF0097A7),
+      text: Color(0xFF006064),
+      mutedText: Color(0xFF00838F),
+      shapeType: 1, // شكل سهم
     ),
     _CardTemplate(
-      name: 'ذهبي ملكي',
+      name: 'برتقالي سهم',
+      subtitle: 'مشرق',
+      background: Color(0xFFFFF3E0),
+      backgroundSoft: Color(0xFFFFE0B2),
+      accent: Color(0xFFFF9800),
+      accentSoft: Color(0x66FF9800),
+      border: Color(0xFFF57C00),
+      text: Color(0xFFE65100),
+      mutedText: Color(0xFFEF6C00),
+      shapeType: 1,
+    ),
+    _CardTemplate(
+      name: 'ذهبي دائري',
       subtitle: 'فخم',
-      background: Color(0xFF1A1A1A),
-      backgroundSoft: Color(0xFF2D2D2D),
-      accent: Color(0xFFD4AF37),
-      accentSoft: Color(0x66D4AF37),
-      border: Color(0xFFD4AF37),
-      text: Colors.white,
-      mutedText: Color(0xFFBFBFBF),
+      background: Color(0xFFFFFDE7),
+      backgroundSoft: Color(0xFFFFF59D),
+      accent: Color(0xFF004D40), // لمسة خضراء داكنة مع خلفية صفراء/ذهبية
+      accentSoft: Color(0x66004D40),
+      border: Color(0xFF00695C),
+      text: Color(0xFF004D40),
+      mutedText: Color(0xFF00695C),
+      shapeType: 2, // دائري منحني
+    ),
+    _CardTemplate(
+      name: 'وردي دائري',
+      subtitle: 'ناعم',
+      background: Color(0xFFFCE4EC),
+      backgroundSoft: Color(0xFFF8BBD0),
+      accent: Color(0xFFE91E63),
+      accentSoft: Color(0x66E91E63),
+      border: Color(0xFFC2185B),
+      text: Color(0xFF880E4F),
+      mutedText: Color(0xFFAD1457),
+      shapeType: 2,
+    ),
+    _CardTemplate(
+      name: 'أزرق محيطي',
+      subtitle: 'عميق',
+      background: Color(0xFFE3F2FD),
+      backgroundSoft: Color(0xFFBBDEFB),
+      accent: Color(0xFF1565C0),
+      accentSoft: Color(0x661565C0),
+      border: Color(0xFF0D47A1),
+      text: Color(0xFF0D47A1),
+      mutedText: Color(0xFF1565C0),
+      shapeType: 2,
+    ),
+    _CardTemplate(
+      name: 'أخضر طبيعي',
+      subtitle: 'منعش',
+      background: Color(0xFFF1F8E9),
+      backgroundSoft: Color(0xFFDCEDC8),
+      accent: Color(0xFF43A047),
+      accentSoft: Color(0x6643A047),
+      border: Color(0xFF2E7D32),
+      text: Color(0xFF1B5E20),
+      mutedText: Color(0xFF2E7D32),
+      shapeType: 2,
+    ),
+    _CardTemplate(
+      name: 'أحمر دائري',
+      subtitle: 'جذاب',
+      background: Color(0xFFFFEBEE),
+      backgroundSoft: Color(0xFFFFCDD2),
+      accent: Color(0xFFD32F2F),
+      accentSoft: Color(0x66D32F2F),
+      border: Color(0xFFB71C1C),
+      text: Color(0xFFB71C1C),
+      mutedText: Color(0xFFC62828),
+      shapeType: 2,
+    ),
+    _CardTemplate(
+      name: 'بنفسجي كلاسيك',
+      subtitle: 'أنيق',
+      background: Color(0xFFF3E5F5),
+      backgroundSoft: Color(0xFFE1BEE7),
+      accent: Color(0xFF8E24AA),
+      accentSoft: Color(0x668E24AA),
+      border: Color(0xFF6A1B9A),
+      text: Color(0xFF4A148C),
+      mutedText: Color(0xFF6A1B9A),
+      shapeType: 0, // مستطيل كلاسيكي
+    ),
+    _CardTemplate(
+      name: 'داكن كلاسيك',
+      subtitle: 'رسمي',
+      background: Color(0xFFECEFF1),
+      backgroundSoft: Color(0xFFCFD8DC),
+      accent: Color(0xFF263238),
+      accentSoft: Color(0x66263238),
+      border: Color(0xFF37474F),
+      text: Color(0xFF263238),
+      mutedText: Color(0xFF455A64),
+      shapeType: 0,
     ),
     _CardTemplate(
       name: 'أبيض نقي',
-      subtitle: 'بسيط ونظيف',
+      subtitle: 'بسيط',
       background: Color(0xFFFFFFFF),
-      backgroundSoft: Color(0xFFF9F9F9),
-      accent: Color(0xFFE53935), // لمسة حمراء خفيفة
-      accentSoft: Color(0x66E53935),
-      border: Color(0xFFEEEEEE),
+      backgroundSoft: Color(0xFFF5F5F5),
+      accent: Color(0xFF9E9E9E),
+      accentSoft: Color(0x669E9E9E),
+      border: Color(0xFFE0E0E0),
       text: Color(0xFF212121),
       mutedText: Color(0xFF757575),
-    ),
-    _CardTemplate(
-      name: 'داكن نيون',
-      subtitle: 'لليلي',
-      background: Color(0xFF0F172A),
-      backgroundSoft: Color(0xFF1E293B),
-      accent: Color(0xFF38BDF8),
-      accentSoft: Color(0x6638BDF8),
-      border: Color(0xFF38BDF8),
-      text: Colors.white,
-      mutedText: Color(0xFF94A3B8),
-    ),
-    _CardTemplate(
-      name: 'بنفسجي فايبر',
-      subtitle: 'ألوان حيوية',
-      background: Color(0xFFFDF4FF),
-      backgroundSoft: Color(0xFFFAE8FF),
-      accent: Color(0xFFC026D3),
-      accentSoft: Color(0x66C026D3),
-      border: Color(0xFFE879F9),
-      text: Color(0xFF4A044E),
-      mutedText: Color(0xFF86198F),
+      shapeType: 0,
     ),
   ];
 
@@ -353,8 +420,11 @@ class _CardsScreenState extends State<CardsScreen>
       final uptime = _getMikrotikUptime(_sValidityCtrl.text, _sValidityUnit);
       final bytes = _getMikrotikBytes(_sVolumeCtrl.text, _sVolumeUnit);
 
-      // تحديد وتضمين الإيميل ليمثل عدد الأيام كجزء من الطلب
-      final emailValue = '${_sValidityCtrl.text}@nobind.com';
+      // تحديد وتضمين الإيميل ليمثل عدد الأيام كجزء من الطلب مع التمييز بين الأيام والساعات
+      final validityText = _sValidityCtrl.text;
+      final emailValue = _sValidityUnit == 'ساعة' 
+          ? '${validityText}h@nobind.com' 
+          : '$validityText@nobind.com';
 
       final params = {
         'name': _sUserCtrl.text.trim(),
@@ -726,14 +796,43 @@ class _CardsScreenState extends State<CardsScreen>
           if (_useCustomImage && _templateImage != null)
             Positioned.fill(
                 child: Image.file(_templateImage!, fit: BoxFit.cover)),
+          
+          // العناصر الرسومية الملونة الجانبية حسب شكل البطاقة (دائري، سهم، مستطيل)
           if (!_useCustomImage)
-            Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: w * 0.3,
-              child: Container(color: t.accent),
-            ),
+            if (t.shapeType == 2) // دائري منحني
+              Positioned(
+                left: -h * 0.75,
+                top: -h * 0.25,
+                child: Container(
+                  width: h * 1.5,
+                  height: h * 1.5,
+                  decoration: BoxDecoration(
+                    color: t.accent,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              )
+            else if (t.shapeType == 1) // سهم
+              Positioned(
+                left: -h * 0.6,
+                top: -h * 0.1,
+                child: Transform.rotate(
+                  angle: 0.785398, // دوران بزاوية 45 درجة لتشكيل السهم
+                  child: Container(
+                    width: h * 1.2,
+                    height: h * 1.2,
+                    color: t.accent,
+                  ),
+                ),
+              )
+            else // مستطيل كلاسيكي
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: w * 0.3,
+                child: Container(color: t.accent),
+              ),
 
           // العناصر القابلة للسحب
           if (_showNetwork)
@@ -1377,14 +1476,17 @@ class _CardsScreenState extends State<CardsScreen>
 
           final results = await Future.wait(batch.map((card) async {
             try {
-              // تحديد الإيميل كقيمة لعدد الأيام للدفعة
-              final emailValue = '${_mValidityCtrl.text}@nobind.com';
+              // تحديد الإيميل ليمثل عدد الأيام للدفعة مع إضافة حرف h في حالة الساعات
+              final validityText = _mValidityCtrl.text;
+              final emailValue = _mValidityUnit == 'ساعة' 
+                  ? '${validityText}h@nobind.com' 
+                  : '$validityText@nobind.com';
 
               final params = {
                 'name': card.user,
                 'password': card.pass,
                 'profile': card.profile,
-                'email': emailValue, // الإضافة هنا
+                'email': emailValue,
                 'comment': 'ST_Manager_Batch',
               };
               if (uptime != null) params['limit-uptime'] = uptime;
@@ -1535,13 +1637,42 @@ class _CardsScreenState extends State<CardsScreen>
           if (imageBytes != null)
             pw.Positioned.fill(
                 child: pw.Image(pw.MemoryImage(imageBytes), fit: pw.BoxFit.cover)),
+          
           if (imageBytes == null)
-            pw.Positioned(
-              left: 0,
-              top: 0,
-              bottom: 0,
-              child: pw.Container(width: cardW * 0.3, color: toPdfCol(t.accent)),
-            ),
+            if (t.shapeType == 2) // دائري منحني
+              pw.Positioned(
+                left: -cardH * 0.75,
+                top: -cardH * 0.25,
+                child: pw.Container(
+                  width: cardH * 1.5,
+                  height: cardH * 1.5,
+                  decoration: pw.BoxDecoration(
+                    color: toPdfCol(t.accent),
+                    shape: pw.BoxShape.circle,
+                  ),
+                ),
+              )
+            else if (t.shapeType == 1) // سهم
+              pw.Positioned(
+                left: -cardH * 0.6,
+                top: -cardH * 0.1,
+                child: pw.Transform.rotate(
+                  angle: 0.785398, // دوران بزاوية 45 درجة لتشكيل السهم
+                  child: pw.Container(
+                    width: cardH * 1.2,
+                    height: cardH * 1.2,
+                    color: toPdfCol(t.accent),
+                  ),
+                ),
+              )
+            else // مستطيل كلاسيكي
+              pw.Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: pw.Container(width: cardW * 0.3, color: toPdfCol(t.accent)),
+              ),
+              
           if (_showNetwork)
             pw.Positioned(
               left: _netX * cardW,
