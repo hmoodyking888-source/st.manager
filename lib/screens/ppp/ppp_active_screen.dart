@@ -106,7 +106,6 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return DateTime.now().isAfter(end);
   }
 
-  // تم إصلاح الدالة للتحقق من الحسابات الجديدة بشكل دقيق
   bool _isNewAccount(
     Map<String, dynamic> secret,
     bool isActive,
@@ -117,15 +116,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     if (isActive || isDisabled || isExpired) return false;
 
     final lastLoggedOut = _normalizeText(secret['last-logged-out']).toLowerCase();
-    
-    // المايكروتيك إما أن يترك الحقل فارغاً، أو يضع تاريخ البداية 1970 للحسابات التي لم تتصل أبداً
-    if (lastLoggedOut.isNotEmpty && 
-        !lastLoggedOut.contains('jan/01/1970') && 
+
+    if (lastLoggedOut.isNotEmpty &&
+        !lastLoggedOut.contains('jan/01/1970') &&
         !lastLoggedOut.contains('1970-01-01')) {
-      return false; // الحساب سجل خروج مسبقاً (ليس جديداً)
+      return false;
     }
 
-    return true; // الحساب لم يتصل أبداً
+    return true;
   }
 
   String _dateOnlyString(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
@@ -360,19 +358,17 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return allSucceeded;
   }
 
-  // تم إصلاح دالة بناء اسم الواجهة لتتطابق مع صيغة مايكروتيك <pppoe-username>
   String _buildTrafficInterfaceName(Map<String, dynamic> active) {
     final service = _normalizeText(active['service']).toLowerCase();
-    final name = _normalizeText(active['name']); // اسم المستخدم المتصل
-    
+    final name = _normalizeText(active['name']);
+
     if (name.isEmpty) return '';
 
-    // الصيغة الرسمية في المايكروتيك للانترفيس الدايناميك هي بين قوسين < >
     if (service.isNotEmpty) {
       return '<$service-$name>';
     }
-    
-    return '<pppoe-$name>'; // افتراضي إذا لم يتوفر نوع الخدمة
+
+    return '<pppoe-$name>';
   }
 
   Future<Map<String, double>> _getSessionTraffic(
@@ -399,10 +395,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
       if (result.isNotEmpty) {
         final row = result.first;
-        final rx =
-            double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ?? 0;
-        final tx =
-            double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ?? 0;
+        final rx = double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ?? 0;
+        final tx = double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ?? 0;
         return {'rx': rx / 1000000, 'tx': tx / 1000000};
       }
     } catch (_) {}
@@ -1357,6 +1351,16 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     ).then((_) => _load(background: true));
   }
 
+  void _openProfilesPage() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        settings: const RouteSettings(name: '/ppp-profiles'),
+        builder: (_) => _PppProfilesScreen(routerService: widget.routerService),
+      ),
+    );
+  }
+
   Widget _buildAccountCard(Map<String, dynamic> user) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final status = _normalizeText(user['status']).isEmpty
@@ -1628,6 +1632,52 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     );
   }
 
+  Widget _buildBottomBar({required bool onMain}) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: onMain ? () => _load(background: true) : () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.people_alt_outlined),
+                label: const Text('المستخدمين'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: onMain ? AppTheme.gold : Theme.of(context).cardColor,
+                  foregroundColor: onMain ? Colors.black : Theme.of(context).colorScheme.onSurface,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: onMain ? _openProfilesPage : null,
+                icon: const Icon(Icons.folder_open),
+                label: const Text('بروفايل'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: onMain ? Theme.of(context).colorScheme.onSurface : AppTheme.gold,
+                  side: BorderSide(
+                    color: onMain ? Theme.of(context).dividerColor : AppTheme.gold,
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
@@ -1748,6 +1798,670 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             ),
           ],
         ),
+        bottomNavigationBar: _buildBottomBar(onMain: true),
+      ),
+    );
+  }
+}
+
+class _ProfileField {
+  final String title;
+  final String value;
+  const _ProfileField(this.title, this.value);
+}
+
+class _PppProfilesScreen extends StatefulWidget {
+  final RouterService? routerService;
+  const _PppProfilesScreen({required this.routerService});
+
+  @override
+  State<_PppProfilesScreen> createState() => _PppProfilesScreenState();
+}
+
+class _PppProfilesScreenState extends State<_PppProfilesScreen> {
+  static const Duration _fetchTimeout = Duration(seconds: 18);
+  static const Duration _actionTimeout = Duration(seconds: 12);
+
+  final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _uploadController = TextEditingController();
+  final TextEditingController _downloadController = TextEditingController();
+
+  Timer? _refreshTimer;
+  bool _loading = false;
+  String _searchQuery = '';
+  List<Map<String, dynamic>> _profiles = [];
+  List<Map<String, dynamic>> _lastProfiles = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController.addListener(() {
+      if (mounted) {
+        setState(() => _searchQuery = _searchController.text.trim());
+      }
+    });
+    _load(initial: true);
+    _refreshTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+      _load(background: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    _searchController.dispose();
+    _nameController.dispose();
+    _uploadController.dispose();
+    _downloadController.dispose();
+    super.dispose();
+  }
+
+  String _normalize(dynamic value) => value?.toString().trim() ?? '';
+
+  Future<List<Map<String, dynamic>>?> _safeFetchProfiles() async {
+    if (widget.routerService == null) return null;
+    try {
+      final result = await widget.routerService!
+          .sendCommand('/ppp/profile/print', useCache: false)
+          .timeout(_fetchTimeout);
+      return List<Map<String, dynamic>>.from(result);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _load({bool initial = false, bool background = false}) async {
+    if (widget.routerService == null) return;
+    if (_loading) return;
+
+    _loading = true;
+    if (mounted && (initial || !background)) {
+      setState(() {});
+    }
+
+    try {
+      final result = await _safeFetchProfiles();
+      if (result != null) {
+        _lastProfiles = result;
+      }
+      if (!mounted) return;
+      setState(() {
+        _profiles = result ?? _lastProfiles;
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    } finally {
+      _loading = false;
+    }
+  }
+
+  String _pick(Map<String, dynamic> item, List<String> keys) {
+    for (final key in keys) {
+      final v = _normalize(item[key]);
+      if (v.isNotEmpty) return v;
+    }
+    return '';
+  }
+
+  String _extractUpload(String rateLimit) {
+    final value = rateLimit.trim();
+    if (value.isEmpty || !value.contains('/')) return '';
+    return value.split('/').first.trim();
+  }
+
+  String _extractDownload(String rateLimit) {
+    final value = rateLimit.trim();
+    if (value.isEmpty || !value.contains('/')) return '';
+    final parts = value.split('/');
+    if (parts.length < 2) return '';
+    return parts[1].trim();
+  }
+
+  String _composeRateLimit(String upload, String download) {
+    final up = upload.trim();
+    final down = download.trim();
+    if (up.isEmpty && down.isEmpty) return '';
+    return '$up/$down';
+  }
+
+  List<Map<String, dynamic>> get _filteredProfiles {
+    final q = _searchQuery.toLowerCase();
+    final list = List<Map<String, dynamic>>.from(_profiles);
+    list.sort((a, b) {
+      final an = _normalize(a['name']).toLowerCase();
+      final bn = _normalize(b['name']).toLowerCase();
+      return an.compareTo(bn);
+    });
+    if (q.isEmpty) return list;
+    return list.where((p) {
+      final blob = [
+        p['name'],
+        p['rate-limit'],
+        p['only-one'],
+        p['change-tcp-mss'],
+        p['use-compression'],
+        p['use-vj-compression'],
+        p['session-timeout'],
+        p['bridge'],
+        p['local-address'],
+        p['remote-address'],
+        p['incoming-filter'],
+        p['outgoing-filter'],
+        p['dns-server'],
+        p['address-list'],
+        p['parent-queue'],
+        p['limit-bytes-in'],
+        p['limit-bytes-out'],
+      ].map((e) => e?.toString().toLowerCase() ?? '').join(' | ');
+      return blob.contains(q);
+    }).toList();
+  }
+
+  Future<void> _saveProfile({Map<String, dynamic>? profile}) async {
+    final isEdit = profile != null;
+    if (isEdit) {
+      _nameController.text = _normalize(profile['name']);
+      final rate = _normalize(profile['rate-limit']);
+      _uploadController.text = _extractUpload(rate);
+      _downloadController.text = _extractDownload(rate);
+    } else {
+      _nameController.clear();
+      _uploadController.clear();
+      _downloadController.clear();
+    }
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: Text(
+          isEdit ? 'تعديل بروفايل' : 'إضافة بروفايل',
+          style: const TextStyle(color: Colors.white),
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: _nameController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'الاسم',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white10,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _uploadController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'الرفع',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white10,
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _downloadController,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'التحميل',
+                  labelStyle: TextStyle(color: Colors.white70),
+                  filled: true,
+                  fillColor: Colors.white10,
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(
+              isEdit ? 'حفظ' : 'إضافة',
+              style: TextStyle(color: AppTheme.gold),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (result != true) return;
+    final name = _nameController.text.trim();
+    final upload = _uploadController.text.trim();
+    final download = _downloadController.text.trim();
+    if (name.isEmpty) return;
+
+    final rateLimit = _composeRateLimit(upload, download);
+    final numbers = isEdit ? _normalize(profile['.id']) : '';
+
+    try {
+      if (isEdit) {
+        await widget.routerService?.sendCommand(
+          '/ppp/profile/set',
+          params: {
+            'numbers': numbers,
+            'name': name,
+            'rate-limit': rateLimit,
+          },
+        ).timeout(_actionTimeout);
+      } else {
+        await widget.routerService?.sendCommand(
+          '/ppp/profile/add',
+          params: {
+            'name': name,
+            'rate-limit': rateLimit,
+            'only-one': 'no',
+            'change-tcp-mss': 'yes',
+          },
+        ).timeout(_actionTimeout);
+      }
+      await _load(background: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(isEdit ? 'تعذر تعديل البروفايل: $e' : 'تعذر إضافة البروفايل: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _deleteProfile(Map<String, dynamic> profile) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: const Text('تأكيد الحذف', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'هل تريد حذف البروفايل "${_normalize(profile['name'])}"؟',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('حذف', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    final id = _normalize(profile['.id']);
+    if (id.isEmpty) return;
+
+    try {
+      await widget.routerService?.sendCommand(
+        '/ppp/profile/remove',
+        params: {'numbers': id},
+      ).timeout(_actionTimeout);
+      await _load(background: true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('تعذر حذف البروفايل: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  void _showProfileActions(Map<String, dynamic> profile) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppTheme.semiBlack,
+      builder: (_) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.edit, color: AppTheme.gold),
+              title: const Text('تعديل', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _saveProfile(profile: profile);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_forever, color: Colors.red),
+              title: const Text('حذف', style: TextStyle(color: Colors.white)),
+              onTap: () {
+                Navigator.pop(context);
+                _deleteProfile(profile);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfileCard(Map<String, dynamic> profile) {
+    final name = _normalize(profile['name']);
+    final rateLimit = _normalize(profile['rate-limit']);
+    final upload = _extractUpload(rateLimit);
+    final download = _extractDownload(rateLimit);
+    final server = _pick(profile, ['service', 'server', 'bridge', 'interface']);
+
+    final fields = <_ProfileField>[
+      _ProfileField('السيرفر', server.isEmpty ? '-' : server),
+      _ProfileField('الرفع', upload.isEmpty ? '-' : upload),
+      _ProfileField('التحميل', download.isEmpty ? '-' : download),
+      _ProfileField('Rate Limit', rateLimit.isEmpty ? '-' : rateLimit),
+      _ProfileField('Only One', _pick(profile, ['only-one']).isEmpty ? '-' : _pick(profile, ['only-one'])),
+      _ProfileField('Change TCP MSS', _pick(profile, ['change-tcp-mss']).isEmpty ? '-' : _pick(profile, ['change-tcp-mss'])),
+      _ProfileField('Local Address', _pick(profile, ['local-address']).isEmpty ? '-' : _pick(profile, ['local-address'])),
+      _ProfileField('Remote Address', _pick(profile, ['remote-address']).isEmpty ? '-' : _pick(profile, ['remote-address'])),
+      _ProfileField('Session Timeout', _pick(profile, ['session-timeout']).isEmpty ? '-' : _pick(profile, ['session-timeout'])),
+      _ProfileField('Keepalive Timeout', _pick(profile, ['keepalive-timeout']).isEmpty ? '-' : _pick(profile, ['keepalive-timeout'])),
+      _ProfileField('Address List', _pick(profile, ['address-list']).isEmpty ? '-' : _pick(profile, ['address-list'])),
+      _ProfileField('Incoming Filter', _pick(profile, ['incoming-filter']).isEmpty ? '-' : _pick(profile, ['incoming-filter'])),
+      _ProfileField('Outgoing Filter', _pick(profile, ['outgoing-filter']).isEmpty ? '-' : _pick(profile, ['outgoing-filter'])),
+      _ProfileField('DNS', _pick(profile, ['dns-server']).isEmpty ? '-' : _pick(profile, ['dns-server'])),
+      _ProfileField('Parent Queue', _pick(profile, ['parent-queue']).isEmpty ? '-' : _pick(profile, ['parent-queue'])),
+      _ProfileField('Bridge Path Cost', _pick(profile, ['bridge-path-cost']).isEmpty ? '-' : _pick(profile, ['bridge-path-cost'])),
+      _ProfileField('Bridge Horizon', _pick(profile, ['bridge-horizon']).isEmpty ? '-' : _pick(profile, ['bridge-horizon'])),
+      _ProfileField('Bridge Learning', _pick(profile, ['bridge-learning']).isEmpty ? '-' : _pick(profile, ['bridge-learning'])),
+      _ProfileField('Comment', _pick(profile, ['comment']).isEmpty ? '-' : _pick(profile, ['comment'])),
+    ];
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).cardColor,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: AppTheme.gold.withOpacity(0.35)),
+      ),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onTap: () => _showProfileActions(profile),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: AppTheme.gold.withOpacity(0.12),
+                      border: Border.all(color: AppTheme.gold.withOpacity(0.35)),
+                    ),
+                    child: const Icon(Icons.folder, color: AppTheme.gold),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name.isEmpty ? '-' : name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            _pill('السيرفر: ${server.isEmpty ? '-' : server}', Colors.cyan),
+                            _pill('الرفع: ${upload.isEmpty ? '-' : upload}', Colors.green),
+                            _pill('التحميل: ${download.isEmpty ? '-' : download}', Colors.blue),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: fields.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                  childAspectRatio: 3.1,
+                ),
+                itemBuilder: (_, index) {
+                  final item = fields[index];
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          item.title,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          item.value,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _pill(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        child: Row(
+          children: [
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.people_alt_outlined),
+                label: const Text('المستخدمين'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).cardColor,
+                  foregroundColor: Theme.of(context).colorScheme.onSurface,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _load(background: true),
+                icon: const Icon(Icons.folder_open),
+                label: const Text('بروفايل'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.gold,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final list = _filteredProfiles;
+
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) {
+        if (!didPop) {
+          Navigator.of(context).popUntil(
+            (route) => route.settings.name == '/dashboard' || route.isFirst,
+          );
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () {
+              Navigator.of(context).popUntil(
+                (route) => route.settings.name == '/dashboard' || route.isFirst,
+              );
+            },
+          ),
+          title: const Text('البروفايلات'),
+          actions: [
+            IconButton(
+              onPressed: () => _load(background: true),
+              icon: const Icon(Icons.refresh),
+              tooltip: 'تحديث',
+            ),
+            IconButton(
+              onPressed: () => _saveProfile(),
+              icon: const Icon(Icons.add),
+              tooltip: 'إضافة بروفايل',
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: TextField(
+                controller: _searchController,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: 'بحث في البروفايلات...',
+                  prefixIcon: const Icon(Icons.search, color: AppTheme.gold),
+                  filled: true,
+                  fillColor: Theme.of(context).cardColor,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  hintStyle: TextStyle(color: Colors.white.withOpacity(0.35)),
+                ),
+              ),
+            ),
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: _load,
+                child: widget.routerService == null
+                    ? ListView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        children: const [
+                          SizedBox(height: 120),
+                          Center(
+                            child: Text(
+                              'لا يوجد RouterService',
+                              style: TextStyle(color: Colors.white70),
+                            ),
+                          ),
+                        ],
+                      )
+                    : list.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              const SizedBox(height: 120),
+                              Center(
+                                child: Text(
+                                  _profiles.isEmpty
+                                      ? (_loading ? 'جاري التحميل...' : 'لا توجد بروفايلات')
+                                      : 'لا توجد نتائج',
+                                  style: const TextStyle(color: Colors.white70),
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListView.builder(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 8,
+                            ),
+                            itemCount: list.length,
+                            itemBuilder: (_, i) => _buildProfileCard(list[i]),
+                          ),
+              ),
+            ),
+          ],
+        ),
+        bottomNavigationBar: _buildBottomBar(),
       ),
     );
   }
