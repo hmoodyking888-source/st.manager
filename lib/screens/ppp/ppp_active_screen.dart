@@ -1687,9 +1687,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       canPop: false,
       onPopInvoked: (didPop) {
         if (!didPop) {
-          Navigator.of(context).popUntil(
-            (route) => route.settings.name == '/dashboard' || route.isFirst,
-          );
+          Navigator.of(context).popUntil((route) => route.isFirst);
         }
       },
       child: Scaffold(
@@ -1697,9 +1695,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () {
-              Navigator.of(context).popUntil(
-                (route) => route.settings.name == '/dashboard' || route.isFirst,
-              );
+              Navigator.of(context).popUntil((route) => route.isFirst);
             },
           ),
           title: const Text('البرودباند'),
@@ -1824,8 +1820,7 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
 
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _uploadController = TextEditingController();
-  final TextEditingController _downloadController = TextEditingController();
+  final TextEditingController _rateLimitController = TextEditingController();
 
   Timer? _refreshTimer;
   bool _loading = false;
@@ -1852,8 +1847,7 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     _refreshTimer?.cancel();
     _searchController.dispose();
     _nameController.dispose();
-    _uploadController.dispose();
-    _downloadController.dispose();
+    _rateLimitController.dispose();
     super.dispose();
   }
 
@@ -1907,27 +1901,6 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     return '';
   }
 
-  String _extractUpload(String rateLimit) {
-    final value = rateLimit.trim();
-    if (value.isEmpty || !value.contains('/')) return '';
-    return value.split('/').first.trim();
-  }
-
-  String _extractDownload(String rateLimit) {
-    final value = rateLimit.trim();
-    if (value.isEmpty || !value.contains('/')) return '';
-    final parts = value.split('/');
-    if (parts.length < 2) return '';
-    return parts[1].trim();
-  }
-
-  String _composeRateLimit(String upload, String download) {
-    final up = upload.trim();
-    final down = download.trim();
-    if (up.isEmpty && down.isEmpty) return '';
-    return '$up/$down';
-  }
-
   List<Map<String, dynamic>> get _filteredProfiles {
     final q = _searchQuery.toLowerCase();
     final list = List<Map<String, dynamic>>.from(_profiles);
@@ -1963,108 +1936,156 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
 
   Future<void> _saveProfile({Map<String, dynamic>? profile}) async {
     final isEdit = profile != null;
+    String selectedPool = '';
+
     if (isEdit) {
       _nameController.text = _normalize(profile['name']);
-      final rate = _normalize(profile['rate-limit']);
-      _uploadController.text = _extractUpload(rate);
-      _downloadController.text = _extractDownload(rate);
+      _rateLimitController.text = _normalize(profile['rate-limit']);
+      selectedPool = _normalize(profile['remote-address']);
     } else {
       _nameController.clear();
-      _uploadController.clear();
-      _downloadController.clear();
+      _rateLimitController.clear();
     }
+
+    List<String> pools = [];
+    if (widget.routerService != null) {
+      try {
+        final res = await widget.routerService!
+            .sendCommand('/ip/pool/print', useCache: false)
+            .timeout(_actionTimeout);
+        pools = res
+            .map((e) => _normalize(e['name']))
+            .where((name) => name.isNotEmpty)
+            .toList();
+      } catch (_) {}
+    }
+
+    if (selectedPool.isNotEmpty && !pools.contains(selectedPool)) {
+      pools.add(selectedPool);
+    }
+    if (pools.isNotEmpty && selectedPool.isEmpty) {
+      selectedPool = pools.first;
+    }
+
+    if (!mounted) return;
 
     final result = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppTheme.semiBlack,
-        title: Text(
-          isEdit ? 'تعديل بروفايل' : 'إضافة بروفايل',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _nameController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'الاسم',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white10,
-                ),
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setStateBuilder) {
+          return AlertDialog(
+            backgroundColor: AppTheme.semiBlack,
+            title: Text(
+              isEdit ? 'تعديل بروفايل' : 'إضافة بروفايل',
+              style: const TextStyle(color: Colors.white),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: _nameController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'الاسم',
+                      labelStyle: TextStyle(color: Colors.white70),
+                      filled: true,
+                      fillColor: Colors.white10,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: _rateLimitController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: const InputDecoration(
+                      labelText: 'تحديد السرعة (Rate Limit)',
+                      hintText: 'مثال: 2M/2M',
+                      hintStyle: TextStyle(color: Colors.white38),
+                      labelStyle: TextStyle(color: Colors.white70),
+                      filled: true,
+                      fillColor: Colors.white10,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (pools.isNotEmpty)
+                    DropdownButtonFormField<String>(
+                      value: selectedPool.isNotEmpty ? selectedPool : null,
+                      dropdownColor: AppTheme.semiBlack,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: const InputDecoration(
+                        labelText: 'رنج الآيبي (IP Pool)',
+                        labelStyle: TextStyle(color: Colors.white70),
+                        filled: true,
+                        fillColor: Colors.white10,
+                      ),
+                      items: pools.map((String pool) {
+                        return DropdownMenuItem<String>(
+                          value: pool,
+                          child: Text(pool),
+                        );
+                      }).toList(),
+                      onChanged: (String? newValue) {
+                        if (newValue != null) {
+                          setStateBuilder(() {
+                            selectedPool = newValue;
+                          });
+                        }
+                      },
+                    )
+                  else
+                    const Text(
+                      'لا توجد Pool Address متوفرة',
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                ],
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _uploadController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'الرفع',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white10,
-                ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
               ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _downloadController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  labelText: 'التحميل',
-                  labelStyle: TextStyle(color: Colors.white70),
-                  filled: true,
-                  fillColor: Colors.white10,
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: Text(
+                  isEdit ? 'حفظ' : 'إضافة',
+                  style: TextStyle(color: AppTheme.gold),
                 ),
               ),
             ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(
-              isEdit ? 'حفظ' : 'إضافة',
-              style: TextStyle(color: AppTheme.gold),
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
 
     if (result != true) return;
     final name = _nameController.text.trim();
-    final upload = _uploadController.text.trim();
-    final download = _downloadController.text.trim();
+    final rateLimit = _rateLimitController.text.trim();
+    
     if (name.isEmpty) return;
 
-    final rateLimit = _composeRateLimit(upload, download);
     final numbers = isEdit ? _normalize(profile['.id']) : '';
+
+    Map<String, String> params = {
+      'name': name,
+    };
+    
+    if (rateLimit.isNotEmpty) params['rate-limit'] = rateLimit;
+    if (selectedPool.isNotEmpty) params['remote-address'] = selectedPool;
 
     try {
       if (isEdit) {
+        params['numbers'] = numbers;
         await widget.routerService?.sendCommand(
           '/ppp/profile/set',
-          params: {
-            'numbers': numbers,
-            'name': name,
-            'rate-limit': rateLimit,
-          },
+          params: params,
         ).timeout(_actionTimeout);
       } else {
+        params['only-one'] = 'yes';
+        params['change-tcp-mss'] = 'yes';
         await widget.routerService?.sendCommand(
           '/ppp/profile/add',
-          params: {
-            'name': name,
-            'rate-limit': rateLimit,
-            'only-one': 'no',
-            'change-tcp-mss': 'yes',
-          },
+          params: params,
         ).timeout(_actionTimeout);
       }
       await _load(background: true);
@@ -2158,19 +2179,18 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
   Widget _buildProfileCard(Map<String, dynamic> profile) {
     final name = _normalize(profile['name']);
     final rateLimit = _normalize(profile['rate-limit']);
-    final upload = _extractUpload(rateLimit);
-    final download = _extractDownload(rateLimit);
     final server = _pick(profile, ['service', 'server', 'bridge', 'interface']);
+    final remoteAddress = _pick(profile, ['remote-address']);
 
     final fields = <_ProfileField>[
       _ProfileField('السيرفر', server.isEmpty ? '-' : server),
-      _ProfileField('الرفع', upload.isEmpty ? '-' : upload),
-      _ProfileField('التحميل', download.isEmpty ? '-' : download),
+      _ProfileField('السرعة', rateLimit.isEmpty ? '-' : rateLimit),
+      _ProfileField('رنج الآيبي', remoteAddress.isEmpty ? '-' : remoteAddress),
       _ProfileField('Rate Limit', rateLimit.isEmpty ? '-' : rateLimit),
       _ProfileField('Only One', _pick(profile, ['only-one']).isEmpty ? '-' : _pick(profile, ['only-one'])),
       _ProfileField('Change TCP MSS', _pick(profile, ['change-tcp-mss']).isEmpty ? '-' : _pick(profile, ['change-tcp-mss'])),
       _ProfileField('Local Address', _pick(profile, ['local-address']).isEmpty ? '-' : _pick(profile, ['local-address'])),
-      _ProfileField('Remote Address', _pick(profile, ['remote-address']).isEmpty ? '-' : _pick(profile, ['remote-address'])),
+      _ProfileField('Remote Address', remoteAddress.isEmpty ? '-' : remoteAddress),
       _ProfileField('Session Timeout', _pick(profile, ['session-timeout']).isEmpty ? '-' : _pick(profile, ['session-timeout'])),
       _ProfileField('Keepalive Timeout', _pick(profile, ['keepalive-timeout']).isEmpty ? '-' : _pick(profile, ['keepalive-timeout'])),
       _ProfileField('Address List', _pick(profile, ['address-list']).isEmpty ? '-' : _pick(profile, ['address-list'])),
@@ -2229,9 +2249,9 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            _pill('السيرفر: ${server.isEmpty ? '-' : server}', Colors.cyan),
-                            _pill('الرفع: ${upload.isEmpty ? '-' : upload}', Colors.green),
-                            _pill('التحميل: ${download.isEmpty ? '-' : download}', Colors.blue),
+                            _pill('السرعة: ${rateLimit.isEmpty ? '-' : rateLimit}', Colors.green),
+                            if (remoteAddress.isNotEmpty)
+                              _pill('IP Pool: $remoteAddress', Colors.cyan),
                           ],
                         ),
                       ],
@@ -2367,9 +2387,7 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
       canPop: false,
       onPopInvoked: (didPop) {
         if (!didPop) {
-          Navigator.of(context).popUntil(
-            (route) => route.settings.name == '/dashboard' || route.isFirst,
-          );
+          Navigator.of(context).popUntil((route) => route.isFirst);
         }
       },
       child: Scaffold(
@@ -2377,9 +2395,7 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
             onPressed: () {
-              Navigator.of(context).popUntil(
-                (route) => route.settings.name == '/dashboard' || route.isFirst,
-              );
+              Navigator.of(context).popUntil((route) => route.isFirst);
             },
           ),
           title: const Text('البروفايلات'),
