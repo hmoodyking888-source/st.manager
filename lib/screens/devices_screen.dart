@@ -1,17 +1,19 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
+import 'package:url_launcher/url_launcher.dart'; // تأكد من إضافة هذه الحزمة في pubspec.yaml
 
-/// نموذج بيانات يمثل أي جهاز متصل بالشبكة (مرسل، مستقبل، أو هوتسبوت)
+/// نموذج بيانات يمثل جهاز متصل بالشبكة (من الـ Neighbors)
 class NetworkDevice {
   final String name;
   final String ip;
   final String mac;
   final String interface;
   final String model;
-  final String type; // 'مستقبل', 'مرسل', 'هوتسبوت', 'راوتر/سويتش'
+  final String type; 
   final String uptime;
-  final String status; // 'متصل', 'غير متصل'
+  final String status;
+  final Map<String, dynamic> rawData; // تمت إضافته لحفظ كل التفاصيل الأصلية لعرضها لاحقاً
 
   NetworkDevice({
     required this.name,
@@ -22,6 +24,7 @@ class NetworkDevice {
     required this.type,
     required this.uptime,
     required this.status,
+    required this.rawData,
   });
 }
 
@@ -35,19 +38,16 @@ class DevicesScreen extends StatefulWidget {
 
 class _DevicesScreenState extends State<DevicesScreen> {
   List<NetworkDevice> _devices = [];
-  List<NetworkDevice> _filteredDevices = [];
   
   bool _isLoading = true;
   String? _errorMessage;
-  String _searchQuery = '';
-  String _selectedFilter = 'الكل'; // الكل, مستقبل, مرسل, هوتسبوت
 
   // الألوان الأساسية للواجهة الفاخرة والنقية
-  final Color _bgColor = const Color(0xFF0A0A0A); // أسود عميق
-  final Color _cardColor = const Color(0xFF141414); // رمادي داكن جداً
-  final Color _goldColor = const Color(0xFFFFD700); // ذهبي
-  final Color _textColor = const Color(0xFFE0E0E0); // أبيض رمادي للقراءة
-  final Color _subTextColor = const Color(0xFF888888); // لون النصوص الفرعية
+  final Color _bgColor = const Color(0xFF0A0A0A); 
+  final Color _cardColor = const Color(0xFF141414); 
+  final Color _goldColor = const Color(0xFFFFD700); 
+  final Color _textColor = const Color(0xFFE0E0E0); 
+  final Color _subTextColor = const Color(0xFF888888); 
 
   @override
   void initState() {
@@ -55,7 +55,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     _fetchNetworkData();
   }
 
-  /// تحديد نوع القطعة بناءً على الموديل (Board Name)
+  /// تحديد نوع القطعة بناءً على الموديل
   String _determineDeviceType(String board) {
     final b = board.toLowerCase();
     if (b.contains('litebeam') || b.contains('powerbeam') || b.contains('nanobeam') || b.contains('loco') || b.contains('sxt') || b.contains('lhg') || b.contains('disc') || b.contains('cpe')) {
@@ -68,7 +68,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     return 'جهاز شبكة';
   }
 
-  /// ترجمة واجهات الميكروتيك (Interfaces) لتكون أوضح
+  /// ترجمة واجهات الميكروتيك
   String _formatInterface(String iface) {
     if (iface.toLowerCase().startsWith('ether')) {
       return iface.replaceFirst('ether', 'ايثرنت ');
@@ -80,7 +80,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
     return iface;
   }
 
-  /// جلب البيانات من الميكروتيك (Neighbors + Hotspot Host)
+  /// جلب البيانات من الميكروتيك (Neighbors فقط)
   Future<void> _fetchNetworkData() async {
     if (widget.routerService == null) {
       setState(() {
@@ -96,107 +96,43 @@ class _DevicesScreenState extends State<DevicesScreen> {
     });
 
     try {
-      // عزل طلبات الجلب لتفادي انهيار (catchError type) وجلب المضيفين من Host
       List<dynamic> neighbors = [];
-      List<dynamic> hotspotsHosts = [];
-
       try {
         final resN = await widget.routerService!.sendCommand('/ip/neighbor/print');
         if (resN is List) neighbors = resN;
       } catch (_) {}
 
-      try {
-        final resH = await widget.routerService!.sendCommand('/ip/hotspot/host/print');
-        if (resH is List) hotspotsHosts = resH;
-      } catch (_) {}
+      List<NetworkDevice> loadedDevices = [];
 
-      // خريطة لدمج الأجهزة بناءً على الماك أدرس لتصحيح الفرز والتكرار
-      Map<String, NetworkDevice> uniqueMap = {};
-
-      // 1. معالجة القطع والأجهزة (Neighbors)
       for (var n in neighbors) {
         final identity = n['identity']?.toString() ?? 'جهاز غير مسمى';
         final ip = n['address']?.toString() ?? 'لا يوجد IP';
-        final mac = n['mac-address']?.toString() ?? '';
+        final mac = n['mac-address']?.toString() ?? 'غير معروف';
         final interface = n['interface']?.toString() ?? 'غير معروف';
         final board = n['board']?.toString() ?? 'غير معروف';
         final uptime = n['uptime']?.toString() ?? '-';
 
-        if (ip == 'لا يوجد IP' && mac.isEmpty) continue;
-        
-        final key = mac.isNotEmpty ? mac : ip;
-
-        uniqueMap[key] = NetworkDevice(
-          name: identity,
-          ip: ip,
-          mac: mac.isEmpty ? 'غير معروف' : mac,
-          interface: _formatInterface(interface),
-          model: board != 'غير معروف' ? board : 'جهاز عام',
-          type: _determineDeviceType(board),
-          uptime: uptime,
-          status: 'متصل', // أجهزة الجوار نشطة دائماً
+        loadedDevices.add(
+          NetworkDevice(
+            name: identity,
+            ip: ip,
+            mac: mac,
+            interface: _formatInterface(interface),
+            model: board != 'غير معروف' ? board : 'جهاز عام',
+            type: _determineDeviceType(board),
+            uptime: uptime,
+            status: 'متصل', // أجهزة الـ Neighbors تعتبر متصلة
+            rawData: n as Map<String, dynamic>,
+          )
         );
       }
 
-      // 2. معالجة مستخدمي ومضيفي الهوتسبوت المتصلين وغير المتصلين
-      for (var h in hotspotsHosts) {
-        final mac = h['mac-address']?.toString() ?? '';
-        final ip = h['address']?.toString() ?? 'لا يوجد IP';
-        final key = mac.isNotEmpty ? mac : ip;
-
-        final comment = h['comment']?.toString() ?? '';
-        final user = h['user']?.toString() ?? '';
-        final name = comment.isNotEmpty ? comment : (user.isNotEmpty ? user : (mac.isNotEmpty ? mac : ip));
-        
-        final server = h['server']?.toString() ?? 'الهوتسبوت';
-        final uptime = h['uptime']?.toString() ?? '-';
-        
-        // تحديد حالة الاتصال الفعلية
-        final authorized = h['authorized']?.toString() == 'true';
-        final bypassed = h['bypassed']?.toString() == 'true';
-        final isConnected = authorized || bypassed;
-        final statusText = isConnected ? 'متصل' : 'غير متصل';
-
-        if (uniqueMap.containsKey(key)) {
-          // تحديث بيانات القطعة إذا تواجدت في الهوتسبوت لضمان دقة الاسم ووقت الهوتسبوت
-          var existing = uniqueMap[key]!;
-          uniqueMap[key] = NetworkDevice(
-            name: comment.isNotEmpty ? comment : existing.name,
-            ip: existing.ip == 'لا يوجد IP' ? ip : existing.ip,
-            mac: existing.mac,
-            interface: existing.interface,
-            model: existing.model,
-            type: existing.type,
-            uptime: uptime != '-' ? uptime : existing.uptime,
-            status: isConnected ? 'متصل' : existing.status,
-          );
-        } else {
-          uniqueMap[key] = NetworkDevice(
-            name: name,
-            ip: ip,
-            mac: mac.isEmpty ? 'غير معروف' : mac,
-            interface: server, 
-            model: bypassed ? 'بث مباشر (Bypass)' : 'عميل هوتسبوت',
-            type: 'هوتسبوت',
-            uptime: uptime,
-            status: statusText,
-          );
-        }
-      }
-
-      List<NetworkDevice> loadedDevices = uniqueMap.values.toList();
-
-      // تصحيح الفرز: ترتيب לפי النوع، ثم أبجدياً بالاسم ليكون التصفح سلساً
-      loadedDevices.sort((a, b) {
-        int cmp = a.type.compareTo(b.type);
-        if (cmp == 0) return a.name.compareTo(b.name);
-        return cmp;
-      });
+      // ترتيب الأجهزة أبجدياً
+      loadedDevices.sort((a, b) => a.name.compareTo(b.name));
 
       if (mounted) {
         setState(() {
           _devices = loadedDevices;
-          _applyFilters();
           _isLoading = false;
         });
       }
@@ -210,35 +146,176 @@ class _DevicesScreenState extends State<DevicesScreen> {
     }
   }
 
-  /// تطبيق البحث والتصفية الصحيحة
-  void _applyFilters() {
-    setState(() {
-      _filteredDevices = _devices.where((d) {
-        // فلتر النوع
-        final matchesType = _selectedFilter == 'الكل' || d.type == _selectedFilter;
-        
-        // فلتر البحث النصي
-        final query = _searchQuery.toLowerCase();
-        final matchesSearch = d.name.toLowerCase().contains(query) || 
-                              d.ip.toLowerCase().contains(query) || 
-                              d.mac.toLowerCase().contains(query) || 
-                              d.model.toLowerCase().contains(query) ||
-                              d.status.contains(query);
-                              
-        return matchesType && matchesSearch;
-      }).toList();
-    });
-  }
-
   /// اختيار الأيقونة بناءً على نوع الجهاز
   IconData _getTypeIcon(String type) {
     switch (type) {
       case 'مستقبل': return Icons.wifi_tethering;
       case 'مرسل': return Icons.cell_tower;
-      case 'هوتسبوت': return Icons.phonelink_ring;
       case 'راوتر/سويتش': return Icons.router;
       default: return Icons.devices_other;
     }
+  }
+
+  /// فتح رابط في المتصفح
+  Future<void> _openInBrowser(String ip) async {
+    if (ip == 'لا يوجد IP') return;
+    final Uri url = Uri.parse('http://$ip');
+    try {
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+        throw Exception('لا يمكن فتح الرابط');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('تعذر فتح المتصفح للآيبي: $ip', style: const TextStyle(fontFamily: 'Cairo'))),
+        );
+      }
+    }
+  }
+
+  /// عرض خيارات الجهاز (BottomSheet)
+  void _showDeviceOptions(NetworkDevice device) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _cardColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // عنوان القائمة
+              Text(
+                device.name,
+                style: TextStyle(color: _goldColor, fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 10),
+              Divider(color: _subTextColor.withValues(alpha: 0.3)),
+              
+              // خيار الفتح في المتصفح
+              ListTile(
+                leading: Icon(Icons.language, color: _textColor),
+                title: Text('فتح في المتصفح', style: TextStyle(color: _textColor)),
+                subtitle: Text(device.ip, style: TextStyle(color: _subTextColor, fontSize: 12)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _openInBrowser(device.ip);
+                },
+              ),
+              
+              // خيار إعادة التشغيل
+              ListTile(
+                leading: const Icon(Icons.restart_alt, color: Colors.orangeAccent),
+                title: const Text('إعادة تشغيل الجهاز', style: TextStyle(color: Colors.orangeAccent)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showRebootConfirmation(device);
+                },
+              ),
+
+              // خيار عرض التفاصيل الكاملة
+              ListTile(
+                leading: Icon(Icons.info_outline, color: _textColor),
+                title: Text('تفاصيل أكثر', style: TextStyle(color: _textColor)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showMoreDetails(device);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// نافذة تأكيد إعادة التشغيل
+  void _showRebootConfirmation(NetworkDevice device) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardColor,
+        title: Text('تأكيد إعادة التشغيل', style: TextStyle(color: _goldColor)),
+        content: Text(
+          'هل أنت متأكد أنك تريد إعادة تشغيل الجهاز:\n${device.name}؟',
+          style: TextStyle(color: _textColor),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () {
+              Navigator.pop(context);
+              // TODO: ضع كود أمر إعادة التشغيل الخاص بك هنا
+              // مثال: widget.routerService!.sendCommand('....');
+              
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('تم إرسال أمر إعادة التشغيل إلى ${device.name}', style: const TextStyle(fontFamily: 'Cairo')),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            child: const Text('إعادة تشغيل', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// نافذة عرض تفاصيل الجهاز الكاملة
+  void _showMoreDetails(NetworkDevice device) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardColor,
+        title: Text('تفاصيل ${device.name}', style: TextStyle(color: _goldColor)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: device.rawData.keys.length,
+            itemBuilder: (context, index) {
+              String key = device.rawData.keys.elementAt(index);
+              String value = device.rawData[key].toString();
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6.0),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Text(key, style: TextStyle(color: _goldColor, fontSize: 13)),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        value, 
+                        style: TextStyle(color: _textColor, fontSize: 13),
+                        textDirection: TextDirection.ltr,
+                        textAlign: TextAlign.left,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('إغلاق', style: TextStyle(color: _goldColor)),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -250,8 +327,8 @@ class _DevicesScreenState extends State<DevicesScreen> {
         elevation: 0,
         centerTitle: true,
         title: Text(
-          'الشبكة والأجهزة',
-          style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold, letterSpacing: 1),
+          'أجهزة الشبكة (Neighbors)',
+          style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold, letterSpacing: 1, fontSize: 18),
         ),
         actions: [
           IconButton(
@@ -261,85 +338,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
           )
         ],
       ),
-      body: Column(
-        children: [
-          _buildTopPanel(),
-          Expanded(child: _buildDeviceList()),
-        ],
-      ),
-    );
-  }
-
-  /// لوحة البحث والفلترة العلوية
-  Widget _buildTopPanel() {
-    return Container(
-      color: _cardColor,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-      child: Column(
-        children: [
-          // شريط البحث
-          Container(
-            decoration: BoxDecoration(
-              color: _bgColor,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _goldColor.withValues(alpha: 0.3)),
-            ),
-            child: TextField(
-              style: TextStyle(color: _textColor),
-              textDirection: TextDirection.rtl,
-              decoration: InputDecoration(
-                hintText: 'ابحث عن اسم، آيبي، موديل، أو حالة...',
-                hintStyle: TextStyle(color: _subTextColor),
-                prefixIcon: Icon(Icons.search, color: _goldColor),
-                border: InputBorder.none,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              ),
-              onChanged: (value) {
-                _searchQuery = value;
-                _applyFilters();
-              },
-            ),
-          ),
-          const SizedBox(height: 16),
-          // أزرار الفلترة السريعة
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            reverse: true, // لتبدأ من اليمين
-            child: Row(
-              children: ['الكل', 'مستقبل', 'مرسل', 'هوتسبوت', 'راوتر/سويتش'].map((filter) {
-                final isSelected = _selectedFilter == filter;
-                return Padding(
-                  padding: const EdgeInsets.only(left: 8.0),
-                  child: ChoiceChip(
-                    label: Text(filter),
-                    selected: isSelected,
-                    onSelected: (selected) {
-                      if (selected) {
-                        setState(() {
-                          _selectedFilter = filter;
-                          _applyFilters();
-                        });
-                      }
-                    },
-                    selectedColor: _goldColor.withValues(alpha: 0.2),
-                    backgroundColor: _bgColor,
-                    labelStyle: TextStyle(
-                      color: isSelected ? _goldColor : _subTextColor,
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    ),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                      side: BorderSide(
-                        color: isSelected ? _goldColor : Colors.transparent,
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ),
-        ],
-      ),
+      body: _buildDeviceList(),
     );
   }
 
@@ -370,10 +369,10 @@ class _DevicesScreenState extends State<DevicesScreen> {
       );
     }
 
-    if (_filteredDevices.isEmpty) {
+    if (_devices.isEmpty) {
       return Center(
         child: Text(
-          'لا توجد أجهزة مطابقة للبحث',
+          'لا توجد أجهزة متصلة',
           style: TextStyle(color: _subTextColor, fontSize: 16),
         ),
       );
@@ -386,16 +385,16 @@ class _DevicesScreenState extends State<DevicesScreen> {
       child: ListView.builder(
         padding: const EdgeInsets.all(12),
         physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: _filteredDevices.length,
+        itemCount: _devices.length,
         itemBuilder: (context, index) {
-          final device = _filteredDevices[index];
+          final device = _devices[index];
           return _buildDeviceCard(device);
         },
       ),
     );
   }
 
-  /// تصميم بطاقة الجهاز الفاخرة والنقية
+  /// تصميم بطاقة الجهاز الفاخرة والنقية (تم جعلها قابلة للضغط)
   Widget _buildDeviceCard(NetworkDevice device) {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -411,120 +410,119 @@ class _DevicesScreenState extends State<DevicesScreen> {
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // الصف العلوي: الأيقونة، الاسم، النوع والحالة
-            Row(
+      child: Material( // إضافة Material و InkWell لجعل البطاقة قابلة للضغط مع تأثير مرئي
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _showDeviceOptions(device),
+          child: Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: _bgColor,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _goldColor.withValues(alpha: 0.5)),
-                  ),
-                  child: Icon(_getTypeIcon(device.type), color: _goldColor, size: 28),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        device.name,
-                        style: TextStyle(
-                          color: _textColor,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                // الصف العلوي: الأيقونة، الاسم، النوع والحالة
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: _bgColor,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: _goldColor.withValues(alpha: 0.5)),
                       ),
-                      const SizedBox(height: 6),
-                      Row(
+                      child: Icon(_getTypeIcon(device.type), color: _goldColor, size: 28),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: _goldColor.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
+                          Text(
+                            device.name,
+                            style: TextStyle(
+                              color: _textColor,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
                             ),
-                            child: Text(
-                              device.type,
-                              style: TextStyle(
-                                color: _goldColor,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                          const SizedBox(width: 8),
-                          // إظهار حالة الجهاز (متصل/غير متصل)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: device.status == 'متصل' 
-                                  ? Colors.green.withValues(alpha: 0.15) 
-                                  : Colors.redAccent.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              device.status,
-                              style: TextStyle(
-                                color: device.status == 'متصل' ? Colors.green : Colors.redAccent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.bold,
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: _goldColor.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  device.type,
+                                  style: TextStyle(
+                                    color: _goldColor,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
-                            ),
+                              const SizedBox(width: 8),
+                              // إظهار حالة الجهاز
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.green.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  device.status,
+                                  style: const TextStyle(
+                                    color: Colors.green,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ],
-                  ),
+                    ),
+                    // أيقونة صغيرة تدل على أن البطاقة قابلة للضغط
+                    Icon(Icons.more_vert, color: _subTextColor.withValues(alpha: 0.5)),
+                  ],
+                ),
+                
+                const SizedBox(height: 16),
+                const Divider(color: Color(0xFF2A2A2A), height: 1),
+                const SizedBox(height: 16),
+                
+                // شبكة البيانات الأساسية
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildInfoColumn(Icons.memory, 'الموديل', device.model),
+                    ),
+                    Expanded(
+                      child: _buildInfoColumn(Icons.settings_ethernet, 'المدخل', device.interface),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildInfoColumn(Icons.network_check, 'الآيبي (IP)', device.ip, isLtr: true),
+                    ),
+                    Expanded(
+                      child: _buildInfoColumn(Icons.fingerprint, 'الماك (MAC)', device.mac, isLtr: true),
+                    ),
+                  ],
                 ),
               ],
             ),
-            
-            const SizedBox(height: 16),
-            const Divider(color: Color(0xFF2A2A2A), height: 1),
-            const SizedBox(height: 16),
-            
-            // شبكة البيانات الأساسية
-            Row(
-              children: [
-                Expanded(
-                  child: _buildInfoColumn(Icons.memory, 'الموديل', device.model),
-                ),
-                Expanded(
-                  child: _buildInfoColumn(Icons.settings_ethernet, 'المدخل', device.interface),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _buildInfoColumn(Icons.network_check, 'الآيبي (IP)', device.ip, isLtr: true),
-                ),
-                Expanded(
-                  child: _buildInfoColumn(Icons.fingerprint, 'الماك (MAC)', device.mac, isLtr: true),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            // إظهار مدة تشغيل الجهاز
-            Row(
-              children: [
-                Expanded(
-                  child: _buildInfoColumn(Icons.access_time_filled, 'مدة التشغيل (Uptime)', device.uptime, isLtr: true),
-                ),
-              ],
-            ),
-          ],
+          ),
         ),
       ),
     );
