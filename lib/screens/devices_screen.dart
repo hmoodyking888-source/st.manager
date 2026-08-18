@@ -1,13 +1,12 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
-import 'package:url_launcher/url_launcher.dart'; // تأكد من إضافة هذه الحزمة في pubspec.yaml
+import 'package:url_launcher/url_launcher.dart'; 
 
 // ============================================================================
 // نماذج البيانات (Models)
 // ============================================================================
 
-/// نموذج بيانات يمثل جهاز متصل بالشبكة (من الـ Neighbors)
 class NetworkDevice {
   final String name;
   final String ip;
@@ -32,12 +31,11 @@ class NetworkDevice {
   });
 }
 
-/// نموذج بيانات يمثل جهاز من أداة Netwatch
 class NetwatchDevice {
   final String host;
   final String comment;
-  final String status; // 'up' or 'down'
-  final DateTime? since; // وقت تغيير الحالة
+  final String status; 
+  final DateTime? since; 
   final Map<String, dynamic> rawData;
 
   NetwatchDevice({
@@ -50,21 +48,20 @@ class NetwatchDevice {
 }
 
 // ============================================================================
-// الشاشة الرئيسية الحاضنة (تحتوي على الشريط السفلي)
+// الشاشة الرئيسية (عادت باسم DevicesScreen لكي لا ينهار البناء)
 // ============================================================================
 
-class NetworkDashboardScreen extends StatefulWidget {
+class DevicesScreen extends StatefulWidget {
   final RouterService? routerService;
-  const NetworkDashboardScreen({super.key, required this.routerService});
+  const DevicesScreen({super.key, required this.routerService});
 
   @override
-  State<NetworkDashboardScreen> createState() => _NetworkDashboardScreenState();
+  State<DevicesScreen> createState() => _DevicesScreenState();
 }
 
-class _NetworkDashboardScreenState extends State<NetworkDashboardScreen> {
+class _DevicesScreenState extends State<DevicesScreen> {
   int _currentIndex = 0;
 
-  // الألوان الأساسية
   final Color _bgColor = const Color(0xFF0A0A0A);
   final Color _cardColor = const Color(0xFF141414);
   final Color _goldColor = const Color(0xFFFFD700);
@@ -127,16 +124,15 @@ class NeighborsTab extends StatefulWidget {
 class _NeighborsTabState extends State<NeighborsTab> {
   List<NetworkDevice> _devices = [];
   List<NetworkDevice> _filteredDevices = [];
-  List<String> _availableInterfaces = ['الكل']; // لفلتر المداخل
+  List<String> _availableInterfaces = ['الكل']; 
 
   bool _isLoading = true;
   String? _errorMessage;
 
   String _searchQuery = '';
-  String _selectedTypeFilter = 'الكل'; // الفلتر الأول
-  String _selectedInterfaceFilter = 'الكل'; // الفلتر الثاني
+  String _selectedTypeFilter = 'الكل'; 
+  String _selectedInterfaceFilter = 'الكل'; 
 
-  // الألوان
   final Color _bgColor = const Color(0xFF0A0A0A);
   final Color _cardColor = const Color(0xFF141414);
   final Color _goldColor = const Color(0xFFFFD700);
@@ -412,7 +408,6 @@ class _NeighborsTabState extends State<NeighborsTab> {
     );
   }
 
-  /// لوحة البحث والفلترة العلوية
   Widget _buildTopPanel() {
     return Container(
       color: _cardColor,
@@ -420,7 +415,6 @@ class _NeighborsTabState extends State<NeighborsTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // شريط البحث
           Container(
             decoration: BoxDecoration(
               color: _bgColor,
@@ -444,8 +438,6 @@ class _NeighborsTabState extends State<NeighborsTab> {
             ),
           ),
           const SizedBox(height: 12),
-          
-          // فلتر نوع الجهاز
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             reverse: true,
@@ -474,10 +466,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
               }).toList(),
             ),
           ),
-          
           const SizedBox(height: 8),
-          
-          // فلتر المداخل (Ethernet / Interfaces)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             reverse: true,
@@ -512,9 +501,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
   }
 
   Widget _buildDeviceList() {
-    if (_isLoading) {
-      return Center(child: CircularProgressIndicator(color: _goldColor));
-    }
+    if (_isLoading) return Center(child: CircularProgressIndicator(color: _goldColor));
     if (_errorMessage != null) {
       return Center(
         child: Column(
@@ -532,9 +519,8 @@ class _NeighborsTabState extends State<NeighborsTab> {
         ),
       );
     }
-    if (_filteredDevices.isEmpty) {
-      return Center(child: Text('لا توجد أجهزة مطابقة للبحث', style: TextStyle(color: _subTextColor, fontSize: 16)));
-    }
+    if (_filteredDevices.isEmpty) return Center(child: Text('لا توجد أجهزة مطابقة للبحث', style: TextStyle(color: _subTextColor, fontSize: 16)));
+    
     return RefreshIndicator(
       color: _goldColor,
       backgroundColor: _cardColor,
@@ -672,7 +658,7 @@ class _NetwatchTabState extends State<NetwatchTab> {
   bool _isLoading = true;
   String? _errorMessage;
   Timer? _timer;
-  Duration _timeOffset = Duration.zero; // لحساب فرق الوقت بين التطبيق والراوتر لضمان دقة العداد
+  Duration _timeOffset = Duration.zero; 
 
   final Color _bgColor = const Color(0xFF0A0A0A);
   final Color _cardColor = const Color(0xFF141414);
@@ -684,7 +670,6 @@ class _NetwatchTabState extends State<NetwatchTab> {
   void initState() {
     super.initState();
     _fetchNetwatchData();
-    // تحديث الواجهة كل ثانية ليعمل العداد بشكل حي
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) setState(() {});
     });
@@ -696,16 +681,13 @@ class _NetwatchTabState extends State<NetwatchTab> {
     super.dispose();
   }
 
-  /// تحويل صيغة التاريخ الخاصة بالمايكروتيك إلى DateTime 
   DateTime? _parseMikrotikSince(String sinceText) {
     try {
       final now = DateTime.now();
       if (sinceText.length <= 8) {
-        // إذا كان الوقت فقط (مثل: 07:43:28) فهذا يعني أنه اليوم
         final parts = sinceText.split(':');
         return DateTime(now.year, now.month, now.day, int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
       } else {
-        // إذا كان يحوي تاريخ ووقت (مثل: aug/18/2026 07:43:28)
         final parts = sinceText.split(' ');
         final dateParts = parts[0].split('/');
         final timeParts = parts[1].split(':');
@@ -737,7 +719,6 @@ class _NetwatchTabState extends State<NetwatchTab> {
     });
 
     try {
-      // جلب وقت الراوتر لحساب الفرق (لتفادي مشاكل اختلاف التوقيت بين الجوال والراوتر)
       try {
         final clockRes = await widget.routerService!.sendCommand('/system/clock/print');
         if (clockRes is List && clockRes.isNotEmpty) {
@@ -750,7 +731,6 @@ class _NetwatchTabState extends State<NetwatchTab> {
         }
       } catch (_) {}
 
-      // جلب بيانات Netwatch
       final res = await widget.routerService!.sendCommand('/tool/netwatch/print');
       
       List<NetwatchDevice> loadedList = [];
@@ -792,15 +772,13 @@ class _NetwatchTabState extends State<NetwatchTab> {
     }
   }
 
-  /// تنسيق العداد الحي لعرض (أيام، ساعات، دقائق، ثواني)
   String _formatLiveCounter(DateTime? since) {
     if (since == null) return "غير معروف";
     
-    // إضافة فرق التوقيت لضمان العد الصحيح بناء على وقت الراوتر
     final actualSince = since.add(_timeOffset);
     final diff = DateTime.now().difference(actualSince);
     
-    if (diff.isNegative) return "00:00:00"; // لو كان هناك تأخير بسيط
+    if (diff.isNegative) return "00:00:00"; 
     
     final days = diff.inDays;
     final hours = diff.inHours % 24;
@@ -832,9 +810,7 @@ class _NetwatchTabState extends State<NetwatchTab> {
   }
 
   Widget _buildNetwatchList() {
-    if (_isLoading) {
-      return Center(child: CircularProgressIndicator(color: _goldColor));
-    }
+    if (_isLoading) return Center(child: CircularProgressIndicator(color: _goldColor));
     if (_errorMessage != null) {
       return Center(
         child: Column(
@@ -852,9 +828,8 @@ class _NetwatchTabState extends State<NetwatchTab> {
         ),
       );
     }
-    if (_netwatchDevices.isEmpty) {
-      return Center(child: Text('لا توجد أجهزة مضافة في Netwatch', style: TextStyle(color: _subTextColor, fontSize: 16)));
-    }
+    if (_netwatchDevices.isEmpty) return Center(child: Text('لا توجد أجهزة مضافة في Netwatch', style: TextStyle(color: _subTextColor, fontSize: 16)));
+    
     return RefreshIndicator(
       color: _goldColor,
       backgroundColor: _cardColor,
@@ -878,7 +853,6 @@ class _NetwatchTabState extends State<NetwatchTab> {
               padding: const EdgeInsets.all(16.0),
               child: Row(
                 children: [
-                  // أيقونة الحالة
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -893,8 +867,6 @@ class _NetwatchTabState extends State<NetwatchTab> {
                     ),
                   ),
                   const SizedBox(width: 16),
-                  
-                  // معلومات الجهاز والعداد
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -908,8 +880,6 @@ class _NetwatchTabState extends State<NetwatchTab> {
                         const SizedBox(height: 4),
                         Text(device.host, style: TextStyle(color: _subTextColor, fontSize: 13), textDirection: TextDirection.ltr),
                         const SizedBox(height: 8),
-                        
-                        // العداد الحي
                         Row(
                           children: [
                             Icon(Icons.timer_outlined, size: 14, color: isUp ? Colors.green : Colors.redAccent),
