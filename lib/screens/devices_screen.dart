@@ -48,7 +48,7 @@ class NetwatchDevice {
 }
 
 // ============================================================================
-// الشاشة الرئيسية (عادت باسم DevicesScreen لكي لا ينهار البناء)
+// الشاشة الرئيسية (DevicesScreen)
 // ============================================================================
 
 class DevicesScreen extends StatefulWidget {
@@ -62,15 +62,10 @@ class DevicesScreen extends StatefulWidget {
 class _DevicesScreenState extends State<DevicesScreen> {
   int _currentIndex = 0;
 
-  final Color _bgColor = const Color(0xFF0A0A0A);
-  final Color _cardColor = const Color(0xFF141414);
-  final Color _goldColor = const Color(0xFFFFD700);
-  final Color _subTextColor = const Color(0xFF888888);
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _bgColor,
+      backgroundColor: const Color(0xFF0A0A0A), // تم التعديل للون الأسود
       body: IndexedStack(
         index: _currentIndex,
         children: [
@@ -78,39 +73,34 @@ class _DevicesScreenState extends State<DevicesScreen> {
           NetwatchTab(routerService: widget.routerService),
         ],
       ),
-      bottomNavigationBar: Container(
-        decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: _goldColor.withValues(alpha: 0.2), width: 1)),
-        ),
-        child: BottomNavigationBar(
-          backgroundColor: _cardColor,
-          currentIndex: _currentIndex,
-          selectedItemColor: _goldColor,
-          unselectedItemColor: _subTextColor,
-          type: BottomNavigationBarType.fixed,
-          onTap: (index) {
-            setState(() {
-              _currentIndex = index;
-            });
-          },
-          items: const [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.router),
-              label: 'أجهزة الشبكة',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.monitor_heart),
-              label: 'مراقبة Netwatch',
-            ),
-          ],
-        ),
+      bottomNavigationBar: BottomNavigationBar(
+        backgroundColor: const Color(0xFF141414), // تم التعديل للون البطاقات الداكن
+        currentIndex: _currentIndex,
+        selectedItemColor: const Color(0xFFFFD700), // تم التعديل للون الذهبي
+        unselectedItemColor: Colors.white60,
+        type: BottomNavigationBarType.fixed,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.router),
+            label: 'أجهزة الشبكة',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.monitor_heart),
+            label: 'مراقبة Netwatch',
+          ),
+        ],
       ),
     );
   }
 }
 
 // ============================================================================
-// التبويب الأول: صفحة الأجهزة (Neighbors) مع الفلاتر
+// التبويب الأول: صفحة الأجهزة (Neighbors)
 // ============================================================================
 
 class NeighborsTab extends StatefulWidget {
@@ -642,7 +632,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
 }
 
 // ============================================================================
-// التبويب الثاني: صفحة مراقبة الأجهزة (Netwatch) مع العداد الحي
+// التبويب الثاني: صفحة مراقبة الأجهزة (Netwatch) بالهوية الموحدة
 // ============================================================================
 
 class NetwatchTab extends StatefulWidget {
@@ -660,11 +650,11 @@ class _NetwatchTabState extends State<NetwatchTab> {
   Timer? _timer;
   Duration _timeOffset = Duration.zero; 
 
+  // توحيد الألوان بناءً على تصميم سلطان الذهبي والأسود
   final Color _bgColor = const Color(0xFF0A0A0A);
   final Color _cardColor = const Color(0xFF141414);
   final Color _goldColor = const Color(0xFFFFD700);
   final Color _textColor = const Color(0xFFE0E0E0);
-  final Color _subTextColor = const Color(0xFF888888);
 
   @override
   void initState() {
@@ -772,8 +762,111 @@ class _NetwatchTabState extends State<NetwatchTab> {
     }
   }
 
+  // دوال الإضافة والحذف
+  Future<void> _addDevice(String name, String ip) async {
+    if (widget.routerService == null) return;
+    try {
+      await widget.routerService!.sendCommand('/tool/netwatch/add host=$ip comment="$name"');
+      _fetchNetwatchData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت إضافة الجهاز بنجاح', style: TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء الإضافة: $e', style: const TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  Future<void> _deleteDevice(NetwatchDevice device) async {
+    if (widget.routerService == null) return;
+    final id = device.rawData['.id'];
+    if (id == null) return;
+    try {
+      await widget.routerService!.sendCommand('/tool/netwatch/remove numbers=$id');
+      _fetchNetwatchData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حذف الجهاز بنجاح', style: TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.orange));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء الحذف: $e', style: const TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.red));
+      }
+    }
+  }
+
+  // النوافذ المنبثقة
+  void _showAddDialog() {
+    final nameCtrl = TextEditingController();
+    final ipCtrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('إضافة قطعة جديدة', style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameCtrl,
+              style: TextStyle(color: _textColor),
+              textDirection: TextDirection.rtl,
+              decoration: InputDecoration(labelText: 'اسم الجهاز', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7))),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: ipCtrl,
+              style: TextStyle(color: _textColor),
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(labelText: 'الآيبي (IP)', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7))),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _goldColor),
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (nameCtrl.text.isNotEmpty && ipCtrl.text.isNotEmpty) {
+                _addDevice(nameCtrl.text, ipCtrl.text);
+              }
+            },
+            child: Text('إضافة', style: TextStyle(color: _bgColor, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteDialog(NetwatchDevice device) {
+    final displayName = device.comment != 'بدون اسم' ? device.comment : device.host;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('تأكيد الحذف', style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold)),
+        content: Text('هل أنت متأكد من رغبتك في حذف الجهاز:\n$displayName؟', style: TextStyle(color: _textColor)),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _deleteDevice(device);
+            },
+            child: const Text('حذف', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // تنسيق الوقت
   String _formatLiveCounter(DateTime? since) {
-    if (since == null) return "غير معروف";
+    if (since == null) return "";
     
     final actualSince = since.add(_timeOffset);
     final diff = DateTime.now().difference(actualSince);
@@ -787,7 +880,7 @@ class _NetwatchTabState extends State<NetwatchTab> {
     
     String timeString = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
     if (days > 0) {
-      return "$days أيام و $timeString";
+      return "$days يوم, $timeString";
     }
     return timeString;
   }
@@ -796,16 +889,50 @@ class _NetwatchTabState extends State<NetwatchTab> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: _bgColor,
-      appBar: AppBar(
-        backgroundColor: _cardColor,
-        elevation: 0,
-        centerTitle: true,
-        title: Text('مراقبة Netwatch', style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold, letterSpacing: 1, fontSize: 18)),
-        actions: [
-          IconButton(icon: Icon(Icons.refresh, color: _goldColor), onPressed: _isLoading ? null : _fetchNetwatchData, tooltip: 'تحديث البيانات')
+      body: Column(
+        children: [
+          // الهيدر العلوي المحدث
+          Container(
+            width: double.infinity,
+            color: _cardColor, // تم تغييره للون البطاقات الداكن ليتماشى مع الهوية
+            padding: const EdgeInsets.only(top: 40, bottom: 16, left: 12, right: 12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Text("للدخول الى القطع يجب ان تكون:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _goldColor)),
+                const SizedBox(height: 4),
+                Text("داخل الشبكة أو مفعل vpn الخاص بنا", style: TextStyle(fontSize: 14, color: _textColor)),
+                const SizedBox(height: 4),
+                Text("يجب أن تكون القطع تفتح من المتصفح", style: TextStyle(fontSize: 14, color: _textColor)),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _goldColor, // أزرار ذهبية
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: _showAddDialog,
+                      child: Text("إضافة قطعة", style: TextStyle(color: _bgColor, fontSize: 13, fontWeight: FontWeight.bold)),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _goldColor, // أزرار ذهبية
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      onPressed: () {}, 
+                      child: Text("لدي مشكلة في الدخول الى القطع", style: TextStyle(color: _bgColor, fontSize: 13, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                )
+              ],
+            ),
+          ),
+          // قائمة الأجهزة
+          Expanded(child: _buildNetwatchList()),
         ],
       ),
-      body: _buildNetwatchList(),
     );
   }
 
@@ -816,26 +943,25 @@ class _NetwatchTabState extends State<NetwatchTab> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, size: 64, color: Colors.redAccent.withValues(alpha: 0.8)),
+            const Icon(Icons.error_outline, size: 64, color: Colors.redAccent),
             const SizedBox(height: 16),
             Text(_errorMessage!, style: TextStyle(color: _textColor)),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: _goldColor, foregroundColor: _bgColor),
+              style: ElevatedButton.styleFrom(backgroundColor: _goldColor),
               onPressed: _fetchNetwatchData,
-              child: const Text('إعادة المحاولة', style: TextStyle(fontWeight: FontWeight.bold)),
+              child: Text('إعادة المحاولة', style: TextStyle(color: _bgColor, fontWeight: FontWeight.bold)),
             )
           ],
         ),
       );
     }
-    if (_netwatchDevices.isEmpty) return Center(child: Text('لا توجد أجهزة مضافة في Netwatch', style: TextStyle(color: _subTextColor, fontSize: 16)));
     
     return RefreshIndicator(
       color: _goldColor,
       backgroundColor: _cardColor,
       onRefresh: _fetchNetwatchData,
       child: ListView.builder(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(vertical: 8),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: _netwatchDevices.length,
         itemBuilder: (context, index) {
@@ -843,70 +969,84 @@ class _NetwatchTabState extends State<NetwatchTab> {
           final isUp = device.status.toLowerCase() == 'up';
           
           return Container(
-            margin: const EdgeInsets.only(bottom: 12),
+            margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: _cardColor,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isUp ? Colors.green.withValues(alpha: 0.3) : Colors.redAccent.withValues(alpha: 0.5)),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF2A2A2A)), // إضافة إطار يتناسب مع التصميم
+              boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 8, offset: const Offset(0, 4))],
             ),
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
+            child: Row(
+              children: [
+                // زر الحذف والإعدادات
+                InkWell(
+                  onTap: () => _showDeleteDialog(device), 
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: _bgColor,
                       shape: BoxShape.circle,
-                      border: Border.all(color: isUp ? Colors.green : Colors.redAccent, width: 2),
+                      color: _bgColor,
+                      border: Border.all(color: _goldColor.withValues(alpha: 0.5)),
                     ),
-                    child: Icon(
-                      isUp ? Icons.wifi : Icons.wifi_off,
-                      color: isUp ? Colors.green : Colors.redAccent,
-                      size: 24,
-                    ),
+                    child: Icon(Icons.keyboard_arrow_down, color: _goldColor, size: 28),
                   ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          device.comment != 'بدون اسم' ? device.comment : device.host,
-                          style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.bold),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(device.host, style: TextStyle(color: _subTextColor, fontSize: 13), textDirection: TextDirection.ltr),
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Icon(Icons.timer_outlined, size: 14, color: isUp ? Colors.green : Colors.redAccent),
-                            const SizedBox(width: 4),
-                            Text(
-                              isUp ? 'متصل منذ: ' : 'مفصول منذ: ',
-                              style: TextStyle(color: isUp ? Colors.green : Colors.redAccent, fontSize: 12),
-                            ),
-                            Directionality(
-                              textDirection: TextDirection.ltr,
-                              child: Text(
-                                _formatLiveCounter(device.since),
-                                style: TextStyle(
-                                  color: isUp ? Colors.greenAccent : Colors.redAccent,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  letterSpacing: 1.2,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                ),
+                const SizedBox(width: 8),
+                // الوقت وحالة الاتصال
+                Expanded(
+                  flex: 3,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _formatLiveCounter(device.since),
+                        style: TextStyle(color: isUp ? Colors.greenAccent : Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold),
+                        textDirection: TextDirection.rtl,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        isUp ? 'الحالة: متصل' : 'الحالة: مفصول',
+                        style: TextStyle(color: _textColor.withValues(alpha: 0.7), fontSize: 12),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                // الاسم والآيبي
+                Expanded(
+                  flex: 4,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(
+                        device.comment != 'بدون اسم' ? device.comment : device.host,
+                        style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.bold),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        device.host,
+                        style: TextStyle(color: _goldColor, fontSize: 14),
+                        textDirection: TextDirection.ltr,
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                // الأيقونة الدائرية اليمنى
+                Column(
+                  children: [
+                    CircleAvatar(
+                      backgroundColor: _bgColor,
+                      radius: 22,
+                      child: Icon(Icons.wifi_tethering, color: _goldColor, size: 24),
+                    ),
+                    const SizedBox(height: 4),
+                    Text("جهاز", style: TextStyle(color: _textColor, fontSize: 11)),
+                  ],
+                ),
+              ],
             ),
           );
         },
