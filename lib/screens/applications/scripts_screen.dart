@@ -57,10 +57,13 @@ class AppPriorityConfig {
     this.burstTime = '20s',
     this.inInterfaceList = _defaultWanInterfaceList,
     this.outInterfaceList = _defaultWanInterfaceList,
-    this.downloadParent = 'global-in',
-    this.uploadParent = 'global-out',
+    // تم الإصلاح ليتناسب مع ميكروتك بإصداراته 6 و 7 حيث تم دمجها في global
+    this.downloadParent = 'global',
+    this.uploadParent = 'global',
   });
 }
+
+enum ExtraMenu { openSpeed, telegramBot }
 
 class AppPriorityScreen extends StatefulWidget {
   final RouterService? routerService;
@@ -618,7 +621,7 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
       final downQueueParams = _buildQueueParams(
         name: _downQueueNameFor(app),
-        parent: app.downloadParent.trim().isEmpty ? 'global-in' : app.downloadParent.trim(),
+        parent: app.downloadParent.trim().isEmpty ? 'global' : app.downloadParent.trim(),
         packetMark: downPackMark,
         maxLimit: downMax,
         limitAt: downAt,
@@ -632,7 +635,7 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
       final upQueueParams = _buildQueueParams(
         name: _upQueueNameFor(app),
-        parent: app.uploadParent.trim().isEmpty ? 'global-out' : app.uploadParent.trim(),
+        parent: app.uploadParent.trim().isEmpty ? 'global' : app.uploadParent.trim(),
         packetMark: upPackMark,
         maxLimit: upMax,
         limitAt: upAt,
@@ -700,6 +703,157 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
       if (mounted) {
         setState(() => _loading = false);
       }
+    }
+  }
+
+  // الدوال المضافة لتلبية المطالب الجديدة الخاصة بفتح السرعة وإشعارات البوت
+  Future<void> _confirmOpenSpeed() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('تأكيد فتح السرعات للجميع'),
+        content: const Text(
+            'هل أنت متأكد من تحويل جميع الحسابات لبروفايل "speed" وطرد جميع المتصلين حالياً (الأكتف) لتطبيق السرعة الجديدة؟'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('تأكيد وتنفيذ',
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _openSpeedForAll();
+    }
+  }
+
+  Future<void> _openSpeedForAll() async {
+    final router = _router;
+    if (router == null) {
+      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      // تعديل بروفايلات PPPoE إلى speed
+      await router.sendCommand('/ppp/secret/set',
+          params: {'numbers': '[find]', 'profile': 'speed'});
+      
+      // تعديل بروفايلات Hotspot إلى speed
+      await router.sendCommand('/ip/hotspot/user/set',
+          params: {'numbers': '[find]', 'profile': 'speed'});
+      
+      // طرد المتصلين حالياً ليتمكنوا من الاتصال بالبروفايل الجديد
+      await router.sendCommand('/ppp/active/remove',
+          params: {'numbers': '[find]'});
+      await router.sendCommand('/ip/hotspot/active/remove',
+          params: {'numbers': '[find]'});
+
+      _showSnack('تم فتح السرعات للجميع وطرد الأكتف بنجاح (بروفايل speed)',
+          backgroundColor: Colors.green);
+    } catch (e) {
+      _showSnack('حدث خطأ أثناء فتح السرعات: $e', backgroundColor: Colors.red);
+    } finally {
+      setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _showTelegramBotDialog() async {
+    final nameCtrl = TextEditingController();
+    final ipCtrl = TextEditingController();
+    final tokenCtrl = TextEditingController();
+    final chatCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('إعداد إشعارات البوت للقطع (Netwatch)'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildField(
+                  controller: nameCtrl,
+                  label: 'اسم القطعة (مثال: مطعم اليمني)'),
+              _buildField(
+                  controller: ipCtrl,
+                  label: 'IP القطعة (مثال: 192.168.1.10)'),
+              _buildField(
+                  controller: tokenCtrl, label: 'توكن البوت (Bot Token)'),
+              _buildField(
+                  controller: chatCtrl, label: 'معرف المحادثة (Chat ID)'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _injectTelegramScript(
+                nameCtrl.text.trim(),
+                ipCtrl.text.trim(),
+                tokenCtrl.text.trim(),
+                chatCtrl.text.trim(),
+              );
+            },
+            child: const Text('حقن السكربت',
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _injectTelegramScript(
+      String name, String ip, String token, String chat) async {
+    final router = _router;
+    if (router == null) {
+      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      return;
+    }
+
+    if (name.isEmpty || ip.isEmpty || token.isEmpty || chat.isEmpty) {
+      _showSnack('الرجاء تعبئة جميع الحقول', backgroundColor: Colors.red);
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      // تجهيز النصوص وتشفيرها لـ URL لتصل بشكل صحيح للتليجرام
+      String upMsg = Uri.encodeComponent("✅ القطعة $name عادت إلى العمل.");
+      String downMsg = Uri.encodeComponent("❌ القطعة $name توقفت عن العمل.");
+
+      // بناء أوامر الـ Script الخاصة بالـ Fetch 
+      String upScript =
+          '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no';
+      String downScript =
+          '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no';
+
+      // إضافة الـ Netwatch للراوتر
+      await router.sendCommand('/tool/netwatch/add', params: {
+        'host': ip,
+        'comment': 'TelegramBot_$name',
+        'up-script': upScript,
+        'down-script': downScript,
+      });
+
+      _showSnack('تم إضافة السكربت إلى Netwatch بنجاح',
+          backgroundColor: Colors.green);
+    } catch (e) {
+      _showSnack('حدث خطأ أثناء إضافة السكربت: $e',
+          backgroundColor: Colors.red);
+    } finally {
+      setState(() => _loading = false);
     }
   }
 
@@ -851,14 +1005,14 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
                           ),
                           _buildField(
                             controller: downloadParentCtrl,
-                            label: 'Parent للتحميل',
-                            hint: 'مثال: global-in',
+                            label: 'Parent للتحميل (مثال: global)',
+                            hint: 'مثال: global',
                             validator: _validateNonEmptyField,
                           ),
                           _buildField(
                             controller: uploadParentCtrl,
-                            label: 'Parent للرفع',
-                            hint: 'مثال: global-out',
+                            label: 'Parent للرفع (مثال: global)',
+                            hint: 'مثال: global',
                             validator: _validateNonEmptyField,
                           ),
                           const SizedBox(height: 8),
@@ -1039,7 +1193,7 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         padding: EdgeInsets.all(12.0),
         child: Text(
           'هذه الصفحة تضبط أولوية المرور للتطبيقات عبر قواعد Mangle و Queue Tree.\n'
-          'التحميل والرفع منفصلان الآن، ويمكنك تعديل limit-at و burst لكل تطبيق من الإعدادات.\n'
+          'تم تحديث المسارات الافتراضية (Parent) إلى global لتعمل مع أنظمة ميكروتك الحديثة بسلاسة.\n'
           'إذا كان اسم قائمة WAN مختلفًا أو كان الراوتر يستخدم FastTrack فراجع التحذير أعلى الصفحة.',
           style: TextStyle(
             fontSize: 13,
@@ -1186,6 +1340,27 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
             icon: const Icon(Icons.refresh, color: AppTheme.gold),
             onPressed: _loading ? null : _refreshAll,
             tooltip: 'تحديث الحالة',
+          ),
+          // القائمة الجانبية التي تحتوي على الخصائص الجديدة المضافة
+          PopupMenuButton<ExtraMenu>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) {
+              if (value == ExtraMenu.openSpeed) {
+                _confirmOpenSpeed();
+              } else if (value == ExtraMenu.telegramBot) {
+                _showTelegramBotDialog();
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: ExtraMenu.openSpeed,
+                child: Text('فتح السرعة للجميع'),
+              ),
+              const PopupMenuItem(
+                value: ExtraMenu.telegramBot,
+                child: Text('إضافة بوت تيليجرام (إشعارات الأجهزة)'),
+              ),
+            ],
           ),
         ],
       ),
