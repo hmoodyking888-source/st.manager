@@ -347,6 +347,40 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
     return null;
   }
 
+  /// يبحث عن أول قاعدة Mangle موجودة حاليًا ضمن سلسلة (chain)
+  /// معيّنة، لاستخدام معرّفها كنقطة إدراج (place-before) بحيث
+  /// توضع قواعد تسريع التطبيق في أعلى تلك السلسلة دائمًا، بدل
+  /// إضافتها في آخر الجدول حيث قد تسبقها قواعد أخرى موجودة
+  /// مسبقًا (عامة أو من تطبيقات أخرى) فتمنعها من العمل بشكل
+  /// صحيح. في حال فشل الطلب أو عدم وجود أي قاعدة، تُعاد قيمة
+  /// null وتتم الإضافة بالطريقة الافتراضية (في آخر الجدول).
+  Future<String?> _firstRuleIdInChain(
+    RouterService router,
+    String chain,
+  ) async {
+    try {
+      final response = await router.sendCommand(
+        '/ip/firewall/mangle/print',
+      );
+
+      final rules = _asMapList(response);
+
+      for (final rule in rules) {
+        if (rule['chain']?.toString() == chain) {
+          final id = rule['.id']?.toString();
+
+          if (id != null && id.isNotEmpty) {
+            return id;
+          }
+        }
+      }
+    } catch (_) {
+      // نتجاهل الخطأ ونكمل بالإضافة العادية (آخر الجدول).
+    }
+
+    return null;
+  }
+
   bool _isDisabled(dynamic value) {
     final v = value?.toString().trim().toLowerCase();
 
@@ -382,9 +416,7 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   }
 
   String _normalizeHostToDomain(String value) {
-    return value
-        .replaceAll('*', '')
-        .replaceAll('?', '')
+    var v = value
         .trim()
         .replaceAll(
           RegExp(r'^https?://'),
@@ -392,8 +424,23 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         )
         .split('/')
         .first
+        .replaceAll('*', '')
+        .replaceAll('?', '')
         .trim()
         .toLowerCase();
+
+    // إزالة أي نقاط زائدة في البداية/النهاية ناتجة عن حذف
+    // رموز الـ wildcard (مثال: "*instagram.*" تتحول إلى
+    // "instagram." وهذه ليست دومين صالحًا).
+    while (v.startsWith('.')) {
+      v = v.substring(1);
+    }
+
+    while (v.endsWith('.')) {
+      v = v.substring(0, v.length - 1);
+    }
+
+    return v;
   }
 
   List<String> _normalizedAppDomains(
@@ -407,11 +454,24 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
       if (domain.isEmpty) continue;
 
-      if (!domain.contains('.')) {
-        continue;
-      }
+      final parts = domain.split('.');
 
-      result.add(domain);
+      // نتجاهل أي قيمة لا تشكّل دومين حقيقي (بدون نقطة،
+      // بأجزاء فارغة، أو بامتداد أقل من حرفين) حتى لا يتم
+      // إنشاء إدخال غير صالح في Address List لا يطابق شيئًا
+      // (مثل "instagram." الناتجة عن المضيف "*instagram.*").
+      if (parts.length < 2) continue;
+
+      if (parts.any((p) => p.trim().isEmpty)) continue;
+
+      if (parts.last.length < 2) continue;
+
+      // نضيف نقطة في البداية لتفعيل مطابقة كل النطاقات
+      // الفرعية تلقائيًا في Address List الخاص بالراوتر
+      // (مثال: ".facebook.com" تطابق أيضًا
+      // "edge-mqtt.facebook.com" و"scontent.fbcdn.net"... إلخ)
+      // بدل الاقتصار على الدومين الرئيسي فقط كما كان سابقًا.
+      result.add('.$domain');
     }
 
     return result.toList();
@@ -1119,104 +1179,168 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
     final addressList =
         _addressListFor(app);
 
+    // نحدد أعلى قاعدة موجودة حاليًا في كل سلسلة (chain) قبل
+    // البدء بالإضافة، لنضع كل قواعد هذا التطبيق في أعلى تلك
+    // السلسلة (بدل آخر الجدول كما كان سابقًا)، حتى لا تسبقها
+    // أي قواعد Mangle أخرى (عامة أو خاصة بتطبيقات سبق تفعيلها)
+    // وتمنعها من التقاط حزم هذا التطبيق أولًا.
+    final preroutingAnchor =
+        await _firstRuleIdInChain(
+      router,
+      'prerouting',
+    );
+
+    final postroutingAnchor =
+        await _firstRuleIdInChain(
+      router,
+      'postrouting',
+    );
+
     // ============================================================
-    // TLS HOST
+    // TLS HOST (SNI)
+    // ------------------------------------------------------------
+    // ملاحظة مهمة: لا نستخدم connection-state=new هنا. حزمة
+    // TLS ClientHello (التي تحمل اسم الموقع Host/SNI) تصل دائمًا
+    // بعد اكتمال مصافحة TCP الثلاثية (SYN, SYN/ACK, ACK)، وعند
+    // تلك اللحظة يكون تتبّع الاتصال (connection tracking) قد
+    // حوّل حالة الاتصال بالفعل إلى established وليست new. لذلك
+    // فإن اشتراط connection-state=new مع tls-host كان يمنع هذه
+    // القاعدة عمليًا من التطابق أبدًا وهو السبب الرئيسي في ضعف/
+    // عدم عمل تسريع التطبيقات. الحماية من إعادة الوسم تتم بشكل
+    // كافٍ عبر connection-mark=no-mark فقط (أي: طالما الاتصال لم
+    // يُوسَم من قبل).
     // ============================================================
 
     for (final host in app.hosts) {
-      await router.sendCommand(
-        '/ip/firewall/mangle/add',
-        params: {
-          'chain': 'prerouting',
-          'protocol': 'tcp',
-          'connection-state': 'new',
-          'connection-mark': 'no-mark',
-          'tls-host': host,
-          'action': 'mark-connection',
-          'new-connection-mark':
-              connMark,
-          'passthrough': 'yes',
-          'comment': comment,
-        },
-      );
-    }
-
-    // ============================================================
-    // ADDRESS LIST - TCP
-    // ============================================================
-
-    await router.sendCommand(
-      '/ip/firewall/mangle/add',
-      params: {
+      final params = <String, String>{
         'chain': 'prerouting',
         'protocol': 'tcp',
-        'connection-state': 'new',
         'connection-mark': 'no-mark',
-        'dst-address-list': addressList,
+        'tls-host': host,
         'action': 'mark-connection',
         'new-connection-mark':
             connMark,
         'passthrough': 'yes',
         'comment': comment,
-      },
+      };
+
+      if (preroutingAnchor != null) {
+        params['place-before'] =
+            preroutingAnchor;
+      }
+
+      await router.sendCommand(
+        '/ip/firewall/mangle/add',
+        params: params,
+      );
+    }
+
+    // ============================================================
+    // ADDRESS LIST - TCP
+    // (احتياطي لما لا يظهر SNI بوضوح، أو اتصالات تبدأ مباشرة
+    // بعنوان IP معروف من قائمة العناوين الخاصة بالتطبيق)
+    // ============================================================
+
+    final tcpParams = <String, String>{
+      'chain': 'prerouting',
+      'protocol': 'tcp',
+      'connection-state': 'new',
+      'connection-mark': 'no-mark',
+      'dst-address-list': addressList,
+      'action': 'mark-connection',
+      'new-connection-mark':
+          connMark,
+      'passthrough': 'yes',
+      'comment': comment,
+    };
+
+    if (preroutingAnchor != null) {
+      tcpParams['place-before'] =
+          preroutingAnchor;
+    }
+
+    await router.sendCommand(
+      '/ip/firewall/mangle/add',
+      params: tcpParams,
     );
 
     // ============================================================
     // ADDRESS LIST - UDP / QUIC
     // ============================================================
 
+    final udpParams = <String, String>{
+      'chain': 'prerouting',
+      'protocol': 'udp',
+      'connection-state': 'new',
+      'connection-mark': 'no-mark',
+      'dst-address-list': addressList,
+      'action': 'mark-connection',
+      'new-connection-mark':
+          connMark,
+      'passthrough': 'yes',
+      'comment': comment,
+    };
+
+    if (preroutingAnchor != null) {
+      udpParams['place-before'] =
+          preroutingAnchor;
+    }
+
     await router.sendCommand(
       '/ip/firewall/mangle/add',
-      params: {
-        'chain': 'prerouting',
-        'protocol': 'udp',
-        'connection-state': 'new',
-        'connection-mark': 'no-mark',
-        'dst-address-list': addressList,
-        'action': 'mark-connection',
-        'new-connection-mark':
-            connMark,
-        'passthrough': 'yes',
-        'comment': comment,
-      },
+      params: udpParams,
     );
 
     // ============================================================
     // DOWNLOAD
     // ============================================================
 
+    final downParams = <String, String>{
+      'chain': 'prerouting',
+      'connection-mark': connMark,
+      'in-interface-list':
+          app.inInterfaceList,
+      'action': 'mark-packet',
+      'new-packet-mark':
+          downPackMark,
+      'passthrough': 'no',
+      'comment': comment,
+    };
+
+    if (preroutingAnchor != null) {
+      downParams['place-before'] =
+          preroutingAnchor;
+    }
+
     await router.sendCommand(
       '/ip/firewall/mangle/add',
-      params: {
-        'chain': 'prerouting',
-        'connection-mark': connMark,
-        'in-interface-list':
-            app.inInterfaceList,
-        'action': 'mark-packet',
-        'new-packet-mark':
-            downPackMark,
-        'passthrough': 'no',
-        'comment': comment,
-      },
+      params: downParams,
     );
 
     // ============================================================
     // UPLOAD
     // ============================================================
 
+    final upParams = <String, String>{
+      'chain': 'postrouting',
+      'connection-mark': connMark,
+      'out-interface-list':
+          app.outInterfaceList,
+      'action': 'mark-packet',
+      'new-packet-mark':
+          upPackMark,
+      'passthrough': 'no',
+      'comment': comment,
+    };
+
+    if (postroutingAnchor != null) {
+      upParams['place-before'] =
+          postroutingAnchor;
+    }
+
     await router.sendCommand(
       '/ip/firewall/mangle/add',
-      params: {
-        'chain': 'postrouting',
-        'connection-mark': connMark,
-        'out-interface-list':
-            app.outInterfaceList,
-        'action': 'mark-packet',
-        'new-packet-mark':
-            upPackMark,
-        'passthrough': 'no',
-        'comment': comment,
-      },
+      params: upParams,
     );
   }
 
