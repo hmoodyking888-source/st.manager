@@ -1684,19 +1684,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final filteredList = filtered;
 
     return PopScope(
-      canPop: false,
-      onPopInvoked: (didPop) {
-        if (!didPop) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
-      },
+      // ✅ تم تعديل سلوك زر الرجوع للعودة للداشبورد
+      canPop: true,
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            },
+            onPressed: () => Navigator.pop(context),
           ),
           title: const Text('البرودباند'),
           actions: [
@@ -2384,19 +2378,13 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     final list = _filteredProfiles;
 
     return PopScope(
-      canPop: false,
-      onPopInvoked: (didPop) {
-        if (!didPop) {
-          Navigator.of(context).popUntil((route) => route.isFirst);
-        }
-      },
+      // ✅ تم تعديل سلوك زر الرجوع للعودة للداشبورد
+      canPop: true,
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () {
-              Navigator.of(context).popUntil((route) => route.isFirst);
-            },
+            onPressed: () => Navigator.pop(context),
           ),
           title: const Text('البروفايلات'),
           actions: [
