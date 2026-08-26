@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
-import 'package:st_manager/screens/applications/scripts_screen.dart';
+import 'package:st_manager/screens/user_manager_screen.dart'; // استيراد شاشة User Manager
 import 'package:st_manager/theme/app_theme.dart';
 
 class SideDrawer extends StatefulWidget {
@@ -1012,21 +1012,7 @@ class _SideDrawerState extends State<SideDrawer> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
                   _sectionHeader('أدوات'),
-                  _buildTile(
-                    icon: Icons.speed,
-                    label: 'تسريع البرامج',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AppPriorityScreen(
-                            routerService: widget.routerService,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                  // ✅ تمت إزالة زر تسريع البرامج من هنا
                   _buildTile(
                     icon: Icons.info_outline,
                     label: 'معلومات الراوتر',
@@ -1036,6 +1022,21 @@ class _SideDrawerState extends State<SideDrawer> {
                     },
                   ),
                   _sectionHeader('إدارة المستخدمين'),
+                  // ✅ تمت إضافة زر User Manager هنا
+                  _buildTile(
+                    icon: Icons.manage_accounts,
+                    label: 'User Manager',
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              UserManagerScreen(routerService: widget.routerService),
+                        ),
+                      );
+                    },
+                  ),
                   _buildTile(
                     icon: Icons.build,
                     label: 'حماية اللوب (Loop Protect)',
