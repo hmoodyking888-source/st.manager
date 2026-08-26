@@ -9,7 +9,7 @@ import 'package:st_manager/screens/devices_screen.dart';
 import 'package:st_manager/screens/backup_restore_screen.dart';
 import 'package:st_manager/screens/interface_screen.dart';
 import 'package:st_manager/screens/simple_queue_screen.dart';
-import 'package:st_manager/screens/user_manager_screen.dart';
+import 'package:st_manager/screens/applications/scripts_screen.dart'; // استيراد شاشة تسريع التطبيقات
 import 'package:st_manager/widgets/side_drawer.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -793,12 +793,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 );
               }),
-              _buildMenuButton('User Manager', Icons.manage_accounts, () {
+              // ✅ زر تسريع التطبيقات بدلاً من User Manager
+              _buildMenuButton('تسريع التطبيقات', Icons.flash_on, () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (_) =>
-                        UserManagerScreen(routerService: _routerService),
+                        AppPriorityScreen(routerService: _routerService),
                   ),
                 );
               }),
