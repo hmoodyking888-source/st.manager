@@ -155,76 +155,241 @@ class _SideDrawerState extends State<SideDrawer> {
     }
   }
 
-  // ===== تلجرام (Netwatch) =====
+  // ===== تلجرام (Netwatch) مع خيارات الإشعارات والاختبار والتحديث الجماعي =====
   Future<void> _showTelegramBotDialog() async {
-    final nameCtrl = TextEditingController();
-    final ipCtrl = TextEditingController();
-    final tokenCtrl = TextEditingController();
-    final chatCtrl = TextEditingController();
+    // قراءة الإعدادات المحفوظة
+    final savedToken = await _storage.read('telegram_bot_token') ?? '';
+    final savedChatId = await _storage.read('telegram_chat_id') ?? '';
+
+    // خيارات الإشعارات (مثل الكود الأصلي)
+    bool notifyUp = await _storage.read('tg_notify_up') == 'true';
+    bool notifyDown = await _storage.read('tg_notify_down') == 'true';
+
+    // خيارات إضافية (قد لا تستخدم هنا لكن نحتفظ بها)
+    bool notifyExpiry = await _storage.read('tg_notify_expiry') == 'true';
+    bool notifyHighUsage = await _storage.read('tg_notify_high_usage') == 'true';
+    bool notifyRestart = await _storage.read('tg_notify_restart') == 'true';
+
+    // متغيرات لإضافة قطع متعددة
+    final ipsController = TextEditingController();
+    final namesController = TextEditingController();
+
+    final tokenCtrl = TextEditingController(text: savedToken);
+    final chatCtrl = TextEditingController(text: savedChatId);
 
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.semiBlack,
-        title: const Row(
-          children: [
-            Icon(Icons.telegram, color: Color(0xFF29B6F6)),
-            SizedBox(width: 8),
-            Text('إعداد إشعارات البوت للقطع (Netwatch)',
-                style: TextStyle(color: Colors.white, fontSize: 16)),
-          ],
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          backgroundColor: AppTheme.semiBlack,
+          title: const Row(
             children: [
-              _buildField(
-                controller: nameCtrl,
-                label: 'اسم القطعة (مثال: مطعم اليمني)',
-              ),
-              _buildField(
-                controller: ipCtrl,
-                label: 'IP القطعة (مثال: 192.168.1.10)',
-              ),
-              _buildField(
-                controller: tokenCtrl,
-                label: 'توكن البوت (Bot Token)',
-              ),
-              _buildField(
-                controller: chatCtrl,
-                label: 'معرف المحادثة (Chat ID)',
-              ),
+              Icon(Icons.telegram, color: Color(0xFF29B6F6)),
+              SizedBox(width: 8),
+              Text('إعداد بوت التلجرام',
+                  style: TextStyle(color: Colors.white, fontSize: 16)),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // التوكن و Chat ID
+                _buildField(
+                  controller: tokenCtrl,
+                  label: 'توكن البوت (Bot Token)',
+                  hint: 'سيتم حفظه تلقائياً',
+                ),
+                _buildField(
+                  controller: chatCtrl,
+                  label: 'معرف المحادثة (Chat ID)',
+                  hint: 'سيتم حفظه تلقائياً',
+                ),
+                const SizedBox(height: 12),
+
+                // خيارات الإشعارات (كما في الكود الأصلي)
+                const Text('خيارات الإشعارات:',
+                    style: TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                _buildNotifToggle(
+                  ctx,
+                  setDialogState,
+                  icon: Icons.arrow_upward,
+                  iconColor: Colors.green,
+                  label: 'إشعار عند عودة القطعة (Up)',
+                  value: notifyUp,
+                  onChanged: (v) => setDialogState(() => notifyUp = v),
+                ),
+                _buildNotifToggle(
+                  ctx,
+                  setDialogState,
+                  icon: Icons.arrow_downward,
+                  iconColor: Colors.red,
+                  label: 'إشعار عند انقطاع القطعة (Down)',
+                  value: notifyDown,
+                  onChanged: (v) => setDialogState(() => notifyDown = v),
+                ),
+                // خيارات إضافية (للتوافق مع السابق)
+                _buildNotifToggle(
+                  ctx,
+                  setDialogState,
+                  icon: Icons.timer_off,
+                  iconColor: Colors.orange,
+                  label: 'إشعار انتهاء صلاحية (عام)',
+                  value: notifyExpiry,
+                  onChanged: (v) => setDialogState(() => notifyExpiry = v),
+                ),
+                _buildNotifToggle(
+                  ctx,
+                  setDialogState,
+                  icon: Icons.speed,
+                  iconColor: Colors.purple,
+                  label: 'إشعار استهلاك عالي (عام)',
+                  value: notifyHighUsage,
+                  onChanged: (v) => setDialogState(() => notifyHighUsage = v),
+                ),
+                _buildNotifToggle(
+                  ctx,
+                  setDialogState,
+                  icon: Icons.restart_alt,
+                  iconColor: Colors.cyan,
+                  label: 'إشعار إعادة تشغيل (عام)',
+                  value: notifyRestart,
+                  onChanged: (v) => setDialogState(() => notifyRestart = v),
+                ),
+
+                const Divider(color: Colors.white24, height: 20),
+                const Text('إضافة قطع متعددة إلى Netwatch:',
+                    style: TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                _buildField(
+                  controller: ipsController,
+                  label: 'عناوين IP (مفصولة بفواصل)',
+                  hint: 'مثال: 192.168.1.10, 192.168.1.20',
+                ),
+                _buildField(
+                  controller: namesController,
+                  label: 'أسماء القطع (مفصولة بفواصل بنفس الترتيب)',
+                  hint: 'مثال: قطعة1, قطعة2',
+                ),
+                const SizedBox(height: 8),
+                const Text('ملاحظة: سيتم إضافة كل قطعة مع التوكن والـ Chat ID المحفوظين.',
+                    style: TextStyle(color: Colors.white38, fontSize: 11)),
+              ],
+            ),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await _injectTelegramScript(
-                nameCtrl.text.trim(),
-                ipCtrl.text.trim(),
-                tokenCtrl.text.trim(),
-                chatCtrl.text.trim(),
-              );
-            },
-            child: const Text('حقن السكربت',
-                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+            ),
+            // زر الاختبار
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
+              onPressed: () async {
+                // اختبار إرسال رسالة بمعلومات الراوتر
+                await _testTelegramBot(
+                  tokenCtrl.text.trim(),
+                  chatCtrl.text.trim(),
+                );
+              },
+              icon: const Icon(Icons.send, color: Colors.white),
+              label: const Text('اختبار', style: TextStyle(color: Colors.white)),
+            ),
+            // زر حفظ الإعدادات وتحديث جميع القطع
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+              onPressed: () async {
+                // حفظ الإعدادات
+                await _storage.write('telegram_bot_token', tokenCtrl.text.trim());
+                await _storage.write('telegram_chat_id', chatCtrl.text.trim());
+                await _storage.write('tg_notify_up', notifyUp.toString());
+                await _storage.write('tg_notify_down', notifyDown.toString());
+                await _storage.write('tg_notify_expiry', notifyExpiry.toString());
+                await _storage.write('tg_notify_high_usage', notifyHighUsage.toString());
+                await _storage.write('tg_notify_restart', notifyRestart.toString());
+
+                // إضافة القطع المدخلة إلى Netwatch
+                final ips = ipsController.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+                final names = namesController.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+
+                if (ips.isNotEmpty) {
+                  // إذا كان عدد الأسماء أقل من عدد الـ IPs، نملأ بالأسماء الافتراضية
+                  final fullNames = List<String>.filled(ips.length, 'قطعة');
+                  for (int i = 0; i < ips.length && i < names.length; i++) {
+                    fullNames[i] = names[i];
+                  }
+                  for (int i = 0; i < ips.length; i++) {
+                    await _addNetwatchEntry(
+                      fullNames[i],
+                      ips[i],
+                      tokenCtrl.text.trim(),
+                      chatCtrl.text.trim(),
+                      notifyUp,
+                      notifyDown,
+                    );
+                  }
+                }
+
+                // تحديث جميع قطع Netwatch الموجودة (التي تحمل تعليق TelegramBot_) باستخدام التوكن الجديد
+                await _updateAllNetwatchEntries(
+                  tokenCtrl.text.trim(),
+                  chatCtrl.text.trim(),
+                  notifyUp,
+                  notifyDown,
+                );
+
+                Navigator.pop(ctx);
+                _showSnack('✅ تم حفظ الإعدادات وتحديث جميع القطع', backgroundColor: Colors.green);
+              },
+              child: const Text('حفظ وتحديث الكل',
+                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+    tokenCtrl.dispose();
+    chatCtrl.dispose();
+    ipsController.dispose();
+    namesController.dispose();
+  }
+
+  // بناء عنصر تبديل الإشعارات
+  Widget _buildNotifToggle(
+    BuildContext ctx,
+    StateSetter setDialogState, {
+    required IconData icon,
+    required Color iconColor,
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Icon(icon, color: iconColor, size: 16),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              label,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
+            ),
+          ),
+          Switch(
+            value: value,
+            onChanged: onChanged,
+            activeColor: AppTheme.gold,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ],
       ),
     );
-    nameCtrl.dispose();
-    ipCtrl.dispose();
-    tokenCtrl.dispose();
-    chatCtrl.dispose();
   }
 
+  // حقل إدخال
   Widget _buildField({
     required TextEditingController controller,
     required String label,
@@ -253,42 +418,139 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  Future<void> _injectTelegramScript(
+  // إضافة قطعة واحدة إلى Netwatch
+  Future<void> _addNetwatchEntry(
     String name,
     String ip,
     String token,
     String chat,
+    bool notifyUp,
+    bool notifyDown,
   ) async {
+    final router = widget.routerService;
+    if (router == null) return;
+
+    final upMsg = Uri.encodeComponent('✅ القطعة $name ($ip) عادت إلى العمل.');
+    final downMsg = Uri.encodeComponent('❌ القطعة $name ($ip) توقفت عن العمل.');
+
+    final upScript = notifyUp
+        ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no'
+        : '';
+    final downScript = notifyDown
+        ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no'
+        : '';
+
+    final params = {
+      'host': ip,
+      'comment': 'TelegramBot_$name',
+    };
+    if (upScript.isNotEmpty) params['up-script'] = upScript;
+    if (downScript.isNotEmpty) params['down-script'] = downScript;
+
+    try {
+      await router.sendCommand('/tool/netwatch/add', params: params);
+    } catch (_) {}
+  }
+
+  // تحديث جميع قطع Netwatch الموجودة التي تحمل تعليق TelegramBot_
+  Future<void> _updateAllNetwatchEntries(
+    String token,
+    String chat,
+    bool notifyUp,
+    bool notifyDown,
+  ) async {
+    final router = widget.routerService;
+    if (router == null) return;
+
+    try {
+      final response = await router.sendCommand('/tool/netwatch/print');
+      final entries = response is List ? response : [];
+      for (final entry in entries) {
+        final comment = entry['comment']?.toString() ?? '';
+        if (comment.startsWith('TelegramBot_')) {
+          final id = entry['.id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            final name = comment.replaceFirst('TelegramBot_', '');
+            final ip = entry['host']?.toString() ?? '';
+            final upMsg = Uri.encodeComponent('✅ القطعة $name ($ip) عادت إلى العمل.');
+            final downMsg = Uri.encodeComponent('❌ القطعة $name ($ip) توقفت عن العمل.');
+            final upScript = notifyUp
+                ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no'
+                : '';
+            final downScript = notifyDown
+                ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no'
+                : '';
+
+            final params = {'numbers': id};
+            if (upScript.isNotEmpty) params['up-script'] = upScript;
+            if (downScript.isNotEmpty) params['down-script'] = downScript;
+
+            if (params.length > 1) {
+              await router.sendCommand('/tool/netwatch/set', params: params);
+            }
+          }
+        }
+      }
+    } catch (_) {}
+  }
+
+  // اختبار إرسال رسالة بمعلومات الراوتر
+  Future<void> _testTelegramBot(String token, String chat) async {
     final router = widget.routerService;
     if (router == null) {
       _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
       return;
     }
-    if (name.isEmpty || ip.isEmpty || token.isEmpty || chat.isEmpty) {
-      _showSnack('الرجاء تعبئة جميع الحقول', backgroundColor: Colors.red);
+    if (token.isEmpty || chat.isEmpty) {
+      _showSnack('⚠️ أدخل التوكن والـ Chat ID أولاً', backgroundColor: Colors.orange);
       return;
     }
 
     try {
-      final upMsg = Uri.encodeComponent('✅ القطعة $name عادت إلى العمل.');
-      final downMsg = Uri.encodeComponent('❌ القطعة $name توقفت عن العمل.');
+      // جلب معلومات الراوتر
+      final resource = await router.getSystemResource();
+      final res = resource.isNotEmpty ? resource.first : {};
+      final boardName = res['board-name'] ?? 'غير معروف';
+      final version = res['version'] ?? '';
+      final cpu = res['cpu'] ?? '';
+      final temperature = res['temperature']?.toString() ?? 'غير متاح';
+      // محاولة الحصول على الجهد (ليس في resource، نبحث في system/health)
+      String voltage = 'غير متاح';
+      try {
+        final healthResp = await router.sendCommand('/system/health/print');
+        if (healthResp is List) {
+          for (final item in healthResp) {
+            if (item['name']?.toString().toLowerCase() == 'voltage') {
+              voltage = item['value']?.toString() ?? 'غير متاح';
+              break;
+            }
+          }
+        }
+      } catch (_) {}
 
-      final upScript =
-          '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no';
-      final downScript =
-          '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no';
+      final message =
+          '📊 *معلومات الراوتر*\n'
+          '------------------------\n'
+          '🖥️ الجهاز: $boardName\n'
+          '📦 الإصدار: $version\n'
+          '⚙️ المعالج: $cpu\n'
+          '🌡️ الحرارة: $temperature°C\n'
+          '⚡ الجهد: $voltage\n'
+          '------------------------\n'
+          '📱 *ST_Manager*';
 
-      await router.sendCommand('/tool/netwatch/add', params: {
-        'host': ip,
-        'comment': 'TelegramBot_$name',
-        'up-script': upScript,
-        'down-script': downScript,
+      final encoded = Uri.encodeComponent(message);
+      final url =
+          'https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$encoded&parse_mode=Markdown';
+
+      await router.sendCommand('/tool/fetch', params: {
+        'url': url,
+        'keep-result': 'no',
       });
 
-      _showSnack('تم إضافة السكربت إلى Netwatch بنجاح',
-          backgroundColor: Colors.green);
+      _showSnack('📨 تم إرسال رسالة الاختبار إلى التلجرام', backgroundColor: Colors.blue);
     } catch (e) {
-      _showSnack('حدث خطأ أثناء إضافة السكربت: $e', backgroundColor: Colors.red);
+      _showSnack('❌ فشل إرسال رسالة الاختبار: $e', backgroundColor: Colors.red);
     }
   }
 
@@ -811,7 +1073,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   _sectionHeader('الإعدادات'),
                   _buildTile(
                     icon: Icons.telegram,
-                    label: 'إضافة بوت تيليجرام (إشعارات الأجهزة)',
+                    label: 'إعداد بوت التلجرام (Netwatch)',
                     iconColor: const Color(0xFF29B6F6),
                     onTap: () {
                       Navigator.pop(context);
