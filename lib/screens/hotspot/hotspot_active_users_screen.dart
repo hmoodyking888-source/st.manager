@@ -407,6 +407,11 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        // ✅ تمت إضافة زر الرجوع للعودة إلى الداشبورد
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.pop(context),
+        ),
         title: const Text('جميع حسابات الهوتسبوت'),
         actions: [
           if (_selectionMode) ...[
