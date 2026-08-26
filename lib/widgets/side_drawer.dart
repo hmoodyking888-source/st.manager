@@ -18,481 +18,289 @@ class _SideDrawerState extends State<SideDrawer> {
 
   static const String _appVersion = '2.6.0';
 
-  int _remainingDays = 0;
-  int _expiredDays = 0;
-  DateTime? _expiryDate;
+  // ===== الاشتراك / الترخيص =====
+  int? _subscriptionDaysRemaining;
+  DateTime? _subscriptionExpiryDate;
   bool _loadingDays = true;
-  bool _licenseExpired = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadRemainingDays();
-  }
-
-  int _positiveDaysFromDuration(Duration diff) {
-    final minutes = diff.inMinutes.abs();
-    final days = (minutes / (24 * 60)).ceil();
-    return days <= 0 ? 1 : days;
-  }
-
-  void _setLicenseState(DateTime expiry) {
-    final now = DateTime.now();
-    final diff = expiry.difference(now);
-
-    if (diff.isNegative) {
-      _licenseExpired = true;
-      _expiredDays = _positiveDaysFromDuration(diff);
-      _remainingDays = 0;
-    } else {
-      _licenseExpired = false;
-      _remainingDays = _positiveDaysFromDuration(diff);
-      _expiredDays = 0;
-    }
-
-    _expiryDate = expiry;
-    _loadingDays = false;
-  }
-
-  // جلب تاريخ الانتهاء الحقيقي من SecureStorage
-  Future<void> _loadRemainingDays() async {
+  // ===== دوال الاشتراك (مأخوذة من AppPriorityScreen) =====
+  Future<void> _loadSubscriptionCounter() async {
     try {
-      final expiryStr = await _storage.read('license_expiry_date');
-      if (expiryStr != null && expiryStr.isNotEmpty) {
-        final expiry = DateTime.tryParse(expiryStr);
-        if (expiry != null) {
-          if (mounted) {
-            setState(() {
-              _setLicenseState(expiry);
-            });
-          }
-          return;
-        }
-      }
-
-      final firstLaunch = await _storage.getFirstLaunch();
-      if (firstLaunch == null || firstLaunch.isEmpty) {
+      final rawExpiry = await _storage.read('license_expiry_date');
+      if (rawExpiry == null || rawExpiry.trim().isEmpty) {
         if (mounted) {
           setState(() {
+            _subscriptionExpiryDate = null;
+            _subscriptionDaysRemaining = null;
             _loadingDays = false;
           });
         }
         return;
       }
 
-      final trialEnd = DateTime.parse(firstLaunch).add(const Duration(days: 3));
+      final parsed = DateTime.tryParse(rawExpiry.trim());
+      if (parsed == null) {
+        if (mounted) {
+          setState(() {
+            _subscriptionExpiryDate = null;
+            _subscriptionDaysRemaining = null;
+            _loadingDays = false;
+          });
+        }
+        return;
+      }
+
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final expiryDate = DateTime(parsed.year, parsed.month, parsed.day);
+
+      int daysRemaining = expiryDate.difference(today).inDays;
+      if (daysRemaining < 0) daysRemaining = 0;
+
       if (mounted) {
         setState(() {
-          _setLicenseState(trialEnd);
+          _subscriptionExpiryDate = expiryDate;
+          _subscriptionDaysRemaining = daysRemaining;
+          _loadingDays = false;
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
+          _subscriptionExpiryDate = null;
+          _subscriptionDaysRemaining = null;
           _loadingDays = false;
         });
       }
     }
   }
 
-  // ──────────────────────────────────────────
-  // إعداد التلجرام: يطلب توكن + Chat ID + خيارات الإشعارات
-  // ──────────────────────────────────────────
-  Future<void> _showTelegramSetupDialog() async {
-    final tokenController = TextEditingController(
-      text: await _storage.read('telegram_bot_token') ?? '',
-    );
-    final chatIdController = TextEditingController(
-      text: await _storage.read('telegram_chat_id') ?? '',
-    );
-
-    bool notifyNewConnection =
-        await _storage.read('tg_notify_connect') == 'true';
-    bool notifyDisconnect =
-        await _storage.read('tg_notify_disconnect') == 'true';
-    bool notifyExpiry = await _storage.read('tg_notify_expiry') == 'true';
-    bool notifyHighUsage =
-        await _storage.read('tg_notify_high_usage') == 'true';
-    bool notifyRouterRestart =
-        await _storage.read('tg_notify_restart') == 'true';
-
-    if (!mounted) return;
-
-    try {
-      await showDialog(
-        context: context,
-        builder: (ctx) => StatefulBuilder(
-          builder: (ctx, setDialogState) => AlertDialog(
-            backgroundColor: AppTheme.semiBlack,
-            title: const Row(
-              children: [
-                Icon(Icons.telegram, color: Color(0xFF29B6F6)),
-                SizedBox(width: 8),
-                Text(
-                  'إعداد بوت التلجرام',
-                  style: TextStyle(color: Colors.white, fontSize: 16),
-                ),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'توكن البوت:',
-                    style: TextStyle(color: AppTheme.gold, fontSize: 12),
-                  ),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: tokenController,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: '123456789:AAF...',
-                      hintStyle: const TextStyle(color: Colors.white30),
-                      filled: true,
-                      fillColor: Colors.white10,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide.none,
-                      ),
-                      suffixIcon: IconButton(
-                        icon: const Icon(
-                          Icons.paste,
-                          color: Colors.white38,
-                          size: 18,
-                        ),
-                        onPressed: () async {
-                          final data = await Clipboard.getData('text/plain');
-                          if (data?.text != null) {
-                            tokenController.text = data!.text!.trim();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Chat ID:',
-                    style: TextStyle(color: AppTheme.gold, fontSize: 12),
-                  ),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: chatIdController,
-                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      hintText: '-1001234567890',
-                      hintStyle: const TextStyle(color: Colors.white30),
-                      filled: true,
-                      fillColor: Colors.white10,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide.none,
-                      ),
-                      suffixIcon: IconButton(
-                        icon: const Icon(
-                          Icons.paste,
-                          color: Colors.white38,
-                          size: 18,
-                        ),
-                        onPressed: () async {
-                          final data = await Clipboard.getData('text/plain');
-                          if (data?.text != null) {
-                            chatIdController.text = data!.text!.trim();
-                          }
-                        },
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'خيارات الإشعارات:',
-                    style: TextStyle(
-                      color: AppTheme.gold,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _buildNotifToggle(
-                    ctx,
-                    setDialogState,
-                    icon: Icons.login,
-                    iconColor: Colors.green,
-                    label: 'اتصال مستخدم جديد',
-                    value: notifyNewConnection,
-                    onChanged: (v) =>
-                        setDialogState(() => notifyNewConnection = v),
-                  ),
-                  _buildNotifToggle(
-                    ctx,
-                    setDialogState,
-                    icon: Icons.logout,
-                    iconColor: Colors.orange,
-                    label: 'انقطاع اتصال مستخدم',
-                    value: notifyDisconnect,
-                    onChanged: (v) => setDialogState(() => notifyDisconnect = v),
-                  ),
-                  _buildNotifToggle(
-                    ctx,
-                    setDialogState,
-                    icon: Icons.timer_off,
-                    iconColor: Colors.red,
-                    label: 'انتهاء صلاحية حساب',
-                    value: notifyExpiry,
-                    onChanged: (v) => setDialogState(() => notifyExpiry = v),
-                  ),
-                  _buildNotifToggle(
-                    ctx,
-                    setDialogState,
-                    icon: Icons.speed,
-                    iconColor: Colors.purple,
-                    label: 'استهلاك عالي (> 50 Mbps)',
-                    value: notifyHighUsage,
-                    onChanged: (v) => setDialogState(() => notifyHighUsage = v),
-                  ),
-                  _buildNotifToggle(
-                    ctx,
-                    setDialogState,
-                    icon: Icons.restart_alt,
-                    iconColor: Colors.cyan,
-                    label: 'إعادة تشغيل الراوتر',
-                    value: notifyRouterRestart,
-                    onChanged: (v) =>
-                        setDialogState(() => notifyRouterRestart = v),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text(
-                  'إلغاء',
-                  style: TextStyle(color: Colors.white54),
-                ),
-              ),
-              TextButton(
-                onPressed: () async {
-                  await _testTelegramBot(
-                    tokenController.text.trim(),
-                    chatIdController.text.trim(),
-                  );
-                },
-                child: const Text(
-                  'اختبار',
-                  style: TextStyle(color: Colors.cyan),
-                ),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
-                onPressed: () async {
-                  await _saveTelegramSettings(
-                    token: tokenController.text.trim(),
-                    chatId: chatIdController.text.trim(),
-                    notifyConnect: notifyNewConnection,
-                    notifyDisconnect: notifyDisconnect,
-                    notifyExpiry: notifyExpiry,
-                    notifyHighUsage: notifyHighUsage,
-                    notifyRestart: notifyRouterRestart,
-                  );
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-                child: const Text(
-                  'تفعيل البوت',
-                  style: TextStyle(color: Colors.black),
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    } finally {
-      tokenController.dispose();
-      chatIdController.dispose();
-    }
+  String _subscriptionText() {
+    final days = _subscriptionDaysRemaining;
+    if (days == null) return 'الاشتراك: غير متوفر';
+    if (days == 0) return 'الاشتراك منتهي';
+    if (days == 1) return 'متبقي يوم واحد';
+    if (days == 2) return 'متبقي يومان';
+    return 'متبقي $days يوم';
   }
 
-  Widget _buildNotifToggle(
-    BuildContext ctx,
-    StateSetter setDialogState, {
-    required IconData icon,
-    required Color iconColor,
-    required String label,
-    required bool value,
-    required ValueChanged<bool> onChanged,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: [
-          Icon(icon, color: iconColor, size: 16),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+  Color _subscriptionColor() {
+    final days = _subscriptionDaysRemaining;
+    if (days == null) return Colors.white54;
+    if (days <= 0) return Colors.redAccent;
+    if (days <= 3) return Colors.orangeAccent;
+    return Colors.greenAccent;
+  }
+
+  String _formatSubscriptionDate() {
+    final date = _subscriptionExpiryDate;
+    if (date == null) return 'تاريخ الانتهاء غير متوفر';
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final year = date.year.toString();
+    return '$day/$month/$year';
+  }
+
+  // ===== إصلاح اللوب (Loop Protect) =====
+  Future<void> _confirmFixLoop() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('حماية الشبكة من اللوب (Loop Protect)',
+                style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: const Text(
+          'هل أنت متأكد من تفعيل بروتوكول الحماية (RSTP) على جميع الجسور (Bridges) وتفعيل حماية المنافذ (Loop-Protect) لجميع كروت الشبكة؟\n'
+          'هذا سيقوم بفصل أي راوتر يسبب لوب أوتوماتيكياً.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
           ),
-          Switch(
-            value: value,
-            onChanged: onChanged,
-            activeColor: AppTheme.gold,
-            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('تأكيد وتنفيذ',
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
+    if (confirm == true) await _fixLoop();
   }
 
-  Future<void> _saveTelegramSettings({
-    required String token,
-    required String chatId,
-    required bool notifyConnect,
-    required bool notifyDisconnect,
-    required bool notifyExpiry,
-    required bool notifyHighUsage,
-    required bool notifyRestart,
-  }) async {
-    await _storage.write('telegram_bot_token', token);
-    await _storage.write('telegram_chat_id', chatId);
-    await _storage.write('tg_notify_connect', notifyConnect.toString());
-    await _storage.write('tg_notify_disconnect', notifyDisconnect.toString());
-    await _storage.write('tg_notify_expiry', notifyExpiry.toString());
-    await _storage.write('tg_notify_high_usage', notifyHighUsage.toString());
-    await _storage.write('tg_notify_restart', notifyRestart.toString());
-
-    if (widget.routerService != null && token.isNotEmpty && chatId.isNotEmpty) {
-      await _installTelegramHelperScript(token: token, chatId: chatId);
-      await _sendTelegramTestMessage(
-        token: token,
-        chatId: chatId,
-        text: '✅ تم تفعيل ST Manager بنجاح',
-      );
+  Future<void> _fixLoop() async {
+    final router = widget.routerService;
+    if (router == null) {
+      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      return;
     }
+    try {
+      await router.sendCommand('/interface/bridge/set',
+          params: {'numbers': '[find]', 'protocol-mode': 'rstp'});
+      await router.sendCommand('/interface/ethernet/set',
+          params: {'numbers': '[find]', 'loop-protect': 'on'});
+      _showSnack('تم تفعيل حماية اللوب (RSTP & Loop-Protect) بنجاح',
+          backgroundColor: Colors.green);
+    } catch (e) {
+      _showSnack('حدث خطأ أثناء تفعيل الحماية: $e', backgroundColor: Colors.red);
+    }
+  }
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('✅ تم حفظ إعدادات التلجرام وتفعيلها'),
-          backgroundColor: Colors.green,
+  // ===== تلجرام (Netwatch) =====
+  Future<void> _showTelegramBotDialog() async {
+    final nameCtrl = TextEditingController();
+    final ipCtrl = TextEditingController();
+    final tokenCtrl = TextEditingController();
+    final chatCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: const Row(
+          children: [
+            Icon(Icons.telegram, color: Color(0xFF29B6F6)),
+            SizedBox(width: 8),
+            Text('إعداد إشعارات البوت للقطع (Netwatch)',
+                style: TextStyle(color: Colors.white, fontSize: 16)),
+          ],
         ),
-      );
-    }
-  }
-
-  String _buildTelegramScriptSource({
-    required String token,
-    required String chatId,
-  }) {
-    final safeToken = token.replaceAll('"', r'\"');
-    final safeChatId = chatId.replaceAll('"', r'\"');
-
-    return ':global ST_TG_TOKEN "$safeToken";'
-        ':global ST_TG_CHATID "$safeChatId";'
-        ':global ST_TG_SEND do={'
-        ':local msg \$1;'
-        ':if ([:len \$msg] = 0) do={ :set msg "ST Manager"; }'
-        ':local url ("https://api.telegram.org/bot" . \$ST_TG_TOKEN . "/sendMessage?chat_id=" . \$ST_TG_CHATID . "&text=" . \$msg);'
-        '/tool fetch url=\$url keep-result=no;'
-        '};';
-  }
-
-  Future<void> _installTelegramHelperScript({
-    required String token,
-    required String chatId,
-  }) async {
-    final router = widget.routerService;
-    if (router == null) return;
-
-    const scriptName = 'ST_Telegram_Bot';
-
-    try {
-      final scriptsResp = await router.sendCommand('/system/script/print');
-      final scripts = scriptsResp is List ? scriptsResp : [];
-
-      Map<String, dynamic>? existing;
-      for (final item in scripts) {
-        if (item is Map &&
-            item['name']?.toString() == scriptName) {
-          existing = item.map((k, v) => MapEntry(k.toString(), v));
-          break;
-        }
-      }
-
-      if (existing != null) {
-        final id = existing['.id']?.toString() ?? '';
-        if (id.isNotEmpty) {
-          await router.sendCommand(
-            '/system/script/remove',
-            params: {'numbers': id},
-          );
-        }
-      }
-
-      await router.sendCommand('/system/script/add', params: {
-        'name': scriptName,
-        'policy': 'read,write,test,policy,password,sensitive,romon',
-        'source': _buildTelegramScriptSource(token: token, chatId: chatId),
-        'comment': 'ST Manager Telegram helper',
-      });
-    } catch (_) {
-      // لا نكسر الواجهة إذا فشل حقن السكربت
-    }
-  }
-
-  Future<void> _sendTelegramTestMessage({
-    required String token,
-    required String chatId,
-    required String text,
-  }) async {
-    final router = widget.routerService;
-    if (router == null) return;
-
-    try {
-      final encodedText = Uri.encodeComponent(text);
-      final url =
-          'https://api.telegram.org/bot$token/sendMessage?chat_id=$chatId&text=$encodedText';
-
-      await router.sendCommand('/tool/fetch', params: {
-        'url': url,
-        'keep-result': 'no',
-      });
-    } catch (_) {
-      // تجاهل الفشل حتى لا يمنع حفظ الإعدادات
-    }
-  }
-
-  Future<void> _testTelegramBot(String token, String chatId) async {
-    if (token.isEmpty || chatId.isEmpty) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ أدخل التوكن والـ Chat ID أولاً'),
-            backgroundColor: Colors.orange,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildField(
+                controller: nameCtrl,
+                label: 'اسم القطعة (مثال: مطعم اليمني)',
+              ),
+              _buildField(
+                controller: ipCtrl,
+                label: 'IP القطعة (مثال: 192.168.1.10)',
+              ),
+              _buildField(
+                controller: tokenCtrl,
+                label: 'توكن البوت (Bot Token)',
+              ),
+              _buildField(
+                controller: chatCtrl,
+                label: 'معرف المحادثة (Chat ID)',
+              ),
+            ],
           ),
-        );
-      }
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _injectTelegramScript(
+                nameCtrl.text.trim(),
+                ipCtrl.text.trim(),
+                tokenCtrl.text.trim(),
+                chatCtrl.text.trim(),
+              );
+            },
+            child: const Text('حقن السكربت',
+                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+    nameCtrl.dispose();
+    ipCtrl.dispose();
+    tokenCtrl.dispose();
+    chatCtrl.dispose();
+  }
+
+  Widget _buildField({
+    required TextEditingController controller,
+    required String label,
+    String? hint,
+    TextInputType keyboardType = TextInputType.text,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: TextFormField(
+        controller: controller,
+        keyboardType: keyboardType,
+        style: const TextStyle(color: Colors.white),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: AppTheme.gold, fontSize: 12),
+          hintText: hint,
+          hintStyle: const TextStyle(color: Colors.white30),
+          filled: true,
+          fillColor: Colors.white10,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(8),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _injectTelegramScript(
+    String name,
+    String ip,
+    String token,
+    String chat,
+  ) async {
+    final router = widget.routerService;
+    if (router == null) {
+      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      return;
+    }
+    if (name.isEmpty || ip.isEmpty || token.isEmpty || chat.isEmpty) {
+      _showSnack('الرجاء تعبئة جميع الحقول', backgroundColor: Colors.red);
       return;
     }
 
-    await _sendTelegramTestMessage(
-      token: token,
-      chatId: chatId,
-      text: '📨 اختبار من ST Manager',
-    );
+    try {
+      final upMsg = Uri.encodeComponent('✅ القطعة $name عادت إلى العمل.');
+      final downMsg = Uri.encodeComponent('❌ القطعة $name توقفت عن العمل.');
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('📨 تم إرسال رسالة اختبار للبوت'),
-          backgroundColor: Colors.blue,
-        ),
-      );
+      final upScript =
+          '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no';
+      final downScript =
+          '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no';
+
+      await router.sendCommand('/tool/netwatch/add', params: {
+        'host': ip,
+        'comment': 'TelegramBot_$name',
+        'up-script': upScript,
+        'down-script': downScript,
+      });
+
+      _showSnack('تم إضافة السكربت إلى Netwatch بنجاح',
+          backgroundColor: Colors.green);
+    } catch (e) {
+      _showSnack('حدث خطأ أثناء إضافة السكربت: $e', backgroundColor: Colors.red);
     }
   }
 
+  // ===== مساعدات عامة =====
+  void _showSnack(String message, {Color backgroundColor = Colors.black87}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), backgroundColor: backgroundColor),
+    );
+  }
+
+  // ===== السرعات المؤقتة (موجود سابقاً) =====
   Future<void> _showSpeedBoostDialog() async {
     TimeOfDay fromTime = const TimeOfDay(hour: 0, minute: 0);
     TimeOfDay toTime = const TimeOfDay(hour: 1, minute: 0);
@@ -502,27 +310,21 @@ class _SideDrawerState extends State<SideDrawer> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: AppTheme.semiBlack,
-          title: const Text(
-            'فتح السرعات الشامل المؤقت',
-            style: TextStyle(color: Colors.white),
-          ),
+          title: const Text('فتح السرعات الشامل المؤقت',
+              style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'حدد وقت البداية والنهاية لفتح السرعات:',
-                style: TextStyle(color: Colors.white70),
-              ),
+              const Text('حدد وقت البداية والنهاية لفتح السرعات:',
+                  style: TextStyle(color: Colors.white70)),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   Column(
                     children: [
-                      const Text(
-                        'من الساعة:',
-                        style: TextStyle(color: Colors.white70),
-                      ),
+                      const Text('من الساعة:',
+                          style: TextStyle(color: Colors.white70)),
                       TextButton(
                         onPressed: () async {
                           final t = await showTimePicker(
@@ -531,23 +333,17 @@ class _SideDrawerState extends State<SideDrawer> {
                           );
                           if (t != null) setDialogState(() => fromTime = t);
                         },
-                        child: Text(
-                          fromTime.format(ctx),
-                          style: const TextStyle(
-                            color: AppTheme.gold,
-                            fontSize: 18,
-                          ),
-                        ),
+                        child: Text(fromTime.format(ctx),
+                            style: const TextStyle(
+                                color: AppTheme.gold, fontSize: 18)),
                       ),
                     ],
                   ),
                   const Icon(Icons.arrow_forward, color: Colors.white38),
                   Column(
                     children: [
-                      const Text(
-                        'إلى الساعة:',
-                        style: TextStyle(color: Colors.white70),
-                      ),
+                      const Text('إلى الساعة:',
+                          style: TextStyle(color: Colors.white70)),
                       TextButton(
                         onPressed: () async {
                           final t = await showTimePicker(
@@ -556,13 +352,9 @@ class _SideDrawerState extends State<SideDrawer> {
                           );
                           if (t != null) setDialogState(() => toTime = t);
                         },
-                        child: Text(
-                          toTime.format(ctx),
-                          style: const TextStyle(
-                            color: AppTheme.gold,
-                            fontSize: 18,
-                          ),
-                        ),
+                        child: Text(toTime.format(ctx),
+                            style: const TextStyle(
+                                color: AppTheme.gold, fontSize: 18)),
                       ),
                     ],
                   ),
@@ -573,10 +365,7 @@ class _SideDrawerState extends State<SideDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text(
-                'إلغاء',
-                style: TextStyle(color: Colors.white54),
-              ),
+              child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
@@ -584,10 +373,7 @@ class _SideDrawerState extends State<SideDrawer> {
                 Navigator.pop(ctx);
                 _applySpeedBoost(fromTime, toTime);
               },
-              child: const Text(
-                'تطبيق',
-                style: TextStyle(color: Colors.black),
-              ),
+              child: const Text('تطبيق', style: TextStyle(color: Colors.black)),
             ),
           ],
         ),
@@ -596,228 +382,48 @@ class _SideDrawerState extends State<SideDrawer> {
   }
 
   Future<void> _applySpeedBoost(TimeOfDay from, TimeOfDay to) async {
-    if (widget.routerService == null) return;
-
+    final router = widget.routerService;
+    if (router == null) return;
     try {
-      final profiles = await widget.routerService!.getHotspotProfiles();
+      final profiles = await router.getHotspotProfiles();
       for (var profile in profiles) {
-        final profileId = profile['.id']?.toString() ?? '';
-        if (profileId.isNotEmpty) {
-          await widget.routerService!.sendCommand(
-            '/ip/hotspot/user/profile/set',
-            params: {'numbers': profileId, 'rate-limit': ''},
-          );
+        final id = profile['.id']?.toString() ?? '';
+        if (id.isNotEmpty) {
+          await router.sendCommand('/ip/hotspot/user/profile/set',
+              params: {'numbers': id, 'rate-limit': ''});
         }
       }
 
-      final activeUsers = await widget.routerService!.getHotspotActive();
+      final activeUsers = await router.getHotspotActive();
       for (var user in activeUsers) {
-        final userId = user['.id']?.toString() ?? '';
-        if (userId.isNotEmpty) {
-          await widget.routerService!.sendCommand(
-            '/ip/hotspot/active/remove',
-            params: {'numbers': userId},
-          );
-        }
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '🚀 تم فتح السرعات من ${from.format(context)} إلى ${to.format(context)}',
-            ),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ فشل فتح السرعات: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _confirmReboot() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.semiBlack,
-        title: const Row(
-          children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.orange),
-            SizedBox(width: 8),
-            Text('تأكيد إعادة التشغيل',
-                style: TextStyle(color: Colors.white)),
-          ],
-        ),
-        content: const Text(
-          'هل أنت متأكد من إعادة تشغيل الراوتر؟\nسيتم قطع جميع الاتصالات مؤقتاً.',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'إلغاء',
-              style: TextStyle(color: Colors.white54),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'إعادة تشغيل',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true && widget.routerService != null) {
-      try {
-        await widget.routerService!.sendCommand('/system/reboot', usePost: true);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('🔄 جاري إعادة تشغيل الراوتر...'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ فشل: $e'),
-              backgroundColor: Colors.red,
-            ),
-          );
-        }
-      }
-    }
-  }
-
-  Future<void> _fixLoop() async {
-    if (widget.routerService == null) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.semiBlack,
-        title: const Row(
-          children: [
-            Icon(Icons.build, color: AppTheme.gold),
-            SizedBox(width: 8),
-            Text('إصلاح اللوب', style: TextStyle(color: Colors.white)),
-          ],
-        ),
-        content: const Text(
-          'سيتم قطع جميع جلسات PPP النشطة وإعادة تشغيل الـ PPPoE server.\nهل تريد المتابعة؟',
-          style: TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text(
-              'إلغاء',
-              style: TextStyle(color: Colors.white54),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'متابعة',
-              style: TextStyle(color: Colors.black),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    try {
-      final activeSessions = await widget.routerService!.sendCommand(
-        '/ppp/active/print',
-        useCache: false,
-      );
-      for (final session in activeSessions) {
-        final id = session['.id']?.toString() ?? '';
+        final id = user['.id']?.toString() ?? '';
         if (id.isNotEmpty) {
-          await widget.routerService!.sendCommand(
-            '/ppp/active/remove',
-            params: {'numbers': id},
-          );
+          await router.sendCommand('/ip/hotspot/active/remove',
+              params: {'numbers': id});
         }
       }
 
-      final servers = await widget.routerService!.sendCommand(
-        '/interface/pppoe-server/server/print',
-        useCache: false,
-      );
-      for (final server in servers) {
-        final id = server['.id']?.toString() ?? '';
-        if (id.isNotEmpty) {
-          await widget.routerService!.sendCommand(
-            '/interface/pppoe-server/server/set',
-            params: {'numbers': id, 'disabled': 'yes'},
-          );
-          await Future.delayed(const Duration(seconds: 1));
-          await widget.routerService!.sendCommand(
-            '/interface/pppoe-server/server/set',
-            params: {'numbers': id, 'disabled': 'no'},
-          );
-        }
-      }
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content:
-                Text('✅ تم إصلاح اللوب - قُطعت ${activeSessions.length} جلسة'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      _showSnack('🚀 تم فتح السرعات من ${from.format(context)} إلى ${to.format(context)}',
+          backgroundColor: Colors.green);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ فشل إصلاح اللوب: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showSnack('❌ فشل فتح السرعات: $e', backgroundColor: Colors.red);
     }
   }
 
+  // ===== فتح سرعة مستخدم (موجود) =====
   Future<void> _showOpenUserSpeedDialog() async {
     final nameController = TextEditingController();
-
     try {
       await showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: AppTheme.semiBlack,
-          title: const Text(
-            'فتح سرعة مستخدم',
-            style: TextStyle(color: Colors.white),
-          ),
+          title: const Text('فتح سرعة مستخدم', style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                'أدخل اسم المستخدم:',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
-              ),
+              const Text('أدخل اسم المستخدم:',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
               const SizedBox(height: 8),
               TextField(
                 controller: nameController,
@@ -839,10 +445,7 @@ class _SideDrawerState extends State<SideDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text(
-                'إلغاء',
-                style: TextStyle(color: Colors.white54),
-              ),
+              child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
@@ -850,10 +453,7 @@ class _SideDrawerState extends State<SideDrawer> {
                 Navigator.pop(ctx);
                 _applyUserSpeedBoost(nameController.text.trim());
               },
-              child: const Text(
-                'فتح',
-                style: TextStyle(color: Colors.black),
-              ),
+              child: const Text('فتح', style: TextStyle(color: Colors.black)),
             ),
           ],
         ),
@@ -864,85 +464,56 @@ class _SideDrawerState extends State<SideDrawer> {
   }
 
   Future<void> _applyUserSpeedBoost(String username) async {
-    if (widget.routerService == null || username.isEmpty) return;
+    final router = widget.routerService;
+    if (router == null || username.isEmpty) return;
 
     try {
-      final secrets = await widget.routerService!.sendCommand(
-        '/ppp/secret/print',
-        useCache: false,
-      );
+      final secrets = await router.sendCommand('/ppp/secret/print', useCache: false);
       final secret = secrets.firstWhere(
         (s) => s['name']?.toString().toLowerCase() == username.toLowerCase(),
         orElse: () => {},
       );
 
       if (secret.isEmpty) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('⚠️ المستخدم "$username" غير موجود'),
-              backgroundColor: Colors.orange,
-            ),
-          );
-        }
+        _showSnack('⚠️ المستخدم "$username" غير موجود', backgroundColor: Colors.orange);
         return;
       }
 
       final secretId = secret['.id']?.toString() ?? '';
-
-      try {
-        await widget.routerService!.sendCommand(
-          '/ppp/profile/add',
-          params: {'name': 'Speed', 'rate-limit': '', 'only-one': 'no'},
-        );
-      } catch (_) {}
-
       if (secretId.isNotEmpty) {
-        await widget.routerService!.sendCommand(
-          '/ppp/secret/set',
-          params: {'numbers': secretId, 'profile': 'Speed'},
-        );
+        // إنشاء بروفايل Speed إن لم يكن موجوداً
+        try {
+          await router.sendCommand('/ppp/profile/add',
+              params: {'name': 'Speed', 'rate-limit': '', 'only-one': 'no'});
+        } catch (_) {}
+
+        await router.sendCommand('/ppp/secret/set',
+            params: {'numbers': secretId, 'profile': 'Speed'});
       }
 
-      final active = await widget.routerService!.sendCommand(
-        '/ppp/active/print',
-        useCache: false,
-      );
+      // قطع الجلسات النشطة
+      final active = await router.sendCommand('/ppp/active/print', useCache: false);
       for (final session in active) {
         final sessionName = session['name']?.toString().toLowerCase() ?? '';
         if (sessionName == username.toLowerCase()) {
           final activeId = session['.id']?.toString() ?? '';
           if (activeId.isNotEmpty) {
-            await widget.routerService!.sendCommand(
-              '/ppp/active/remove',
-              params: {'numbers': activeId},
-            );
+            await router.sendCommand('/ppp/active/remove',
+                params: {'numbers': activeId});
           }
         }
       }
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ تم فتح سرعة "$username" بنجاح'),
-            backgroundColor: Colors.green,
-          ),
-        );
-      }
+      _showSnack('✅ تم فتح سرعة "$username" بنجاح', backgroundColor: Colors.green);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ فشل: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
+      _showSnack('❌ فشل: $e', backgroundColor: Colors.red);
     }
   }
 
+  // ===== معلومات الراوتر (موجود) =====
   Future<void> _showRouterInfo() async {
-    if (widget.routerService == null) return;
+    final router = widget.routerService;
+    if (router == null) return;
 
     showDialog(
       context: context,
@@ -953,21 +524,17 @@ class _SideDrawerState extends State<SideDrawer> {
           children: [
             CircularProgressIndicator(color: AppTheme.gold),
             SizedBox(width: 16),
-            Text(
-              'جاري التحميل...',
-              style: TextStyle(color: Colors.white70),
-            ),
+            Text('جاري التحميل...', style: TextStyle(color: Colors.white70)),
           ],
         ),
       ),
     );
 
     try {
-      final resource = await widget.routerService!.getSystemResource();
+      final resource = await router.getSystemResource();
       final res = resource.isNotEmpty ? resource.first : {};
 
       if (mounted) Navigator.pop(context);
-
       if (!mounted) return;
 
       showDialog(
@@ -978,10 +545,7 @@ class _SideDrawerState extends State<SideDrawer> {
             children: [
               Icon(Icons.router, color: AppTheme.gold),
               SizedBox(width: 8),
-              Text(
-                'معلومات الراوتر',
-                style: TextStyle(color: Colors.white),
-              ),
+              Text('معلومات الراوتر', style: TextStyle(color: Colors.white)),
             ],
           ),
           content: Column(
@@ -991,24 +555,12 @@ class _SideDrawerState extends State<SideDrawer> {
               _infoRow('الجهاز', res['board-name'] ?? '-'),
               _infoRow('الإصدار', res['version'] ?? '-'),
               _infoRow('المعالج', res['cpu'] ?? '-'),
-              _infoRow(
-                'RAM الكلي',
-                _formatBytes(
-                  int.tryParse(res['total-memory']?.toString() ?? '0') ?? 0,
-                ),
-              ),
-              _infoRow(
-                'RAM المتاح',
-                _formatBytes(
-                  int.tryParse(res['free-memory']?.toString() ?? '0') ?? 0,
-                ),
-              ),
-              _infoRow(
-                'التخزين الكلي',
-                _formatBytes(
-                  int.tryParse(res['total-hdd-space']?.toString() ?? '0') ?? 0,
-                ),
-              ),
+              _infoRow('RAM الكلي',
+                  _formatBytes(int.tryParse(res['total-memory']?.toString() ?? '0') ?? 0)),
+              _infoRow('RAM المتاح',
+                  _formatBytes(int.tryParse(res['free-memory']?.toString() ?? '0') ?? 0)),
+              _infoRow('التخزين الكلي',
+                  _formatBytes(int.tryParse(res['total-hdd-space']?.toString() ?? '0') ?? 0)),
               _infoRow('وقت التشغيل', res['uptime'] ?? '-'),
               _infoRow('درجة الحرارة', '${res['temperature'] ?? '-'}°C'),
             ],
@@ -1016,10 +568,7 @@ class _SideDrawerState extends State<SideDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text(
-                'إغلاق',
-                style: TextStyle(color: AppTheme.gold),
-              ),
+              child: const Text('إغلاق', style: TextStyle(color: AppTheme.gold)),
             ),
           ],
         ),
@@ -1027,12 +576,7 @@ class _SideDrawerState extends State<SideDrawer> {
     } catch (e) {
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ فشل جلب المعلومات: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        _showSnack('❌ فشل جلب المعلومات: $e', backgroundColor: Colors.red);
       }
     }
   }
@@ -1042,20 +586,11 @@ class _SideDrawerState extends State<SideDrawer> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Text(
-            '$label: ',
-            style: const TextStyle(
-              color: AppTheme.gold,
-              fontSize: 12,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
+          Text('$label: ',
+              style: const TextStyle(
+                  color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
           Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
-          ),
+              child: Text(value, style: const TextStyle(color: Colors.white70, fontSize: 12))),
         ],
       ),
     );
@@ -1063,15 +598,10 @@ class _SideDrawerState extends State<SideDrawer> {
 
   String _formatBytes(int bytes) {
     if (bytes <= 0) return '0 B';
-    if (bytes >= 1024 * 1024 * 1024) {
+    if (bytes >= 1024 * 1024 * 1024)
       return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-    }
-    if (bytes >= 1024 * 1024) {
-      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    }
-    if (bytes >= 1024) {
-      return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    }
+    if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '$bytes B';
   }
 
@@ -1079,6 +609,7 @@ class _SideDrawerState extends State<SideDrawer> {
     Navigator.pushNamed(context, '/settings');
   }
 
+  // ===== عناصر القائمة =====
   Widget _buildTile({
     required IconData icon,
     required String label,
@@ -1089,51 +620,21 @@ class _SideDrawerState extends State<SideDrawer> {
     return ListTile(
       dense: true,
       leading: Icon(icon, color: iconColor, size: 20),
-      title: Text(
-        label,
-        style: TextStyle(color: labelColor ?? Colors.white, fontSize: 13),
-      ),
+      title: Text(label,
+          style: TextStyle(color: labelColor ?? Colors.white, fontSize: 13)),
       onTap: onTap,
     );
   }
 
-  Widget _buildLicenseBadge() {
-    final Color daysColor = _licenseExpired
-        ? Colors.red
-        : _remainingDays > 7
-            ? Colors.green
-            : _remainingDays > 2
-                ? Colors.orange
-                : Colors.red;
-
-    final String text = _loadingDays
-        ? 'جارٍ التحقق من الترخيص...'
-        : _licenseExpired
-            ? 'الترخيص منتهي منذ $_expiredDays يوم'
-            : 'الترخيص: $_remainingDays يوم متبقي';
-
-    return Row(
-      children: [
-        Icon(
-          _licenseExpired ? Icons.error_outline : Icons.verified_user,
-          color: daysColor,
-          size: 14,
-        ),
-        const SizedBox(width: 6),
-        _loadingDays
-            ? const SizedBox(
-                width: 14,
-                height: 14,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppTheme.gold,
-                ),
-              )
-            : Text(
-                text,
-                style: TextStyle(color: daysColor, fontSize: 12),
-              ),
-      ],
+  Widget _sectionHeader(String title) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: Text(title,
+          style: const TextStyle(
+              color: AppTheme.gold,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5)),
     );
   }
 
@@ -1142,59 +643,94 @@ class _SideDrawerState extends State<SideDrawer> {
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
       decoration: const BoxDecoration(
-        border: Border(
-          top: BorderSide(color: Colors.white12, width: 1),
-        ),
+        border: Border(top: BorderSide(color: Colors.white12, width: 1)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            'ST Manager',
-            style: TextStyle(
-              color: AppTheme.gold.withOpacity(0.95),
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.6,
-            ),
-          ),
+          Text('ST Manager',
+              style: TextStyle(
+                  color: AppTheme.gold.withOpacity(0.95),
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.6)),
           const SizedBox(height: 4),
-          Text(
-            'الإصدار $_appVersion • برمجة م.احمد النعيمي',
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: Colors.white38,
-              fontSize: 11,
-            ),
-          ),
+          Text('الإصدار $_appVersion • برمجة م.احمد النعيمي',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white38, fontSize: 11)),
           const SizedBox(height: 2),
-          const Text(
-            '+963995870655',
-            style: TextStyle(
-              color: Colors.white38,
-              fontSize: 11,
-            ),
-          ),
+          const Text('+963995870655',
+              style: TextStyle(color: Colors.white38, fontSize: 11)),
         ],
       ),
     );
   }
 
-  Widget _sectionHeader(String title) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Text(
-        title,
-        style: const TextStyle(
-          color: AppTheme.gold,
-          fontSize: 11,
-          fontWeight: FontWeight.bold,
-          letterSpacing: 0.5,
+  // ===== بناء بطاقة الاشتراك في الـ Header =====
+  Widget _buildSubscriptionHeader() {
+    final color = _subscriptionColor();
+    final text = _loadingDays ? 'جارٍ التحقق من الترخيص...' : _subscriptionText();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.router, color: AppTheme.gold, size: 28),
+            SizedBox(width: 10),
+            Text('ST Manager',
+                style: TextStyle(
+                    color: AppTheme.gold,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
+          ],
         ),
-      ),
+        const SizedBox(height: 4),
+        const Text('إدارة الشبكة والتحكم الذكي',
+            style: TextStyle(color: Colors.white54, fontSize: 11)),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Icon(
+              _subscriptionDaysRemaining != null && _subscriptionDaysRemaining! <= 0
+                  ? Icons.error_outline
+                  : Icons.verified_user,
+              color: color,
+              size: 14,
+            ),
+            const SizedBox(width: 6),
+            _loadingDays
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: AppTheme.gold,
+                    ),
+                  )
+                : Text(text, style: TextStyle(color: color, fontSize: 12)),
+          ],
+        ),
+        if (_subscriptionExpiryDate != null && !_loadingDays)
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              'ينتهي: ${_formatSubscriptionDate()}',
+              style: const TextStyle(color: Colors.white38, fontSize: 10),
+            ),
+          ),
+      ],
     );
   }
 
+  // ===== initState =====
+  @override
+  void initState() {
+    super.initState();
+    _loadSubscriptionCounter();
+  }
+
+  // ===== build =====
   @override
   Widget build(BuildContext context) {
     return Drawer(
@@ -1207,45 +743,7 @@ class _SideDrawerState extends State<SideDrawer> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               color: AppTheme.semiBlack,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
-                    children: [
-                      Icon(Icons.router, color: AppTheme.gold, size: 28),
-                      SizedBox(width: 10),
-                      Text(
-                        'ST Manager',
-                        style: TextStyle(
-                          color: AppTheme.gold,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'إدارة الشبكة والتحكم الذكي',
-                    style: TextStyle(color: Colors.white54, fontSize: 11),
-                  ),
-                  const SizedBox(height: 8),
-                  _buildLicenseBadge(),
-                  if (_expiryDate != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        _licenseExpired
-                            ? 'انتهى في: ${_expiryDate!.year}-${_expiryDate!.month.toString().padLeft(2, '0')}-${_expiryDate!.day.toString().padLeft(2, '0')}'
-                            : 'ينتهي: ${_expiryDate!.year}-${_expiryDate!.month.toString().padLeft(2, '0')}-${_expiryDate!.day.toString().padLeft(2, '0')}',
-                        style: const TextStyle(
-                          color: Colors.white38,
-                          fontSize: 10,
-                        ),
-                      ),
-                    ),
-                ],
-              ),
+              child: _buildSubscriptionHeader(),
             ),
             Expanded(
               child: ListView(
@@ -1278,10 +776,10 @@ class _SideDrawerState extends State<SideDrawer> {
                   _sectionHeader('إدارة المستخدمين'),
                   _buildTile(
                     icon: Icons.build,
-                    label: 'إصلاح اللوب',
+                    label: 'حماية اللوب (Loop Protect)',
                     onTap: () {
                       Navigator.pop(context);
-                      _fixLoop();
+                      _confirmFixLoop();
                     },
                   ),
                   _buildTile(
@@ -1313,11 +811,11 @@ class _SideDrawerState extends State<SideDrawer> {
                   _sectionHeader('الإعدادات'),
                   _buildTile(
                     icon: Icons.telegram,
-                    label: 'إعداد بوت التلجرام',
+                    label: 'إضافة بوت تيليجرام (إشعارات الأجهزة)',
                     iconColor: const Color(0xFF29B6F6),
                     onTap: () {
                       Navigator.pop(context);
-                      _showTelegramSetupDialog();
+                      _showTelegramBotDialog();
                     },
                   ),
                   _buildTile(
@@ -1336,5 +834,45 @@ class _SideDrawerState extends State<SideDrawer> {
         ),
       ),
     );
+  }
+
+  // ===== إعادة تشغيل الراوتر (موجود) =====
+  Future<void> _confirmReboot() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange),
+            SizedBox(width: 8),
+            Text('تأكيد إعادة التشغيل', style: TextStyle(color: Colors.white)),
+          ],
+        ),
+        content: const Text(
+          'هل أنت متأكد من إعادة تشغيل الراوتر؟\nسيتم قطع جميع الاتصالات مؤقتاً.',
+          style: TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('إعادة تشغيل', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && widget.routerService != null) {
+      try {
+        await widget.routerService!.sendCommand('/system/reboot', usePost: true);
+        _showSnack('🔄 جاري إعادة تشغيل الراوتر...', backgroundColor: Colors.orange);
+      } catch (e) {
+        _showSnack('❌ فشل: $e', backgroundColor: Colors.red);
+      }
+    }
   }
 }
