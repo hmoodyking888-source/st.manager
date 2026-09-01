@@ -215,7 +215,6 @@ class _SideDrawerState extends State<SideDrawer> {
       'mantbox',
       'hap',
       'cap ',
-      'w ap',
       'wap',
       'audience',
       'groove',
@@ -226,7 +225,6 @@ class _SideDrawerState extends State<SideDrawer> {
       'crs',
       'ccr',
       'rb-',
-      'rb',
     ];
 
     return ubntTerms.any(text.contains) ||
