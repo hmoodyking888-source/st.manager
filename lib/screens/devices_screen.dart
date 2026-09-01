@@ -1,11 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:st_manager/services/router_service.dart';
-import 'package:url_launcher/url_launcher.dart'; 
-
-// ============================================================================
-// نماذج البيانات (Models)
-// ============================================================================
+import 'package:st_manager/services/secure_storage_service.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class NetworkDevice {
   final String name;
@@ -34,8 +31,8 @@ class NetworkDevice {
 class NetwatchDevice {
   final String host;
   final String comment;
-  final String status; 
-  final DateTime? since; 
+  final String status;
+  final DateTime? since;
   final Map<String, dynamic> rawData;
 
   NetwatchDevice({
@@ -46,10 +43,6 @@ class NetwatchDevice {
     required this.rawData,
   });
 }
-
-// ============================================================================
-// الشاشة الرئيسية (DevicesScreen)
-// ============================================================================
 
 class DevicesScreen extends StatefulWidget {
   final RouterService? routerService;
@@ -65,7 +58,7 @@ class _DevicesScreenState extends State<DevicesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0A0A), // تم التعديل للون الأسود
+      backgroundColor: const Color(0xFF0A0A0A),
       body: IndexedStack(
         index: _currentIndex,
         children: [
@@ -74,9 +67,9 @@ class _DevicesScreenState extends State<DevicesScreen> {
         ],
       ),
       bottomNavigationBar: BottomNavigationBar(
-        backgroundColor: const Color(0xFF141414), // تم التعديل للون البطاقات الداكن
+        backgroundColor: const Color(0xFF141414),
         currentIndex: _currentIndex,
-        selectedItemColor: const Color(0xFFFFD700), // تم التعديل للون الذهبي
+        selectedItemColor: const Color(0xFFFFD700),
         unselectedItemColor: Colors.white60,
         type: BottomNavigationBarType.fixed,
         onTap: (index) {
@@ -85,23 +78,13 @@ class _DevicesScreenState extends State<DevicesScreen> {
           });
         },
         items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.router),
-            label: 'أجهزة الشبكة',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.monitor_heart),
-            label: 'مراقبة Netwatch',
-          ),
+          BottomNavigationBarItem(icon: Icon(Icons.router), label: 'أجهزة الشبكة'),
+          BottomNavigationBarItem(icon: Icon(Icons.monitor_heart), label: 'مراقبة Netwatch'),
         ],
       ),
     );
   }
 }
-
-// ============================================================================
-// التبويب الأول: صفحة الأجهزة (Neighbors)
-// ============================================================================
 
 class NeighborsTab extends StatefulWidget {
   final RouterService? routerService;
@@ -114,14 +97,14 @@ class NeighborsTab extends StatefulWidget {
 class _NeighborsTabState extends State<NeighborsTab> {
   List<NetworkDevice> _devices = [];
   List<NetworkDevice> _filteredDevices = [];
-  List<String> _availableInterfaces = ['الكل']; 
+  List<String> _availableInterfaces = ['الكل'];
 
   bool _isLoading = true;
   String? _errorMessage;
 
   String _searchQuery = '';
-  String _selectedTypeFilter = 'الكل'; 
-  String _selectedInterfaceFilter = 'الكل'; 
+  String _selectedTypeFilter = 'الكل';
+  String _selectedInterfaceFilter = 'الكل';
 
   final Color _bgColor = const Color(0xFF0A0A0A);
   final Color _cardColor = const Color(0xFF141414);
@@ -137,11 +120,27 @@ class _NeighborsTabState extends State<NeighborsTab> {
 
   String _determineDeviceType(String board) {
     final b = board.toLowerCase();
-    if (b.contains('litebeam') || b.contains('powerbeam') || b.contains('nanobeam') || b.contains('loco') || b.contains('sxt') || b.contains('lhg') || b.contains('disc') || b.contains('cpe')) {
+    if (b.contains('litebeam') ||
+        b.contains('powerbeam') ||
+        b.contains('nanobeam') ||
+        b.contains('loco') ||
+        b.contains('sxt') ||
+        b.contains('lhg') ||
+        b.contains('disc') ||
+        b.contains('cpe')) {
       return 'مستقبل';
-    } else if (b.contains('rocket') || b.contains('base') || b.contains('mant') || b.contains('netmetal') || b.contains('omnitik')) {
+    } else if (b.contains('rocket') ||
+        b.contains('base') ||
+        b.contains('mant') ||
+        b.contains('netmetal') ||
+        b.contains('omnitik')) {
       return 'مرسل';
-    } else if (b.contains('rb') || b.contains('crs') || b.contains('ccr') || b.contains('edgerouter') || b.contains('hap') || b.contains('hex')) {
+    } else if (b.contains('rb') ||
+        b.contains('crs') ||
+        b.contains('ccr') ||
+        b.contains('edgerouter') ||
+        b.contains('hap') ||
+        b.contains('hex')) {
       return 'راوتر/سويتش';
     }
     return 'جهاز شبكة';
@@ -183,12 +182,14 @@ class _NeighborsTabState extends State<NeighborsTab> {
       Set<String> interfacesSet = {'الكل'};
 
       for (var n in neighbors) {
-        final identity = n['identity']?.toString() ?? 'جهاز غير مسمى';
-        final ip = n['address']?.toString() ?? 'لا يوجد IP';
-        final mac = n['mac-address']?.toString() ?? 'غير معروف';
-        final interface = _formatInterface(n['interface']?.toString() ?? 'غير معروف');
-        final board = n['board']?.toString() ?? 'غير معروف';
-        final uptime = n['uptime']?.toString() ?? '-';
+        if (n is! Map) continue;
+        final item = Map<String, dynamic>.from(n);
+        final identity = item['identity']?.toString() ?? 'جهاز غير مسمى';
+        final ip = item['address']?.toString() ?? 'لا يوجد IP';
+        final mac = item['mac-address']?.toString() ?? 'غير معروف';
+        final interface = _formatInterface(item['interface']?.toString() ?? 'غير معروف');
+        final board = item['board']?.toString() ?? 'غير معروف';
+        final uptime = item['uptime']?.toString() ?? '-';
 
         interfacesSet.add(interface);
 
@@ -202,7 +203,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
             type: _determineDeviceType(board),
             uptime: uptime,
             status: 'متصل',
-            rawData: n as Map<String, dynamic>,
+            rawData: item,
           ),
         );
       }
@@ -213,7 +214,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
         setState(() {
           _devices = loadedDevices;
           _availableInterfaces = interfacesSet.toList();
-          _applyFilters();
+          _filteredDevices = _devices.where(_matchesFilters).toList();
           _isLoading = false;
         });
       }
@@ -227,29 +228,34 @@ class _NeighborsTabState extends State<NeighborsTab> {
     }
   }
 
+  bool _matchesFilters(NetworkDevice d) {
+    final matchesType = _selectedTypeFilter == 'الكل' || d.type == _selectedTypeFilter;
+    final matchesInterface = _selectedInterfaceFilter == 'الكل' || d.interface == _selectedInterfaceFilter;
+    final query = _searchQuery.toLowerCase();
+    final matchesSearch = query.isEmpty ||
+        d.name.toLowerCase().contains(query) ||
+        d.ip.toLowerCase().contains(query) ||
+        d.mac.toLowerCase().contains(query) ||
+        d.model.toLowerCase().contains(query);
+    return matchesType && matchesInterface && matchesSearch;
+  }
+
   void _applyFilters() {
     setState(() {
-      _filteredDevices = _devices.where((d) {
-        final matchesType = _selectedTypeFilter == 'الكل' || d.type == _selectedTypeFilter;
-        final matchesInterface = _selectedInterfaceFilter == 'الكل' || d.interface == _selectedInterfaceFilter;
-        final query = _searchQuery.toLowerCase();
-        final matchesSearch = query.isEmpty ||
-            d.name.toLowerCase().contains(query) ||
-            d.ip.toLowerCase().contains(query) ||
-            d.mac.toLowerCase().contains(query) ||
-            d.model.toLowerCase().contains(query);
-
-        return matchesType && matchesInterface && matchesSearch;
-      }).toList();
+      _filteredDevices = _devices.where(_matchesFilters).toList();
     });
   }
 
   IconData _getTypeIcon(String type) {
     switch (type) {
-      case 'مستقبل': return Icons.wifi_tethering;
-      case 'مرسل': return Icons.cell_tower;
-      case 'راوتر/سويتش': return Icons.router;
-      default: return Icons.devices_other;
+      case 'مستقبل':
+        return Icons.wifi_tethering;
+      case 'مرسل':
+        return Icons.cell_tower;
+      case 'راوتر/سويتش':
+        return Icons.router;
+      default:
+        return Icons.devices_other;
     }
   }
 
@@ -359,10 +365,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Expanded(flex: 2, child: Text(key, style: TextStyle(color: _goldColor, fontSize: 13))),
-                    Expanded(
-                      flex: 3,
-                      child: Text(value, style: TextStyle(color: _textColor, fontSize: 13), textDirection: TextDirection.ltr, textAlign: TextAlign.left),
-                    ),
+                    Expanded(flex: 3, child: Text(value, style: TextStyle(color: _textColor, fontSize: 13), textDirection: TextDirection.ltr, textAlign: TextAlign.left)),
                   ],
                 ),
               );
@@ -386,7 +389,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
         centerTitle: true,
         title: Text('أجهزة الشبكة', style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold, letterSpacing: 1, fontSize: 18)),
         actions: [
-          IconButton(icon: Icon(Icons.refresh, color: _goldColor), onPressed: _isLoading ? null : _fetchNetworkData, tooltip: 'تحديث البيانات')
+          IconButton(icon: Icon(Icons.refresh, color: _goldColor), onPressed: _isLoading ? null : _fetchNetworkData, tooltip: 'تحديث البيانات'),
         ],
       ),
       body: Column(
@@ -441,10 +444,8 @@ class _NeighborsTabState extends State<NeighborsTab> {
                     selected: isSelected,
                     onSelected: (selected) {
                       if (selected) {
-                        setState(() {
-                          _selectedTypeFilter = filter;
-                          _applyFilters();
-                        });
+                        _selectedTypeFilter = filter;
+                        _applyFilters();
                       }
                     },
                     selectedColor: _goldColor.withValues(alpha: 0.2),
@@ -470,10 +471,8 @@ class _NeighborsTabState extends State<NeighborsTab> {
                     selected: isSelected,
                     onSelected: (selected) {
                       if (selected) {
-                        setState(() {
-                          _selectedInterfaceFilter = filter;
-                          _applyFilters();
-                        });
+                        _selectedInterfaceFilter = filter;
+                        _applyFilters();
                       }
                     },
                     selectedColor: Colors.blueAccent.withValues(alpha: 0.2),
@@ -504,13 +503,13 @@ class _NeighborsTabState extends State<NeighborsTab> {
               style: ElevatedButton.styleFrom(backgroundColor: _goldColor, foregroundColor: _bgColor),
               onPressed: _fetchNetworkData,
               child: const Text('إعادة المحاولة', style: TextStyle(fontWeight: FontWeight.bold)),
-            )
+            ),
           ],
         ),
       );
     }
     if (_filteredDevices.isEmpty) return Center(child: Text('لا توجد أجهزة مطابقة للبحث', style: TextStyle(color: _subTextColor, fontSize: 16)));
-    
+
     return RefreshIndicator(
       color: _goldColor,
       backgroundColor: _cardColor,
@@ -519,10 +518,7 @@ class _NeighborsTabState extends State<NeighborsTab> {
         padding: const EdgeInsets.all(12),
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: _filteredDevices.length,
-        itemBuilder: (context, index) {
-          final device = _filteredDevices[index];
-          return _buildDeviceCard(device);
-        },
+        itemBuilder: (context, index) => _buildDeviceCard(_filteredDevices[index]),
       ),
     );
   }
@@ -631,10 +627,6 @@ class _NeighborsTabState extends State<NeighborsTab> {
   }
 }
 
-// ============================================================================
-// التبويب الثاني: صفحة مراقبة الأجهزة (Netwatch) بالهوية الموحدة
-// ============================================================================
-
 class NetwatchTab extends StatefulWidget {
   final RouterService? routerService;
   const NetwatchTab({super.key, required this.routerService});
@@ -644,13 +636,18 @@ class NetwatchTab extends StatefulWidget {
 }
 
 class _NetwatchTabState extends State<NetwatchTab> {
+  final SecureStorageService _storage = SecureStorageService();
+  static const String _telegramCommentPrefix = 'TelegramBot_';
+
   List<NetwatchDevice> _netwatchDevices = [];
   bool _isLoading = true;
   String? _errorMessage;
   Timer? _timer;
-  Duration _timeOffset = Duration.zero; 
+  Timer? _refreshTimer;
+  Duration _timeOffset = Duration.zero;
+  final Map<String, String> _lastKnownStatus = {};
+  final Map<String, DateTime> _localStatusSince = {};
 
-  // توحيد الألوان بناءً على تصميم سلطان الذهبي والأسود
   final Color _bgColor = const Color(0xFF0A0A0A);
   final Color _cardColor = const Color(0xFF141414);
   final Color _goldColor = const Color(0xFFFFD700);
@@ -659,89 +656,340 @@ class _NetwatchTabState extends State<NetwatchTab> {
   @override
   void initState() {
     super.initState();
-    _fetchNetwatchData();
+    _initializeNetwatch();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (mounted) setState(() {});
+    });
+    _refreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
+      if (mounted) _fetchNetwatchData(silent: true);
     });
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  Future<void> _initializeNetwatch() async {
+    await _syncAutomaticDevicesFromTelegram();
+    await _fetchNetwatchData();
+  }
+
+  String _normalizeLower(Object? value) => (value?.toString() ?? '').trim().toLowerCase();
+
+  bool _isValidIpv4(String ip) {
+    final value = ip.trim();
+    if (value.isEmpty || value == 'لا يوجد IP' || value == 'غير معروف') return false;
+    final parts = value.split('.');
+    if (parts.length != 4) return false;
+    for (final part in parts) {
+      final n = int.tryParse(part);
+      if (n == null || n < 0 || n > 255) return false;
+    }
+    return true;
+  }
+
+  bool _isAutomaticCandidate(Map<String, dynamic> device) {
+    final ip = device['address']?.toString().trim() ?? '';
+    if (!_isValidIpv4(ip) || ip == '127.0.0.1' || ip == '0.0.0.0') return false;
+
+    final text = [
+      device['identity'],
+      device['board'],
+      device['platform'],
+      device['version'],
+      device['software-version'],
+      device['system-description'],
+      device['type'],
+    ].map(_normalizeLower).join(' ');
+
+    const ubntTerms = [
+      'ubiquiti',
+      'ubnt',
+      'litebeam',
+      'powerbeam',
+      'nanobeam',
+      'nanostation',
+      'loco',
+      'rocket',
+      'bullet',
+      'airmax',
+      'aircube',
+      'unifi',
+      'uap',
+      'u6-',
+      'uap-ac',
+      'edgeswitch',
+      'edgerouter',
+    ];
+
+    const routerApTerms = [
+      'mikrotik',
+      'routeros',
+      'routerboard',
+      'access point',
+      'basebox',
+      'omnitik',
+      'netmetal',
+      'mantbox',
+      'hap',
+      'cap ',
+      'wap',
+      'audience',
+      'groove',
+      'sxt',
+      'lhg',
+      'disc',
+      'hex',
+      'crs',
+      'ccr',
+      'rb-',
+      'rb',
+    ];
+
+    return ubntTerms.any(text.contains) || routerApTerms.any(text.contains);
+  }
+
+  String _automaticName(Map<String, dynamic> device, int index) {
+    final identity = device['identity']?.toString().trim() ?? '';
+    final board = device['board']?.toString().trim() ?? '';
+    if (identity.isNotEmpty && identity.toLowerCase() != 'unknown') return identity;
+    if (board.isNotEmpty && board.toLowerCase() != 'unknown') return board;
+    return 'قطعة ${index + 1}';
+  }
+
+  String _extractMac(String comment) {
+    final match = RegExp(r'\[MAC:([^\]]+)\]', caseSensitive: false).firstMatch(comment);
+    return match?.group(1)?.trim() ?? '';
+  }
+
+  String _displayComment(String comment, String host) {
+    if (comment == 'بدون اسم') return host;
+    if (!comment.startsWith(_telegramCommentPrefix)) return comment;
+    final value = comment.substring(_telegramCommentPrefix.length);
+    final cleaned = value.replaceFirst(RegExp(r'\s*\[MAC:[^\]]+\]\s*$', caseSensitive: false), '').trim();
+    return cleaned.isEmpty ? host : cleaned;
+  }
+
+  String _commentName(String comment) {
+    if (!comment.startsWith(_telegramCommentPrefix)) return comment;
+    return _displayComment(comment, '');
+  }
+
+  String _buildTelegramComment(String name, String mac) {
+    final cleanName = name.trim().isEmpty ? 'قطعة' : name.trim();
+    final cleanMac = mac.trim();
+    if (cleanMac.isEmpty || cleanMac == 'غير معروف') {
+      return '$_telegramCommentPrefix$cleanName';
+    }
+    return '$_telegramCommentPrefix$cleanName [MAC:$cleanMac]';
+  }
+
+  String _scriptForTelegram({required String token, required String chat, required String message}) {
+    final encoded = Uri.encodeComponent(message);
+    return '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$encoded" keep-result=no';
+  }
+
+  Future<Map<String, dynamic>> _readTelegramConfig() async {
+    final token = (await _storage.read('telegram_bot_token') ?? '').trim();
+    final chat = (await _storage.read('telegram_chat_id') ?? '').trim();
+    final notifyUp = await _storage.read('tg_notify_up') == 'true';
+    final notifyDown = await _storage.read('tg_notify_down') == 'true';
+    return {
+      'token': token,
+      'chat': chat,
+      'notifyUp': notifyUp,
+      'notifyDown': notifyDown,
+    };
+  }
+
+  Future<void> _syncAutomaticDevicesFromTelegram() async {
+    final router = widget.routerService;
+    if (router == null) return;
+
+    final config = await _readTelegramConfig();
+    final token = config['token']?.toString() ?? '';
+    final chat = config['chat']?.toString() ?? '';
+    final notifyUp = config['notifyUp'] == true;
+    final notifyDown = config['notifyDown'] == true;
+    if (token.isEmpty || chat.isEmpty || (!notifyUp && !notifyDown)) return;
+
+    try {
+      final neighborsResponse = await router.sendCommand('/ip/neighbor/print');
+      final neighbors = neighborsResponse is List ? neighborsResponse : <dynamic>[];
+      final netwatchResponse = await router.sendCommand('/tool/netwatch/print');
+      final entries = netwatchResponse is List ? netwatchResponse : <dynamic>[];
+
+      final byMac = <String, Map<String, dynamic>>{};
+      final byHost = <String, Map<String, dynamic>>{};
+      for (final raw in entries) {
+        if (raw is! Map) continue;
+        final item = Map<String, dynamic>.from(raw);
+        final comment = item['comment']?.toString() ?? '';
+        if (!comment.startsWith(_telegramCommentPrefix)) continue;
+        final mac = _extractMac(comment).toLowerCase();
+        final host = item['host']?.toString().trim().toLowerCase() ?? '';
+        if (mac.isNotEmpty) byMac[mac] = item;
+        if (host.isNotEmpty) byHost[host] = item;
+      }
+
+      var index = 0;
+      for (final raw in neighbors) {
+        if (raw is! Map) continue;
+        final device = Map<String, dynamic>.from(raw);
+        if (!_isAutomaticCandidate(device)) continue;
+
+        final ip = device['address']?.toString().trim() ?? '';
+        final mac = device['mac-address']?.toString().trim() ?? '';
+        final newName = _automaticName(device, index++);
+        final old = mac.isNotEmpty ? byMac[mac.toLowerCase()] : byHost[ip.toLowerCase()];
+        final name = old == null ? newName : _displayComment(old['comment']?.toString() ?? '', ip);
+
+        final upScript = notifyUp
+            ? _scriptForTelegram(token: token, chat: chat, message: '✅ القطعة $name ($ip) عادت إلى العمل.')
+            : '';
+        final downScript = notifyDown
+            ? _scriptForTelegram(token: token, chat: chat, message: '❌ القطعة $name ($ip) توقفت عن العمل.')
+            : '';
+
+        if (old != null) {
+          final id = old['.id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            await router.sendCommand('/tool/netwatch/set', params: {
+              'numbers': id,
+              'host': ip,
+              'comment': _buildTelegramComment(name, mac.isNotEmpty ? mac : _extractMac(old['comment']?.toString() ?? '')),
+              'up-script': upScript,
+              'down-script': downScript,
+            });
+          }
+        } else {
+          await router.sendCommand('/tool/netwatch/add', params: {
+            'host': ip,
+            'comment': _buildTelegramComment(name, mac),
+            'up-script': upScript,
+            'down-script': downScript,
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   DateTime? _parseMikrotikSince(String sinceText) {
     try {
+      final text = sinceText.trim();
+      if (text.isEmpty) return null;
       final now = DateTime.now();
-      if (sinceText.length <= 8) {
-        final parts = sinceText.split(':');
-        return DateTime(now.year, now.month, now.day, int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
-      } else {
-        final parts = sinceText.split(' ');
-        final dateParts = parts[0].split('/');
-        final timeParts = parts[1].split(':');
-        
-        final months = {'jan':1, 'feb':2, 'mar':3, 'apr':4, 'may':5, 'jun':6, 'jul':7, 'aug':8, 'sep':9, 'oct':10, 'nov':11, 'dec':12};
-        final month = months[dateParts[0].toLowerCase()] ?? 1;
-        final day = int.parse(dateParts[1]);
-        final year = int.parse(dateParts[2]);
-        
-        return DateTime(year, month, day, int.parse(timeParts[0]), int.parse(timeParts[1]), int.parse(timeParts[2]));
+      final months = {
+        'jan': 1,
+        'feb': 2,
+        'mar': 3,
+        'apr': 4,
+        'may': 5,
+        'jun': 6,
+        'jul': 7,
+        'aug': 8,
+        'sep': 9,
+        'oct': 10,
+        'nov': 11,
+        'dec': 12,
+      };
+
+      if (RegExp(r'^\d{1,2}:\d{2}:\d{2}?$').hasMatch(text)) {
+        final parts = text.replaceAll('\u001b', '').split(':');
+        final candidate = DateTime(now.year, now.month, now.day, int.parse(parts[0]), int.parse(parts[1]), int.parse(parts[2]));
+        if (candidate.isAfter(now.add(const Duration(seconds: 2)))) {
+          return candidate.subtract(const Duration(days: 1));
+        }
+        return candidate;
       }
-    } catch (e) {
+
+      final pieces = text.split(RegExp(r'\s+'));
+      if (pieces.length < 2) return null;
+      final dateParts = pieces[0].split('/');
+      final timeParts = pieces[1].split(':');
+      if (dateParts.length != 3 || timeParts.length < 3) return null;
+
+      final monthText = dateParts[0].toLowerCase();
+      final month = months[monthText] ?? int.tryParse(monthText) ?? now.month;
+      final day = int.parse(dateParts[1]);
+      final year = int.parse(dateParts[2]);
+      return DateTime(year, month, day, int.parse(timeParts[0]), int.parse(timeParts[1]), int.parse(timeParts[2]));
+    } catch (_) {
       return null;
     }
   }
 
-  Future<void> _fetchNetwatchData() async {
+  Future<void> _fetchNetwatchData({bool silent = false}) async {
     if (widget.routerService == null) {
-      setState(() {
-        _errorMessage = 'خدمة الاتصال غير متوفرة';
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'خدمة الاتصال غير متوفرة';
+          _isLoading = false;
+        });
+      }
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    if (mounted && !silent) {
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
+    }
 
     try {
       try {
         final clockRes = await widget.routerService!.sendCommand('/system/clock/print');
         if (clockRes is List && clockRes.isNotEmpty) {
-          final rTime = clockRes[0]['time'];
-          final rDate = clockRes[0]['date'];
-          final parsedRouterTime = _parseMikrotikSince("$rDate $rTime");
+          final rTime = clockRes[0]['time']?.toString() ?? '';
+          final rDate = clockRes[0]['date']?.toString() ?? '';
+          final parsedRouterTime = _parseMikrotikSince('$rDate $rTime');
           if (parsedRouterTime != null) {
+            // _timeOffset is routerNow -> deviceNow. Add it to Netwatch timestamps.
             _timeOffset = DateTime.now().difference(parsedRouterTime);
           }
         }
       } catch (_) {}
 
       final res = await widget.routerService!.sendCommand('/tool/netwatch/print');
-      
-      List<NetwatchDevice> loadedList = [];
+
+      final List<NetwatchDevice> loadedList = [];
       if (res is List) {
-        for (var item in res) {
+        for (final raw in res) {
+          if (raw is! Map) continue;
+          final item = Map<String, dynamic>.from(raw);
           final host = item['host']?.toString() ?? 'غير معروف';
           final comment = item['comment']?.toString() ?? 'بدون اسم';
           final status = item['status']?.toString() ?? 'unknown';
           final sinceStr = item['since']?.toString() ?? '';
-          
+
           DateTime? sinceTime;
-          if (sinceStr.isNotEmpty) {
-            sinceTime = _parseMikrotikSince(sinceStr);
+          if (sinceStr.isNotEmpty) sinceTime = _parseMikrotikSince(sinceStr);
+
+          final statusKey = item['.id']?.toString() ?? host;
+          final normalizedStatus = status.trim().toLowerCase();
+          final previousStatus = _lastKnownStatus[statusKey];
+          if (previousStatus != normalizedStatus || !_localStatusSince.containsKey(statusKey)) {
+            if (sinceTime == null) {
+              // Store a synthetic RouterOS-time value so _formatLiveCounter can use
+              // the same clock-offset calculation and start the fallback counter at 00:00:00.
+              _localStatusSince[statusKey] = DateTime.now().subtract(_timeOffset);
+            } else {
+              _localStatusSince.remove(statusKey);
+            }
           }
-          
+          _lastKnownStatus[statusKey] = normalizedStatus;
+          sinceTime ??= _localStatusSince[statusKey];
+
           loadedList.add(NetwatchDevice(
             host: host,
             comment: comment,
             status: status,
             since: sinceTime,
-            rawData: item as Map<String, dynamic>,
+            rawData: item,
           ));
         }
       }
@@ -762,40 +1010,121 @@ class _NetwatchTabState extends State<NetwatchTab> {
     }
   }
 
-  // دوال الإضافة والحذف
   Future<void> _addDevice(String name, String ip) async {
     if (widget.routerService == null) return;
+    final cleanName = name.trim();
+    final cleanIp = ip.trim();
+    if (cleanName.isEmpty || !_isValidIpv4(cleanIp)) {
+      _showSnack('⚠️ أدخل اسم الجهاز وآيبي صحيح', Colors.orange);
+      return;
+    }
+
     try {
-      await widget.routerService!.sendCommand('/tool/netwatch/add host=$ip comment="$name"');
-      _fetchNetwatchData();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تمت إضافة الجهاز بنجاح', style: TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.green));
+      final config = await _readTelegramConfig();
+      final token = config['token']?.toString() ?? '';
+      final chat = config['chat']?.toString() ?? '';
+      final notifyUp = config['notifyUp'] == true;
+      final notifyDown = config['notifyDown'] == true;
+
+      final upScript = (token.isNotEmpty && chat.isNotEmpty && notifyUp)
+          ? _scriptForTelegram(token: token, chat: chat, message: '✅ القطعة $cleanName ($cleanIp) عادت إلى العمل.')
+          : '';
+      final downScript = (token.isNotEmpty && chat.isNotEmpty && notifyDown)
+          ? _scriptForTelegram(token: token, chat: chat, message: '❌ القطعة $cleanName ($cleanIp) توقفت عن العمل.')
+          : '';
+
+      final existingResponse = await widget.routerService!.sendCommand('/tool/netwatch/print');
+      final entries = existingResponse is List ? existingResponse : <dynamic>[];
+      Map<String, dynamic>? existing;
+      for (final raw in entries) {
+        if (raw is! Map) continue;
+        final item = Map<String, dynamic>.from(raw);
+        if ((item['host']?.toString().trim().toLowerCase() ?? '') == cleanIp.toLowerCase()) {
+          existing = item;
+          break;
+        }
       }
+
+      if (existing != null && existing['.id'] != null) {
+        await widget.routerService!.sendCommand('/tool/netwatch/set', params: {
+          'numbers': existing['.id'].toString(),
+          'comment': existing['comment']?.toString().startsWith(_telegramCommentPrefix) == true
+              ? _buildTelegramComment(cleanName, _extractMac(existing['comment']?.toString() ?? ''))
+              : cleanName,
+          'up-script': upScript,
+          'down-script': downScript,
+        });
+      } else {
+        await widget.routerService!.sendCommand('/tool/netwatch/add', params: {
+          'host': cleanIp,
+          'comment': token.isNotEmpty && chat.isNotEmpty ? _buildTelegramComment(cleanName, '') : cleanName,
+          'up-script': upScript,
+          'down-script': downScript,
+        });
+      }
+
+      await _fetchNetwatchData();
+      _showSnack('تمت إضافة الجهاز بنجاح', Colors.green);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء الإضافة: $e', style: const TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.red));
+      _showSnack('خطأ أثناء الإضافة: $e', Colors.red);
+    }
+  }
+
+  Future<void> _updateDevice(NetwatchDevice device, String name, String ip) async {
+    if (widget.routerService == null) return;
+    final id = device.rawData['.id']?.toString() ?? '';
+    final cleanName = name.trim();
+    final cleanIp = ip.trim();
+    if (id.isEmpty || cleanName.isEmpty || !_isValidIpv4(cleanIp)) {
+      _showSnack('⚠️ تحقق من الاسم والآيبي', Colors.orange);
+      return;
+    }
+
+    try {
+      final config = await _readTelegramConfig();
+      final token = config['token']?.toString() ?? '';
+      final chat = config['chat']?.toString() ?? '';
+      final notifyUp = config['notifyUp'] == true;
+      final notifyDown = config['notifyDown'] == true;
+      final managed = device.comment.startsWith(_telegramCommentPrefix);
+      final mac = _extractMac(device.comment);
+
+      final params = <String, String>{
+        'numbers': id,
+        'host': cleanIp,
+        'comment': managed ? _buildTelegramComment(cleanName, mac) : cleanName,
+      };
+
+      if (managed || (token.isNotEmpty && chat.isNotEmpty)) {
+        params['up-script'] = (token.isNotEmpty && chat.isNotEmpty && notifyUp)
+            ? _scriptForTelegram(token: token, chat: chat, message: '✅ القطعة $cleanName ($cleanIp) عادت إلى العمل.')
+            : '';
+        params['down-script'] = (token.isNotEmpty && chat.isNotEmpty && notifyDown)
+            ? _scriptForTelegram(token: token, chat: chat, message: '❌ القطعة $cleanName ($cleanIp) توقفت عن العمل.')
+            : '';
       }
+
+      await widget.routerService!.sendCommand('/tool/netwatch/set', params: params);
+      await _fetchNetwatchData();
+      _showSnack('✅ تم تعديل الجهاز بنجاح', Colors.green);
+    } catch (e) {
+      _showSnack('❌ تعذر تعديل الجهاز: $e', Colors.red);
     }
   }
 
   Future<void> _deleteDevice(NetwatchDevice device) async {
     if (widget.routerService == null) return;
-    final id = device.rawData['.id'];
-    if (id == null) return;
+    final id = device.rawData['.id']?.toString();
+    if (id == null || id.isEmpty) return;
     try {
-      await widget.routerService!.sendCommand('/tool/netwatch/remove numbers=$id');
-      _fetchNetwatchData();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم حذف الجهاز بنجاح', style: TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.orange));
-      }
+      await widget.routerService!.sendCommand('/tool/netwatch/remove', params: {'numbers': id});
+      await _fetchNetwatchData();
+      _showSnack('تم حذف الجهاز بنجاح', Colors.orange);
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ أثناء الحذف: $e', style: const TextStyle(fontFamily: 'Cairo')), backgroundColor: Colors.red));
-      }
+      _showSnack('خطأ أثناء الحذف: $e', Colors.red);
     }
   }
 
-  // النوافذ المنبثقة
   void _showAddDialog() {
     final nameCtrl = TextEditingController();
     final ipCtrl = TextEditingController();
@@ -808,19 +1137,9 @@ class _NetwatchTabState extends State<NetwatchTab> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextField(
-              controller: nameCtrl,
-              style: TextStyle(color: _textColor),
-              textDirection: TextDirection.rtl,
-              decoration: InputDecoration(labelText: 'اسم الجهاز', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7))),
-            ),
+            TextField(controller: nameCtrl, style: TextStyle(color: _textColor), textDirection: TextDirection.rtl, decoration: InputDecoration(labelText: 'اسم الجهاز', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7)))),
             const SizedBox(height: 10),
-            TextField(
-              controller: ipCtrl,
-              style: TextStyle(color: _textColor),
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(labelText: 'الآيبي (IP)', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7))),
-            ),
+            TextField(controller: ipCtrl, style: TextStyle(color: _textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'الآيبي (IP)', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7)))),
           ],
         ),
         actions: [
@@ -829,19 +1148,55 @@ class _NetwatchTabState extends State<NetwatchTab> {
             style: ElevatedButton.styleFrom(backgroundColor: _goldColor),
             onPressed: () {
               Navigator.pop(ctx);
-              if (nameCtrl.text.isNotEmpty && ipCtrl.text.isNotEmpty) {
-                _addDevice(nameCtrl.text, ipCtrl.text);
-              }
+              _addDevice(nameCtrl.text, ipCtrl.text);
             },
             child: Text('إضافة', style: TextStyle(color: _bgColor, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
-    );
+    ).then((_) {
+      nameCtrl.dispose();
+      ipCtrl.dispose();
+    });
+  }
+
+  void _showEditDialog(NetwatchDevice device) {
+    final nameCtrl = TextEditingController(text: _displayComment(device.comment, device.host));
+    final ipCtrl = TextEditingController(text: device.host);
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _cardColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text('تعديل القطعة', style: TextStyle(color: _goldColor, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: nameCtrl, style: TextStyle(color: _textColor), textDirection: TextDirection.rtl, decoration: InputDecoration(labelText: 'اسم الجهاز', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7)))),
+            const SizedBox(height: 10),
+            TextField(controller: ipCtrl, style: TextStyle(color: _textColor), keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'الآيبي (IP)', labelStyle: TextStyle(color: _textColor.withValues(alpha: 0.7)))),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء', style: TextStyle(color: Colors.grey))),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: _goldColor),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _updateDevice(device, nameCtrl.text, ipCtrl.text);
+            },
+            child: Text('حفظ التعديل', style: TextStyle(color: _bgColor, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    ).then((_) {
+      nameCtrl.dispose();
+      ipCtrl.dispose();
+    });
   }
 
   void _showDeleteDialog(NetwatchDevice device) {
-    final displayName = device.comment != 'بدون اسم' ? device.comment : device.host;
+    final displayName = _displayComment(device.comment, device.host);
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -864,25 +1219,72 @@ class _NetwatchTabState extends State<NetwatchTab> {
     );
   }
 
-  // تنسيق الوقت
+  void _showDeviceActions(NetwatchDevice device) {
+    final displayName = _displayComment(device.comment, device.host);
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: _cardColor,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(displayName, style: TextStyle(color: _goldColor, fontSize: 17, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(device.host, style: const TextStyle(color: Colors.white38, fontSize: 12), textDirection: TextDirection.ltr),
+              const Divider(color: Colors.white12),
+              ListTile(
+                leading: Icon(Icons.edit, color: _goldColor),
+                title: Text('تعديل الاسم أو الآيبي', style: TextStyle(color: _textColor)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showEditDialog(device);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.open_in_browser, color: Colors.lightBlueAccent),
+                title: Text('فتح القطعة في المتصفح', style: TextStyle(color: _textColor)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _openInBrowser(device.host);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.redAccent),
+                title: const Text('حذف القطعة', style: TextStyle(color: Colors.redAccent)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showDeleteDialog(device);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   String _formatLiveCounter(DateTime? since) {
-    if (since == null) return "";
-    
+    if (since == null) return '00:00:00';
+
     final actualSince = since.add(_timeOffset);
-    final diff = DateTime.now().difference(actualSince);
-    
-    if (diff.isNegative) return "00:00:00"; 
-    
+    var diff = DateTime.now().difference(actualSince);
+    if (diff.isNegative) diff = Duration.zero;
+
     final days = diff.inDays;
     final hours = diff.inHours % 24;
     final minutes = diff.inMinutes % 60;
     final seconds = diff.inSeconds % 60;
-    
-    String timeString = "${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}";
-    if (days > 0) {
-      return "$days يوم, $timeString";
-    }
+
+    final timeString = '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    if (days > 0) return '$days يوم, $timeString';
     return timeString;
+  }
+
+  bool _isUp(NetwatchDevice device) {
+    return device.status.trim().toLowerCase() == 'up';
   }
 
   @override
@@ -891,45 +1293,38 @@ class _NetwatchTabState extends State<NetwatchTab> {
       backgroundColor: _bgColor,
       body: Column(
         children: [
-          // الهيدر العلوي المحدث
           Container(
             width: double.infinity,
-            color: _cardColor, // تم تغييره للون البطاقات الداكن ليتماشى مع الهوية
+            color: _cardColor,
             padding: const EdgeInsets.only(top: 40, bottom: 16, left: 12, right: 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Text("للدخول الى القطع يجب ان تكون:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _goldColor)),
+                Text('للدخول الى القطع يجب ان تكون:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: _goldColor)),
                 const SizedBox(height: 4),
-                Text("داخل الشبكة أو مفعل vpn الخاص بنا", style: TextStyle(fontSize: 14, color: _textColor)),
+                Text('داخل الشبكة أو مفعل vpn الخاص بنا', style: TextStyle(fontSize: 14, color: _textColor)),
                 const SizedBox(height: 4),
-                Text("يجب أن تكون القطع تفتح من المتصفح", style: TextStyle(fontSize: 14, color: _textColor)),
+                Text('يجب أن تكون القطع تفتح من المتصفح', style: TextStyle(fontSize: 14, color: _textColor)),
                 const SizedBox(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _goldColor, // أزرار ذهبية
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: _goldColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                       onPressed: _showAddDialog,
-                      child: Text("إضافة قطعة", style: TextStyle(color: _bgColor, fontSize: 13, fontWeight: FontWeight.bold)),
+                      icon: Icon(Icons.add, color: _bgColor, size: 18),
+                      label: Text('إضافة قطعة', style: TextStyle(color: _bgColor, fontSize: 13, fontWeight: FontWeight.bold)),
                     ),
                     ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _goldColor, // أزرار ذهبية
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                      onPressed: () {}, 
-                      child: Text("لدي مشكلة في الدخول الى القطع", style: TextStyle(color: _bgColor, fontSize: 13, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(backgroundColor: _goldColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+                      onPressed: () {},
+                      child: Text('لدي مشكلة في الدخول الى القطع', style: TextStyle(color: _bgColor, fontSize: 13, fontWeight: FontWeight.bold)),
                     ),
                   ],
-                )
+                ),
               ],
             ),
           ),
-          // قائمة الأجهزة
           Expanded(child: _buildNetwatchList()),
         ],
       ),
@@ -948,14 +1343,29 @@ class _NetwatchTabState extends State<NetwatchTab> {
             Text(_errorMessage!, style: TextStyle(color: _textColor)),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: _goldColor),
-              onPressed: _fetchNetwatchData,
+              onPressed: _initializeNetwatch,
               child: Text('إعادة المحاولة', style: TextStyle(color: _bgColor, fontWeight: FontWeight.bold)),
-            )
+            ),
           ],
         ),
       );
     }
-    
+
+    if (_netwatchDevices.isEmpty) {
+      return RefreshIndicator(
+        color: _goldColor,
+        backgroundColor: _cardColor,
+        onRefresh: _fetchNetwatchData,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 120),
+            Center(child: Text('لا توجد قطع في Netwatch', style: TextStyle(color: Colors.white54, fontSize: 16))),
+          ],
+        ),
+      );
+    }
+
     return RefreshIndicator(
       color: _goldColor,
       backgroundColor: _cardColor,
@@ -966,84 +1376,84 @@ class _NetwatchTabState extends State<NetwatchTab> {
         itemCount: _netwatchDevices.length,
         itemBuilder: (context, index) {
           final device = _netwatchDevices[index];
-          final isUp = device.status.toLowerCase() == 'up';
-          
+          final isUp = _isUp(device);
+          final counterColor = isUp ? Colors.greenAccent : Colors.redAccent;
+          final statusText = isUp ? 'الحالة: متصل' : 'الحالة: مفصول';
+          final statusIcon = isUp ? Icons.check_circle : Icons.cancel;
+
           return Container(
             margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: _cardColor,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF2A2A2A)), // إضافة إطار يتناسب مع التصميم
+              border: Border.all(color: const Color(0xFF2A2A2A)),
               boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.4), blurRadius: 8, offset: const Offset(0, 4))],
             ),
             child: Row(
               children: [
-                // زر الحذف والإعدادات
                 InkWell(
-                  onTap: () => _showDeleteDialog(device), 
+                  onTap: () => _showDeviceActions(device),
+                  borderRadius: BorderRadius.circular(30),
                   child: Container(
                     padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: _bgColor,
-                      border: Border.all(color: _goldColor.withValues(alpha: 0.5)),
-                    ),
-                    child: Icon(Icons.keyboard_arrow_down, color: _goldColor, size: 28),
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: _bgColor, border: Border.all(color: _goldColor.withValues(alpha: 0.5))),
+                    child: const Icon(Icons.more_horiz, color: Color(0xFFFFD700), size: 28),
                   ),
                 ),
                 const SizedBox(width: 8),
-                // الوقت وحالة الاتصال
                 Expanded(
                   flex: 3,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _formatLiveCounter(device.since),
-                        style: TextStyle(color: isUp ? Colors.greenAccent : Colors.redAccent, fontSize: 13, fontWeight: FontWeight.bold),
-                        textDirection: TextDirection.rtl,
+                      Row(
+                        children: [
+                          Icon(statusIcon, color: counterColor, size: 15),
+                          const SizedBox(width: 5),
+                          Expanded(
+                            child: Text(
+                              _formatLiveCounter(device.since),
+                              style: TextStyle(color: counterColor, fontSize: 13, fontWeight: FontWeight.bold),
+                              textDirection: TextDirection.ltr,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        isUp ? 'الحالة: متصل' : 'الحالة: مفصول',
-                        style: TextStyle(color: _textColor.withValues(alpha: 0.7), fontSize: 12),
-                      ),
+                      Text(statusText, style: TextStyle(color: counterColor.withValues(alpha: 0.9), fontSize: 12)),
                     ],
                   ),
                 ),
-                // الاسم والآيبي
                 Expanded(
                   flex: 4,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        device.comment != 'بدون اسم' ? device.comment : device.host,
+                        _displayComment(device.comment, device.host),
                         style: TextStyle(color: _textColor, fontSize: 16, fontWeight: FontWeight.bold),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
                       ),
                       const SizedBox(height: 6),
-                      Text(
-                        device.host,
-                        style: TextStyle(color: _goldColor, fontSize: 14),
-                        textDirection: TextDirection.ltr,
-                      ),
+                      Text(device.host, style: TextStyle(color: _goldColor, fontSize: 14), textDirection: TextDirection.ltr),
                     ],
                   ),
                 ),
                 const SizedBox(width: 12),
-                // الأيقونة الدائرية اليمنى
                 Column(
                   children: [
                     CircleAvatar(
                       backgroundColor: _bgColor,
                       radius: 22,
-                      child: Icon(Icons.wifi_tethering, color: _goldColor, size: 24),
+                      child: Icon(Icons.wifi_tethering, color: counterColor, size: 24),
                     ),
                     const SizedBox(height: 4),
-                    Text("جهاز", style: TextStyle(color: _textColor, fontSize: 11)),
+                    Text('جهاز', style: TextStyle(color: _textColor, fontSize: 11)),
                   ],
                 ),
               ],
