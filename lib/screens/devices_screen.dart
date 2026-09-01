@@ -746,7 +746,6 @@ class _NetwatchTabState extends State<NetwatchTab> {
       'crs',
       'ccr',
       'rb-',
-      'rb',
     ];
 
     return ubntTerms.any(text.contains) || routerApTerms.any(text.contains);
@@ -1006,6 +1005,35 @@ class _NetwatchTabState extends State<NetwatchTab> {
           _errorMessage = 'حدث خطأ أثناء جلب Netwatch: $e';
           _isLoading = false;
         });
+      }
+    }
+  }
+
+  void _showSnack(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message, style: const TextStyle(fontFamily: 'Cairo')),
+        backgroundColor: color,
+      ),
+    );
+  }
+
+  Future<void> _openInBrowser(String ip) async {
+    final cleanIp = ip.trim();
+    if (!_isValidIpv4(cleanIp)) {
+      _showSnack('⚠️ آيبي غير صالح: $ip', Colors.orange);
+      return;
+    }
+
+    final Uri url = Uri.parse('http://$cleanIp');
+    try {
+      if (!await launchUrl(url, mode: LaunchMode.externalApplication)) {
+        throw Exception('لا يمكن فتح الرابط');
+      }
+    } catch (_) {
+      if (mounted) {
+        _showSnack('تعذر فتح المتصفح للآيبي: $cleanIp', Colors.redAccent);
       }
     }
   }
