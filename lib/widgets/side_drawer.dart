@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
-import 'package:st_manager/screens/user_manager_screen.dart'; // استيراد شاشة User Manager
+import 'package:st_manager/screens/user_manager_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 class SideDrawer extends StatefulWidget {
@@ -17,13 +17,12 @@ class _SideDrawerState extends State<SideDrawer> {
   final SecureStorageService _storage = SecureStorageService();
 
   static const String _appVersion = '2.6.0';
+  static const String _telegramCommentPrefix = 'TelegramBot_';
 
-  // ===== الاشتراك / الترخيص =====
   int? _subscriptionDaysRemaining;
   DateTime? _subscriptionExpiryDate;
   bool _loadingDays = true;
 
-  // ===== دوال الاشتراك (مأخوذة من AppPriorityScreen) =====
   Future<void> _loadSubscriptionCounter() async {
     try {
       final rawExpiry = await _storage.read('license_expiry_date');
@@ -101,7 +100,6 @@ class _SideDrawerState extends State<SideDrawer> {
     return '$day/$month/$year';
   }
 
-  // ===== إصلاح اللوب (Loop Protect) =====
   Future<void> _confirmFixLoop() async {
     final confirm = await showDialog<bool>(
       context: context,
@@ -155,25 +153,232 @@ class _SideDrawerState extends State<SideDrawer> {
     }
   }
 
-  // ===== تلجرام (Netwatch) مع خيارات الإشعارات والاختبار والتحديث الجماعي =====
+  String _cleanText(String value) => value.trim();
+
+  bool _isValidIpv4(String ip) {
+    final v = ip.trim();
+    if (v.isEmpty || v == 'لا يوجد IP' || v == 'غير معروف') return false;
+    final parts = v.split('.');
+    if (parts.length != 4) return false;
+    for (final part in parts) {
+      final n = int.tryParse(part);
+      if (n == null || n < 0 || n > 255) return false;
+    }
+    return true;
+  }
+
+  String _normalizeLower(Object? value) => (value?.toString() ?? '').trim().toLowerCase();
+
+  bool _isAutomaticNetwatchCandidate(Map<String, dynamic> device) {
+    final ip = _cleanText(device['address']?.toString() ?? '');
+    if (!_isValidIpv4(ip)) return false;
+    if (ip == '127.0.0.1' || ip == '0.0.0.0') return false;
+
+    final text = [
+      device['identity'],
+      device['board'],
+      device['platform'],
+      device['version'],
+      device['software-version'],
+      device['system-description'],
+      device['type'],
+    ].map(_normalizeLower).join(' ');
+
+    const ubntTerms = [
+      'ubiquiti',
+      'ubnt',
+      'litebeam',
+      'powerbeam',
+      'nanobeam',
+      'nanostation',
+      'loco',
+      'rocket',
+      'bullet',
+      'airmax',
+      'aircube',
+      'unifi',
+      'uap',
+      'u6-',
+      'uap-ac',
+      'edgeswitch',
+      'edgerouter',
+    ];
+
+    const mikrotikApRouterTerms = [
+      'mikrotik',
+      'routeros',
+      'routerboard',
+      'access point',
+      'basebox',
+      'omnitik',
+      'netmetal',
+      'mantbox',
+      'hap',
+      'cap ',
+      'w ap',
+      'wap',
+      'audience',
+      'groove',
+      'sxt',
+      'lhg',
+      'disc',
+      'hex',
+      'crs',
+      'ccr',
+      'rb-',
+      'rb',
+    ];
+
+    return ubntTerms.any(text.contains) ||
+        mikrotikApRouterTerms.any(text.contains);
+  }
+
+  String _automaticDisplayName(Map<String, dynamic> device, int index) {
+    final identity = _cleanText(device['identity']?.toString() ?? '');
+    final board = _cleanText(device['board']?.toString() ?? '');
+    if (identity.isNotEmpty && identity != 'unknown') return identity;
+    if (board.isNotEmpty && board != 'unknown') return board;
+    return 'قطعة ${index + 1}';
+  }
+
+  String _buildTelegramComment(String name, String mac) {
+    final cleanName = name.trim().isEmpty ? 'قطعة' : name.trim();
+    final cleanMac = mac.trim();
+    if (cleanMac.isEmpty || cleanMac == 'غير معروف') {
+      return '$_telegramCommentPrefix$cleanName';
+    }
+    return '$_telegramCommentPrefix$cleanName [MAC:$cleanMac]';
+  }
+
+  String _extractMacFromTelegramComment(String comment) {
+    final match = RegExp(r'\[MAC:([^\]]+)\]', caseSensitive: false).firstMatch(comment);
+    return match?.group(1)?.trim() ?? '';
+  }
+
+  String _telegramNameFromComment(String comment) {
+    if (!comment.startsWith(_telegramCommentPrefix)) return comment;
+    final value = comment.substring(_telegramCommentPrefix.length);
+    return value.replaceFirst(RegExp(r'\s*\[MAC:[^\]]+\]\s*$', caseSensitive: false), '').trim();
+  }
+
+  String _scriptForTelegram({
+    required String token,
+    required String chat,
+    required String message,
+  }) {
+    final encoded = Uri.encodeComponent(message);
+    return '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$encoded" keep-result=no';
+  }
+
+  Future<void> _syncAutomaticNetwatchDevices({
+    required String token,
+    required String chat,
+    required bool notifyUp,
+    required bool notifyDown,
+  }) async {
+    final router = widget.routerService;
+    if (router == null || token.trim().isEmpty || chat.trim().isEmpty) return;
+    if (!notifyUp && !notifyDown) return;
+
+    try {
+      final neighborResponse = await router.sendCommand('/ip/neighbor/print');
+      final neighbors = neighborResponse is List ? neighborResponse : <dynamic>[];
+      final netwatchResponse = await router.sendCommand('/tool/netwatch/print');
+      final entries = netwatchResponse is List ? netwatchResponse : <dynamic>[];
+
+      final managedEntries = <String, Map<String, dynamic>>{};
+      final managedByHost = <String, Map<String, dynamic>>{};
+
+      for (final raw in entries) {
+        if (raw is! Map) continue;
+        final item = Map<String, dynamic>.from(raw);
+        final comment = item['comment']?.toString() ?? '';
+        if (!comment.startsWith(_telegramCommentPrefix)) continue;
+
+        final mac = _extractMacFromTelegramComment(comment).toLowerCase();
+        final host = item['host']?.toString().trim().toLowerCase() ?? '';
+        if (mac.isNotEmpty) managedEntries[mac] = item;
+        if (host.isNotEmpty) managedByHost[host] = item;
+      }
+
+      int added = 0;
+      int updated = 0;
+      int index = 0;
+
+      for (final raw in neighbors) {
+        if (raw is! Map) continue;
+        final device = Map<String, dynamic>.from(raw);
+        if (!_isAutomaticNetwatchCandidate(device)) continue;
+
+        final ip = _cleanText(device['address']?.toString() ?? '');
+        final mac = _cleanText(device['mac-address']?.toString() ?? '');
+        final name = _automaticDisplayName(device, index++);
+        final normalizedMac = mac.toLowerCase();
+
+        Map<String, dynamic>? existing = normalizedMac.isNotEmpty
+            ? managedEntries[normalizedMac]
+            : null;
+        existing ??= managedByHost[ip.toLowerCase()];
+
+        final upMessage = '✅ القطعة $name ($ip) عادت إلى العمل.';
+        final downMessage = '❌ القطعة $name ($ip) توقفت عن العمل.';
+        final upScript = notifyUp
+            ? _scriptForTelegram(token: token, chat: chat, message: upMessage)
+            : '';
+        final downScript = notifyDown
+            ? _scriptForTelegram(token: token, chat: chat, message: downMessage)
+            : '';
+
+        if (existing != null) {
+          final id = existing['.id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            final oldComment = existing['comment']?.toString() ?? '';
+            final savedName = _telegramNameFromComment(oldComment);
+            final displayName = savedName.isNotEmpty && savedName != oldComment ? savedName : name;
+            final comment = _buildTelegramComment(displayName, mac);
+            await router.sendCommand('/tool/netwatch/set', params: {
+              'numbers': id,
+              'host': ip,
+              'comment': comment,
+              'up-script': upScript,
+              'down-script': downScript,
+            });
+            updated++;
+          }
+          continue;
+        }
+
+        await router.sendCommand('/tool/netwatch/add', params: {
+          'host': ip,
+          'comment': _buildTelegramComment(name, mac),
+          'up-script': upScript,
+          'down-script': downScript,
+        });
+        added++;
+      }
+
+      if (added > 0 || updated > 0) {
+        _showSnack('✅ تمت مزامنة قطع UBNT وراوترات/AP تلقائياً: أضيف $added، حُدّث $updated',
+            backgroundColor: Colors.green);
+      }
+    } catch (e) {
+      _showSnack('⚠️ تعذر مزامنة قطع الشبكة مع Netwatch: $e',
+          backgroundColor: Colors.orange);
+    }
+  }
+
   Future<void> _showTelegramBotDialog() async {
-    // قراءة الإعدادات المحفوظة
     final savedToken = await _storage.read('telegram_bot_token') ?? '';
     final savedChatId = await _storage.read('telegram_chat_id') ?? '';
 
-    // خيارات الإشعارات (مثل الكود الأصلي)
     bool notifyUp = await _storage.read('tg_notify_up') == 'true';
     bool notifyDown = await _storage.read('tg_notify_down') == 'true';
-
-    // خيارات إضافية (قد لا تستخدم هنا لكن نحتفظ بها)
     bool notifyExpiry = await _storage.read('tg_notify_expiry') == 'true';
     bool notifyHighUsage = await _storage.read('tg_notify_high_usage') == 'true';
     bool notifyRestart = await _storage.read('tg_notify_restart') == 'true';
 
-    // متغيرات لإضافة قطع متعددة
     final ipsController = TextEditingController();
     final namesController = TextEditingController();
-
     final tokenCtrl = TextEditingController(text: savedToken);
     final chatCtrl = TextEditingController(text: savedChatId);
 
@@ -195,7 +400,6 @@ class _SideDrawerState extends State<SideDrawer> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // التوكن و Chat ID
                 _buildField(
                   controller: tokenCtrl,
                   label: 'توكن البوت (Bot Token)',
@@ -207,8 +411,6 @@ class _SideDrawerState extends State<SideDrawer> {
                   hint: 'سيتم حفظه تلقائياً',
                 ),
                 const SizedBox(height: 12),
-
-                // خيارات الإشعارات (كما في الكود الأصلي)
                 const Text('خيارات الإشعارات:',
                     style: TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
@@ -230,7 +432,6 @@ class _SideDrawerState extends State<SideDrawer> {
                   value: notifyDown,
                   onChanged: (v) => setDialogState(() => notifyDown = v),
                 ),
-                // خيارات إضافية (للتوافق مع السابق)
                 _buildNotifToggle(
                   ctx,
                   setDialogState,
@@ -258,7 +459,6 @@ class _SideDrawerState extends State<SideDrawer> {
                   value: notifyRestart,
                   onChanged: (v) => setDialogState(() => notifyRestart = v),
                 ),
-
                 const Divider(color: Colors.white24, height: 20),
                 const Text('إضافة قطع متعددة إلى Netwatch:',
                     style: TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
@@ -274,7 +474,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   hint: 'مثال: قطعة1, قطعة2',
                 ),
                 const SizedBox(height: 8),
-                const Text('ملاحظة: سيتم إضافة كل قطعة مع التوكن والـ Chat ID المحفوظين.',
+                const Text('ملاحظة: سيتم اكتشاف أجهزة UBNT وراوترات/AP تلقائياً عند تفعيل إشعار Up أو Down.',
                     style: TextStyle(color: Colors.white38, fontSize: 11)),
               ],
             ),
@@ -284,11 +484,9 @@ class _SideDrawerState extends State<SideDrawer> {
               onPressed: () => Navigator.pop(ctx),
               child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
-            // زر الاختبار
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
               onPressed: () async {
-                // اختبار إرسال رسالة بمعلومات الراوتر
                 await _testTelegramBot(
                   tokenCtrl.text.trim(),
                   chatCtrl.text.trim(),
@@ -297,25 +495,32 @@ class _SideDrawerState extends State<SideDrawer> {
               icon: const Icon(Icons.send, color: Colors.white),
               label: const Text('اختبار', style: TextStyle(color: Colors.white)),
             ),
-            // زر حفظ الإعدادات وتحديث جميع القطع
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
               onPressed: () async {
-                // حفظ الإعدادات
-                await _storage.write('telegram_bot_token', tokenCtrl.text.trim());
-                await _storage.write('telegram_chat_id', chatCtrl.text.trim());
+                final token = tokenCtrl.text.trim();
+                final chat = chatCtrl.text.trim();
+
+                await _storage.write('telegram_bot_token', token);
+                await _storage.write('telegram_chat_id', chat);
                 await _storage.write('tg_notify_up', notifyUp.toString());
                 await _storage.write('tg_notify_down', notifyDown.toString());
                 await _storage.write('tg_notify_expiry', notifyExpiry.toString());
                 await _storage.write('tg_notify_high_usage', notifyHighUsage.toString());
                 await _storage.write('tg_notify_restart', notifyRestart.toString());
 
-                // إضافة القطع المدخلة إلى Netwatch
-                final ips = ipsController.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-                final names = namesController.text.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+                final ips = ipsController.text
+                    .split(',')
+                    .map((e) => e.trim())
+                    .where((e) => e.isNotEmpty)
+                    .toList();
+                final names = namesController.text
+                    .split(',')
+                    .map((e) => e.trim())
+                    .where((e) => e.isNotEmpty)
+                    .toList();
 
                 if (ips.isNotEmpty) {
-                  // إذا كان عدد الأسماء أقل من عدد الـ IPs، نملأ بالأسماء الافتراضية
                   final fullNames = List<String>.filled(ips.length, 'قطعة');
                   for (int i = 0; i < ips.length && i < names.length; i++) {
                     fullNames[i] = names[i];
@@ -324,24 +529,37 @@ class _SideDrawerState extends State<SideDrawer> {
                     await _addNetwatchEntry(
                       fullNames[i],
                       ips[i],
-                      tokenCtrl.text.trim(),
-                      chatCtrl.text.trim(),
+                      token,
+                      chat,
                       notifyUp,
                       notifyDown,
                     );
                   }
                 }
 
-                // تحديث جميع قطع Netwatch الموجودة (التي تحمل تعليق TelegramBot_) باستخدام التوكن الجديد
                 await _updateAllNetwatchEntries(
-                  tokenCtrl.text.trim(),
-                  chatCtrl.text.trim(),
+                  token,
+                  chat,
                   notifyUp,
                   notifyDown,
                 );
 
+                if (notifyUp || notifyDown) {
+                  await _syncAutomaticNetwatchDevices(
+                    token: token,
+                    chat: chat,
+                    notifyUp: notifyUp,
+                    notifyDown: notifyDown,
+                  );
+                }
+
                 Navigator.pop(ctx);
-                _showSnack('✅ تم حفظ الإعدادات وتحديث جميع القطع', backgroundColor: Colors.green);
+                _showSnack(
+                  notifyUp || notifyDown
+                      ? '✅ تم حفظ الإعدادات ومزامنة جميع قطع UBNT وراوترات/AP'
+                      : '✅ تم حفظ الإعدادات وتحديث جميع القطع',
+                  backgroundColor: Colors.green,
+                );
               },
               child: const Text('حفظ وتحديث الكل',
                   style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
@@ -356,7 +574,6 @@ class _SideDrawerState extends State<SideDrawer> {
     namesController.dispose();
   }
 
-  // بناء عنصر تبديل الإشعارات
   Widget _buildNotifToggle(
     BuildContext ctx,
     StateSetter setDialogState, {
@@ -373,10 +590,7 @@ class _SideDrawerState extends State<SideDrawer> {
           Icon(icon, color: iconColor, size: 16),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              label,
-              style: const TextStyle(color: Colors.white70, fontSize: 12),
-            ),
+            child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
           ),
           Switch(
             value: value,
@@ -389,7 +603,6 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  // حقل إدخال
   Widget _buildField({
     required TextEditingController controller,
     required String label,
@@ -418,7 +631,6 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  // إضافة قطعة واحدة إلى Netwatch
   Future<void> _addNetwatchEntry(
     String name,
     String ip,
@@ -428,31 +640,52 @@ class _SideDrawerState extends State<SideDrawer> {
     bool notifyDown,
   ) async {
     final router = widget.routerService;
-    if (router == null) return;
+    if (router == null || !_isValidIpv4(ip)) return;
 
-    final upMsg = Uri.encodeComponent('✅ القطعة $name ($ip) عادت إلى العمل.');
-    final downMsg = Uri.encodeComponent('❌ القطعة $name ($ip) توقفت عن العمل.');
-
+    final upMsg = '✅ القطعة $name ($ip) عادت إلى العمل.';
+    final downMsg = '❌ القطعة $name ($ip) توقفت عن العمل.';
     final upScript = notifyUp
-        ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no'
+        ? _scriptForTelegram(token: token, chat: chat, message: upMsg)
         : '';
     final downScript = notifyDown
-        ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no'
+        ? _scriptForTelegram(token: token, chat: chat, message: downMsg)
         : '';
 
-    final params = {
-      'host': ip,
-      'comment': 'TelegramBot_$name',
-    };
-    if (upScript.isNotEmpty) params['up-script'] = upScript;
-    if (downScript.isNotEmpty) params['down-script'] = downScript;
-
     try {
-      await router.sendCommand('/tool/netwatch/add', params: params);
+      final response = await router.sendCommand('/tool/netwatch/print');
+      final entries = response is List ? response : <dynamic>[];
+      Map<String, dynamic>? existing;
+      for (final raw in entries) {
+        if (raw is! Map) continue;
+        final item = Map<String, dynamic>.from(raw);
+        final host = item['host']?.toString().trim() ?? '';
+        if (host.toLowerCase() == ip.toLowerCase()) {
+          existing = item;
+          break;
+        }
+      }
+
+      if (existing != null) {
+        final id = existing['.id']?.toString() ?? '';
+        if (id.isNotEmpty) {
+          await router.sendCommand('/tool/netwatch/set', params: {
+            'numbers': id,
+            'comment': _buildTelegramComment(name, _extractMacFromTelegramComment(existing['comment']?.toString() ?? '')),
+            'up-script': upScript,
+            'down-script': downScript,
+          });
+        }
+      } else {
+        await router.sendCommand('/tool/netwatch/add', params: {
+          'host': ip,
+          'comment': _buildTelegramComment(name, ''),
+          'up-script': upScript,
+          'down-script': downScript,
+        });
+      }
     } catch (_) {}
   }
 
-  // تحديث جميع قطع Netwatch الموجودة التي تحمل تعليق TelegramBot_
   Future<void> _updateAllNetwatchEntries(
     String token,
     String chat,
@@ -464,37 +697,36 @@ class _SideDrawerState extends State<SideDrawer> {
 
     try {
       final response = await router.sendCommand('/tool/netwatch/print');
-      final entries = response is List ? response : [];
-      for (final entry in entries) {
+      final entries = response is List ? response : <dynamic>[];
+      for (final raw in entries) {
+        if (raw is! Map) continue;
+        final entry = Map<String, dynamic>.from(raw);
         final comment = entry['comment']?.toString() ?? '';
-        if (comment.startsWith('TelegramBot_')) {
-          final id = entry['.id']?.toString() ?? '';
-          if (id.isNotEmpty) {
-            final name = comment.replaceFirst('TelegramBot_', '');
-            final ip = entry['host']?.toString() ?? '';
-            final upMsg = Uri.encodeComponent('✅ القطعة $name ($ip) عادت إلى العمل.');
-            final downMsg = Uri.encodeComponent('❌ القطعة $name ($ip) توقفت عن العمل.');
-            final upScript = notifyUp
-                ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no'
-                : '';
-            final downScript = notifyDown
-                ? '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no'
-                : '';
+        if (!comment.startsWith(_telegramCommentPrefix)) continue;
 
-            final params = {'numbers': id};
-            if (upScript.isNotEmpty) params['up-script'] = upScript;
-            if (downScript.isNotEmpty) params['down-script'] = downScript;
+        final id = entry['.id']?.toString() ?? '';
+        if (id.isEmpty) continue;
 
-            if (params.length > 1) {
-              await router.sendCommand('/tool/netwatch/set', params: params);
-            }
-          }
-        }
+        final name = _telegramNameFromComment(comment);
+        final ip = entry['host']?.toString() ?? '';
+        final upMsg = '✅ القطعة $name ($ip) عادت إلى العمل.';
+        final downMsg = '❌ القطعة $name ($ip) توقفت عن العمل.';
+        final upScript = notifyUp
+            ? _scriptForTelegram(token: token, chat: chat, message: upMsg)
+            : '';
+        final downScript = notifyDown
+            ? _scriptForTelegram(token: token, chat: chat, message: downMsg)
+            : '';
+
+        await router.sendCommand('/tool/netwatch/set', params: {
+          'numbers': id,
+          'up-script': upScript,
+          'down-script': downScript,
+        });
       }
     } catch (_) {}
   }
 
-  // اختبار إرسال رسالة بمعلومات الراوتر
   Future<void> _testTelegramBot(String token, String chat) async {
     final router = widget.routerService;
     if (router == null) {
@@ -507,14 +739,13 @@ class _SideDrawerState extends State<SideDrawer> {
     }
 
     try {
-      // جلب معلومات الراوتر
       final resource = await router.getSystemResource();
       final res = resource.isNotEmpty ? resource.first : {};
       final boardName = res['board-name'] ?? 'غير معروف';
       final version = res['version'] ?? '';
       final cpu = res['cpu'] ?? '';
       final temperature = res['temperature']?.toString() ?? 'غير متاح';
-      // محاولة الحصول على الجهد (ليس في resource، نبحث في system/health)
+
       String voltage = 'غير متاح';
       try {
         final healthResp = await router.sendCommand('/system/health/print');
@@ -554,7 +785,6 @@ class _SideDrawerState extends State<SideDrawer> {
     }
   }
 
-  // ===== مساعدات عامة =====
   void _showSnack(String message, {Color backgroundColor = Colors.black87}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -562,7 +792,6 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  // ===== السرعات المؤقتة (موجود سابقاً) =====
   Future<void> _showSpeedBoostDialog() async {
     TimeOfDay fromTime = const TimeOfDay(hour: 0, minute: 0);
     TimeOfDay toTime = const TimeOfDay(hour: 1, minute: 0);
@@ -572,51 +801,37 @@ class _SideDrawerState extends State<SideDrawer> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: AppTheme.semiBlack,
-          title: const Text('فتح السرعات الشامل المؤقت',
-              style: TextStyle(color: Colors.white)),
+          title: const Text('فتح السرعات الشامل المؤقت', style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('حدد وقت البداية والنهاية لفتح السرعات:',
-                  style: TextStyle(color: Colors.white70)),
+              const Text('حدد وقت البداية والنهاية لفتح السرعات:', style: TextStyle(color: Colors.white70)),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   Column(
                     children: [
-                      const Text('من الساعة:',
-                          style: TextStyle(color: Colors.white70)),
+                      const Text('من الساعة:', style: TextStyle(color: Colors.white70)),
                       TextButton(
                         onPressed: () async {
-                          final t = await showTimePicker(
-                            context: ctx,
-                            initialTime: fromTime,
-                          );
+                          final t = await showTimePicker(context: ctx, initialTime: fromTime);
                           if (t != null) setDialogState(() => fromTime = t);
                         },
-                        child: Text(fromTime.format(ctx),
-                            style: const TextStyle(
-                                color: AppTheme.gold, fontSize: 18)),
+                        child: Text(fromTime.format(ctx), style: const TextStyle(color: AppTheme.gold, fontSize: 18)),
                       ),
                     ],
                   ),
                   const Icon(Icons.arrow_forward, color: Colors.white38),
                   Column(
                     children: [
-                      const Text('إلى الساعة:',
-                          style: TextStyle(color: Colors.white70)),
+                      const Text('إلى الساعة:', style: TextStyle(color: Colors.white70)),
                       TextButton(
                         onPressed: () async {
-                          final t = await showTimePicker(
-                            context: ctx,
-                            initialTime: toTime,
-                          );
+                          final t = await showTimePicker(context: ctx, initialTime: toTime);
                           if (t != null) setDialogState(() => toTime = t);
                         },
-                        child: Text(toTime.format(ctx),
-                            style: const TextStyle(
-                                color: AppTheme.gold, fontSize: 18)),
+                        child: Text(toTime.format(ctx), style: const TextStyle(color: AppTheme.gold, fontSize: 18)),
                       ),
                     ],
                   ),
@@ -651,8 +866,7 @@ class _SideDrawerState extends State<SideDrawer> {
       for (var profile in profiles) {
         final id = profile['.id']?.toString() ?? '';
         if (id.isNotEmpty) {
-          await router.sendCommand('/ip/hotspot/user/profile/set',
-              params: {'numbers': id, 'rate-limit': ''});
+          await router.sendCommand('/ip/hotspot/user/profile/set', params: {'numbers': id, 'rate-limit': ''});
         }
       }
 
@@ -660,19 +874,16 @@ class _SideDrawerState extends State<SideDrawer> {
       for (var user in activeUsers) {
         final id = user['.id']?.toString() ?? '';
         if (id.isNotEmpty) {
-          await router.sendCommand('/ip/hotspot/active/remove',
-              params: {'numbers': id});
+          await router.sendCommand('/ip/hotspot/active/remove', params: {'numbers': id});
         }
       }
 
-      _showSnack('🚀 تم فتح السرعات من ${from.format(context)} إلى ${to.format(context)}',
-          backgroundColor: Colors.green);
+      _showSnack('🚀 تم فتح السرعات من ${from.format(context)} إلى ${to.format(context)}', backgroundColor: Colors.green);
     } catch (e) {
       _showSnack('❌ فشل فتح السرعات: $e', backgroundColor: Colors.red);
     }
   }
 
-  // ===== فتح سرعة مستخدم (موجود) =====
   Future<void> _showOpenUserSpeedDialog() async {
     final nameController = TextEditingController();
     try {
@@ -684,8 +895,7 @@ class _SideDrawerState extends State<SideDrawer> {
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('أدخل اسم المستخدم:',
-                  style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const Text('أدخل اسم المستخدم:', style: TextStyle(color: Colors.white70, fontSize: 12)),
               const SizedBox(height: 8),
               TextField(
                 controller: nameController,
@@ -696,10 +906,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   hintStyle: const TextStyle(color: Colors.white30),
                   filled: true,
                   fillColor: Colors.white10,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide.none,
-                  ),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                 ),
               ),
             ],
@@ -743,25 +950,19 @@ class _SideDrawerState extends State<SideDrawer> {
 
       final secretId = secret['.id']?.toString() ?? '';
       if (secretId.isNotEmpty) {
-        // إنشاء بروفايل Speed إن لم يكن موجوداً
         try {
-          await router.sendCommand('/ppp/profile/add',
-              params: {'name': 'Speed', 'rate-limit': '', 'only-one': 'no'});
+          await router.sendCommand('/ppp/profile/add', params: {'name': 'Speed', 'rate-limit': '', 'only-one': 'no'});
         } catch (_) {}
-
-        await router.sendCommand('/ppp/secret/set',
-            params: {'numbers': secretId, 'profile': 'Speed'});
+        await router.sendCommand('/ppp/secret/set', params: {'numbers': secretId, 'profile': 'Speed'});
       }
 
-      // قطع الجلسات النشطة
       final active = await router.sendCommand('/ppp/active/print', useCache: false);
       for (final session in active) {
         final sessionName = session['name']?.toString().toLowerCase() ?? '';
         if (sessionName == username.toLowerCase()) {
           final activeId = session['.id']?.toString() ?? '';
           if (activeId.isNotEmpty) {
-            await router.sendCommand('/ppp/active/remove',
-                params: {'numbers': activeId});
+            await router.sendCommand('/ppp/active/remove', params: {'numbers': activeId});
           }
         }
       }
@@ -772,7 +973,6 @@ class _SideDrawerState extends State<SideDrawer> {
     }
   }
 
-  // ===== معلومات الراوتر (موجود) =====
   Future<void> _showRouterInfo() async {
     final router = widget.routerService;
     if (router == null) return;
@@ -817,12 +1017,9 @@ class _SideDrawerState extends State<SideDrawer> {
               _infoRow('الجهاز', res['board-name'] ?? '-'),
               _infoRow('الإصدار', res['version'] ?? '-'),
               _infoRow('المعالج', res['cpu'] ?? '-'),
-              _infoRow('RAM الكلي',
-                  _formatBytes(int.tryParse(res['total-memory']?.toString() ?? '0') ?? 0)),
-              _infoRow('RAM المتاح',
-                  _formatBytes(int.tryParse(res['free-memory']?.toString() ?? '0') ?? 0)),
-              _infoRow('التخزين الكلي',
-                  _formatBytes(int.tryParse(res['total-hdd-space']?.toString() ?? '0') ?? 0)),
+              _infoRow('RAM الكلي', _formatBytes(int.tryParse(res['total-memory']?.toString() ?? '0') ?? 0)),
+              _infoRow('RAM المتاح', _formatBytes(int.tryParse(res['free-memory']?.toString() ?? '0') ?? 0)),
+              _infoRow('التخزين الكلي', _formatBytes(int.tryParse(res['total-hdd-space']?.toString() ?? '0') ?? 0)),
               _infoRow('وقت التشغيل', res['uptime'] ?? '-'),
               _infoRow('درجة الحرارة', '${res['temperature'] ?? '-'}°C'),
             ],
@@ -848,11 +1045,8 @@ class _SideDrawerState extends State<SideDrawer> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Text('$label: ',
-              style: const TextStyle(
-                  color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
-          Expanded(
-              child: Text(value, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+          Text('$label: ', style: const TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
+          Expanded(child: Text(value, style: const TextStyle(color: Colors.white70, fontSize: 12))),
         ],
       ),
     );
@@ -860,8 +1054,7 @@ class _SideDrawerState extends State<SideDrawer> {
 
   String _formatBytes(int bytes) {
     if (bytes <= 0) return '0 B';
-    if (bytes >= 1024 * 1024 * 1024)
-      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    if (bytes >= 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
     if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '$bytes B';
@@ -871,7 +1064,6 @@ class _SideDrawerState extends State<SideDrawer> {
     Navigator.pushNamed(context, '/settings');
   }
 
-  // ===== عناصر القائمة =====
   Widget _buildTile({
     required IconData icon,
     required String label,
@@ -882,8 +1074,7 @@ class _SideDrawerState extends State<SideDrawer> {
     return ListTile(
       dense: true,
       leading: Icon(icon, color: iconColor, size: 20),
-      title: Text(label,
-          style: TextStyle(color: labelColor ?? Colors.white, fontSize: 13)),
+      title: Text(label, style: TextStyle(color: labelColor ?? Colors.white, fontSize: 13)),
       onTap: onTap,
     );
   }
@@ -891,12 +1082,7 @@ class _SideDrawerState extends State<SideDrawer> {
   Widget _sectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Text(title,
-          style: const TextStyle(
-              color: AppTheme.gold,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.5)),
+      child: Text(title, style: const TextStyle(color: AppTheme.gold, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
     );
   }
 
@@ -904,31 +1090,20 @@ class _SideDrawerState extends State<SideDrawer> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.white12, width: 1)),
-      ),
+      decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white12, width: 1)),),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('ST Manager',
-              style: TextStyle(
-                  color: AppTheme.gold.withOpacity(0.95),
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.6)),
+          Text('ST Manager', style: TextStyle(color: AppTheme.gold.withOpacity(0.95), fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.6)),
           const SizedBox(height: 4),
-          Text('الإصدار $_appVersion • برمجة م.احمد النعيمي',
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          Text('الإصدار $_appVersion • برمجة م.احمد النعيمي', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white38, fontSize: 11)),
           const SizedBox(height: 2),
-          const Text('+963995870655',
-              style: TextStyle(color: Colors.white38, fontSize: 11)),
+          const Text('+963995870655', style: TextStyle(color: Colors.white38, fontSize: 11)),
         ],
       ),
     );
   }
 
-  // ===== بناء بطاقة الاشتراك في الـ Header =====
   Widget _buildSubscriptionHeader() {
     final color = _subscriptionColor();
     final text = _loadingDays ? 'جارٍ التحقق من الترخيص...' : _subscriptionText();
@@ -940,16 +1115,11 @@ class _SideDrawerState extends State<SideDrawer> {
           children: [
             Icon(Icons.router, color: AppTheme.gold, size: 28),
             SizedBox(width: 10),
-            Text('ST Manager',
-                style: TextStyle(
-                    color: AppTheme.gold,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold)),
+            Text('ST Manager', style: TextStyle(color: AppTheme.gold, fontSize: 18, fontWeight: FontWeight.bold)),
           ],
         ),
         const SizedBox(height: 4),
-        const Text('إدارة الشبكة والتحكم الذكي',
-            style: TextStyle(color: Colors.white54, fontSize: 11)),
+        const Text('إدارة الشبكة والتحكم الذكي', style: TextStyle(color: Colors.white54, fontSize: 11)),
         const SizedBox(height: 8),
         Row(
           children: [
@@ -962,37 +1132,25 @@ class _SideDrawerState extends State<SideDrawer> {
             ),
             const SizedBox(width: 6),
             _loadingDays
-                ? const SizedBox(
-                    width: 14,
-                    height: 14,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: AppTheme.gold,
-                    ),
-                  )
+                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.gold))
                 : Text(text, style: TextStyle(color: color, fontSize: 12)),
           ],
         ),
         if (_subscriptionExpiryDate != null && !_loadingDays)
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: Text(
-              'ينتهي: ${_formatSubscriptionDate()}',
-              style: const TextStyle(color: Colors.white38, fontSize: 10),
-            ),
+            child: Text('ينتهي: ${_formatSubscriptionDate()}', style: const TextStyle(color: Colors.white38, fontSize: 10)),
           ),
       ],
     );
   }
 
-  // ===== initState =====
   @override
   void initState() {
     super.initState();
     _loadSubscriptionCounter();
   }
 
-  // ===== build =====
   @override
   Widget build(BuildContext context) {
     return Drawer(
@@ -1012,7 +1170,6 @@ class _SideDrawerState extends State<SideDrawer> {
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 children: [
                   _sectionHeader('أدوات'),
-                  // ✅ تمت إزالة زر تسريع البرامج من هنا
                   _buildTile(
                     icon: Icons.info_outline,
                     label: 'معلومات الراوتر',
@@ -1022,19 +1179,12 @@ class _SideDrawerState extends State<SideDrawer> {
                     },
                   ),
                   _sectionHeader('إدارة المستخدمين'),
-                  // ✅ تمت إضافة زر User Manager هنا
                   _buildTile(
                     icon: Icons.manage_accounts,
                     label: 'User Manager',
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              UserManagerScreen(routerService: widget.routerService),
-                        ),
-                      );
+                      Navigator.push(context, MaterialPageRoute(builder: (_) => UserManagerScreen(routerService: widget.routerService)));
                     },
                   ),
                   _buildTile(
@@ -1099,7 +1249,6 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  // ===== إعادة تشغيل الراوتر (موجود) =====
   Future<void> _confirmReboot() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1112,15 +1261,9 @@ class _SideDrawerState extends State<SideDrawer> {
             Text('تأكيد إعادة التشغيل', style: TextStyle(color: Colors.white)),
           ],
         ),
-        content: const Text(
-          'هل أنت متأكد من إعادة تشغيل الراوتر؟\nسيتم قطع جميع الاتصالات مؤقتاً.',
-          style: TextStyle(color: Colors.white70),
-        ),
+        content: const Text('هل أنت متأكد من إعادة تشغيل الراوتر؟\nسيتم قطع جميع الاتصالات مؤقتاً.', style: TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء', style: TextStyle(color: Colors.white54))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
