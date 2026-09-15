@@ -1,4 +1,4 @@
-import 'dart:async';
+Import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -50,6 +50,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   String _sortBy = 'status';
   String _filter = 'all';
   bool _showRxFirst = true;
+
+  // التحديد المتعدد
+  bool _isSelectionMode = false;
+  final Set<String> _selectedIds = {};
 
   Timer? _refreshTimer;
   bool _isLoading = false;
@@ -853,149 +857,237 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
   }
 
-  Widget _buildPill(String text, Color color, {IconData? icon}) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: color.withOpacity(0.35)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, color: color, size: 12),
-            const SizedBox(width: 4),
-          ],
-          Text(
-            text,
-            style: TextStyle(
-              color: color,
-              fontSize: 11,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusChip(Map<String, dynamic> user) {
-    final status = _normalizeText(user['status']).isEmpty
-        ? 'offline'
-        : user['status'].toString();
-    final color = _statusColor(status);
-    return _buildPill(_statusLabel(status), color);
-  }
-
-  Widget _buildInfoLine(String title, String value) {
-    final onSurface = Theme.of(context).colorScheme.onSurface;
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: RichText(
-        text: TextSpan(
-          style: TextStyle(
-            color: onSurface.withOpacity(0.82),
-            fontSize: 12,
-            height: 1.25,
-          ),
-          children: [
-            TextSpan(
-              text: '$title: ',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            TextSpan(text: value),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSpeedBadge(
-    double rxSpeed,
-    double txSpeed,
-  ) {
-    final primaryLabel = _showRxFirst ? 'RX' : 'TX';
-    final primaryValue = _showRxFirst ? rxSpeed : txSpeed;
-    final secondaryLabel = _showRxFirst ? 'TX' : 'RX';
-    final secondaryValue = _showRxFirst ? txSpeed : rxSpeed;
-
-    return Container(
-      width: 132,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: AppTheme.greenOnline.withOpacity(0.14),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppTheme.greenOnline.withOpacity(0.85),
-          width: 1,
-        ),
-      ),
-      child: Stack(
-        children: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                primaryLabel,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              Text(
-                _formatSpeed(primaryValue),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                '$secondaryLabel: ${_formatSpeed(secondaryValue)}',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 9,
-                ),
-              ),
-            ],
-          ),
-          Positioned(
-            top: -6,
-            right: -6,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(999),
-              onTap: () => setState(() => _showRxFirst = !_showRxFirst),
-              child: Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.2),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: Colors.white24),
-                ),
-                child: const Icon(
-                  Icons.swap_vert,
-                  size: 14,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   String _formatSpeed(double speedMbps) {
-    if (speedMbps >= 1000) return '${(speedMbps / 1000).toStringAsFixed(1)} Gbps';
-    if (speedMbps >= 1) return '${speedMbps.toStringAsFixed(1)} Mbps';
-    if (speedMbps > 0) return '${(speedMbps * 1000).toStringAsFixed(0)} Kbps';
+    if (speedMbps >= 1000) return '${(speedMbps / 1000).toStringAsFixed(1)}G';
+    if (speedMbps >= 1) return '${speedMbps.toStringAsFixed(1)}M';
+    if (speedMbps > 0) return '${(speedMbps * 1000).toStringAsFixed(0)}K';
     return '0';
+  }
+
+  // --- التحديد المتعدد والعمليات الجماعية ---
+
+  void _toggleSelection(String id) {
+    setState(() {
+      if (_selectedIds.contains(id)) {
+        _selectedIds.remove(id);
+        if (_selectedIds.isEmpty) _isSelectionMode = false;
+      } else {
+        _selectedIds.add(id);
+        _isSelectionMode = true;
+      }
+    });
+  }
+
+  void _selectAll(List<Map<String, dynamic>> list) {
+    setState(() {
+      if (_selectedIds.length == list.length) {
+        _selectedIds.clear();
+        _isSelectionMode = false;
+      } else {
+        _selectedIds.clear();
+        for (final u in list) {
+          final id = _normalizeText(u['.id']);
+          if (id.isNotEmpty) _selectedIds.add(id);
+        }
+        _isSelectionMode = true;
+      }
+    });
+  }
+
+  void _clearSelection() {
+    setState(() {
+      _selectedIds.clear();
+      _isSelectionMode = false;
+    });
+  }
+
+  // طرد جميع المتصلين
+  Future<void> _kickAllActive() async {
+    final activeAccounts = _accounts
+        .where((u) => u['active'] == true && _normalizeText(u['active-id']).isNotEmpty)
+        .toList();
+
+    if (activeAccounts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا يوجد مستخدمين متصلين حالياً'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: const Text('طرد جميع المتصلين', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'هل أنت متأكد من قطع اتصال جميع المستخدمين المتصلين؟\n(العدد: ${activeAccounts.length})',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('طرد الجميع', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _loading = true);
+    int count = 0;
+
+    for (final user in activeAccounts) {
+      final activeId = _normalizeText(user['active-id']);
+      if (activeId.isNotEmpty) {
+        try {
+          await widget.routerService?.sendCommand(
+            '/ppp/active/remove',
+            params: {'numbers': activeId},
+          ).timeout(_actionTimeout);
+          count++;
+        } catch (_) {}
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم قطع اتصال $count من أصل ${activeAccounts.length} مستخدم'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+    await _load(background: true);
+  }
+
+  // طرد المحدد
+  Future<void> _bulkDisconnect() async {
+    final selectedUsers = _accounts.where((u) => _selectedIds.contains(_normalizeText(u['.id']))).toList();
+    final activeSelected = selectedUsers.where((u) => u['active'] == true && _normalizeText(u['active-id']).isNotEmpty).toList();
+
+    if (activeSelected.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا يوجد حسابات متصلة بين العناصر المحددة'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+    int count = 0;
+    for (final user in activeSelected) {
+      final activeId = _normalizeText(user['active-id']);
+      if (activeId.isNotEmpty) {
+        try {
+          await widget.routerService?.sendCommand(
+            '/ppp/active/remove',
+            params: {'numbers': activeId},
+          ).timeout(_actionTimeout);
+          count++;
+        } catch (_) {}
+      }
+    }
+
+    _clearSelection();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('تم قطع اتصال $count حساب تحديد بنجاح'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    }
+    await _load(background: true);
+  }
+
+  // تغيير حالة الدفع للمحدد
+  Future<void> _bulkTogglePaid() async {
+    final selectedUsers = _accounts.where((u) => _selectedIds.contains(_normalizeText(u['.id']))).toList();
+    if (selectedUsers.isEmpty) return;
+
+    setState(() => _loading = true);
+    for (final user in selectedUsers) {
+      final id = _normalizeText(user['.id']);
+      if (id.isEmpty) continue;
+
+      final parsed = _parseComment(user['comment']?.toString() ?? '');
+      final newComment = _buildComment(parsed, paidOverride: !parsed.isPaid);
+
+      try {
+        await widget.routerService?.sendCommand(
+          '/ppp/secret/set',
+          params: {'numbers': id, 'comment': newComment},
+        ).timeout(_actionTimeout);
+      } catch (_) {}
+    }
+
+    _clearSelection();
+    await _load(background: true);
+  }
+
+  // حذف المحدد
+  Future<void> _bulkDelete() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.semiBlack,
+        title: const Text('تأكيد الحذف الجماعي', style: TextStyle(color: Colors.white)),
+        content: Text(
+          'هل أنت متأكد من حذف الحسابات المحددة؟ (${_selectedIds.length} حساب)',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('حذف الحسابات', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _loading = true);
+    for (final id in _selectedIds) {
+      try {
+        await widget.routerService?.sendCommand(
+          '/ppp/secret/remove',
+          params: {'numbers': id},
+        ).timeout(_actionTimeout);
+      } catch (_) {}
+    }
+
+    _clearSelection();
+    await _load(background: true);
+  }
+
+  // معالجة حركة زر العودة للداشبورد مباشرة
+  void _handleBackNavigation() {
+    if (_isSelectionMode) {
+      _clearSelection();
+      return;
+    }
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacementNamed('/dashboard');
+    }
   }
 
   Future<void> _togglePaid(Map<String, dynamic> user) async {
@@ -1361,6 +1453,78 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     );
   }
 
+  // --- عناصر واجهة المستخدم المصغرة المدمجة ---
+
+  Widget _buildMiniPill(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.35), width: 0.8),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactStatusChip(String status) {
+    final color = _statusColor(status);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withOpacity(0.35), width: 0.8),
+      ),
+      child: Text(
+        _statusLabel(status),
+        style: TextStyle(
+          color: color,
+          fontSize: 10,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCompactSpeedBadge(double rxSpeed, double txSpeed) {
+    final primaryLabel = _showRxFirst ? '↓' : '↑';
+    final primaryValue = _showRxFirst ? rxSpeed : txSpeed;
+    final secondaryLabel = _showRxFirst ? '↑' : '↓';
+    final secondaryValue = _showRxFirst ? txSpeed : rxSpeed;
+
+    return GestureDetector(
+      onTap: () => setState(() => _showRxFirst = !_showRxFirst),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: AppTheme.greenOnline.withOpacity(0.14),
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(
+            color: AppTheme.greenOnline.withOpacity(0.85),
+            width: 0.8,
+          ),
+        ),
+        child: Text(
+          '$primaryLabel${_formatSpeed(primaryValue)} $secondaryLabel${_formatSpeed(secondaryValue)}',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 10,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
+
+  // بطاقة المستخدم المصغرة والمعدلة تتسع لـ 5 حسابات على الشاشة
   Widget _buildAccountCard(Map<String, dynamic> user) {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final status = _normalizeText(user['status']).isEmpty
@@ -1378,212 +1542,143 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final isNew = user['is-new'] == true;
     final uptime = _normalizeText(user['uptime']);
     final cardAccent = isNew ? Colors.amber : _statusColor(status);
+    final userId = _normalizeText(user['.id']);
+    final isSelected = _selectedIds.contains(userId);
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
-        color: isNew
-            ? Colors.amber.withOpacity(0.08)
-            : Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: cardAccent.withOpacity(0.45)),
+        color: isSelected
+            ? AppTheme.gold.withOpacity(0.15)
+            : (isNew
+                ? Colors.amber.withOpacity(0.06)
+                : Theme.of(context).cardColor),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isSelected ? AppTheme.gold : cardAccent.withOpacity(0.35),
+          width: isSelected ? 1.5 : 1.0,
+        ),
       ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(24),
-        onTap: () => _showActions(user),
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          if (_isSelectionMode) {
+            if (userId.isNotEmpty) _toggleSelection(userId);
+          } else {
+            _showActions(user);
+          }
+        },
+        onLongPress: () {
+          if (userId.isNotEmpty) _toggleSelection(userId);
+        },
         child: Padding(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Container(
-                    width: 48,
-                    height: 48,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: cardAccent.withOpacity(0.12),
-                      border: Border.all(
-                        color: cardAccent.withOpacity(0.4),
+                  if (_isSelectionMode)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: Checkbox(
+                          value: isSelected,
+                          activeColor: AppTheme.gold,
+                          checkColor: Colors.black,
+                          onChanged: (_) {
+                            if (userId.isNotEmpty) _toggleSelection(userId);
+                          },
+                        ),
+                      ),
+                    )
+                  else
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: cardAccent.withOpacity(0.12),
+                        border: Border.all(
+                          color: cardAccent.withOpacity(0.4),
+                        ),
+                      ),
+                      child: Icon(
+                        isNew
+                            ? Icons.fiber_new
+                            : (isActive ? Icons.person : Icons.person_off),
+                        color: cardAccent,
+                        size: 16,
                       ),
                     ),
-                    child: Icon(
-                      isNew
-                          ? Icons.fiber_new
-                          : (isActive ? Icons.person : Icons.person_off),
-                      color: cardAccent,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
+                  const SizedBox(width: 8),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Row(
                       children: [
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                _normalizeText(user['name']),
-                                style: TextStyle(
-                                  color: onSurface,
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
+                        Expanded(
+                          child: Text(
+                            _normalizeText(user['name']),
+                            style: TextStyle(
+                              color: onSurface,
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
                             ),
-                            if (browserIp.isNotEmpty)
-                              GestureDetector(
-                                onTap: () => _openBrowser(user),
-                                child: Tooltip(
-                                  message: 'http://$browserIp/login.html',
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 4,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.cyan.withOpacity(0.12),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: Colors.cyan.withOpacity(0.35),
-                                      ),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        const Icon(
-                                          Icons.open_in_browser,
-                                          color: Colors.cyan,
-                                          size: 14,
-                                        ),
-                                        const SizedBox(width: 4),
-                                        Text(
-                                          browserIp,
-                                          style: const TextStyle(
-                                            color: Colors.cyan,
-                                            fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                              ),
-                          ],
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                        const SizedBox(height: 8),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            _buildStatusChip(user),
-                            if (isNew)
-                              _buildPill(
-                                'جديد',
-                                Colors.amber,
-                                icon: Icons.fiber_new,
-                              ),
-                            if (profile.isNotEmpty)
-                              _buildPill(
-                                'الباقة: $profile',
-                                AppTheme.gold,
-                              ),
-                            _buildPill(
-                              isPaid ? 'مدفوع' : 'غير مدفوع',
-                              isPaid ? Colors.green : Colors.red,
-                            ),
-                            if (user['expiry-date'] != null)
-                              _buildPill('له تاريخ', Colors.teal),
-                            if (user['expiry-date'] == null)
-                              _buildPill('بدون تاريخ', Colors.blueGrey),
-                          ],
-                        ),
+                        if (isActive && (rx > 0 || tx > 0)) ...[
+                          const SizedBox(width: 4),
+                          _buildCompactSpeedBadge(rx, tx),
+                        ],
                       ],
                     ),
                   ),
-                  if (isActive) ...[
-                    const SizedBox(width: 8),
-                    _buildSpeedBadge(rx, tx),
-                  ],
+                  const SizedBox(width: 6),
+                  _buildCompactStatusChip(status),
+                  IconButton(
+                    icon: const Icon(Icons.more_vert, size: 18),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _showActions(user),
+                  ),
                 ],
               ),
-              if (isActive) ...[
-                const SizedBox(height: 8),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    Icon(
-                      Icons.access_time_rounded,
-                      size: 12,
-                      color: onSurface.withOpacity(0.65),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 4,
+                cross: WrapCrossAlignment.center,
+                children: [
+                  if (profile.isNotEmpty) _buildMiniPill(profile, AppTheme.gold),
+                  _buildMiniPill(
+                    isPaid ? 'مدفوع' : 'غير مدفوع',
+                    isPaid ? Colors.green : Colors.red,
+                  ),
+                  if (expiry.isNotEmpty) _buildMiniPill('تاريخ: $expiry', Colors.teal),
+                  if (phone.isNotEmpty) _buildMiniPill('📱 $phone', Colors.blue),
+                  if (isActive && uptime.isNotEmpty)
+                    _buildMiniPill('⏱ ${_formatUptime(uptime)}', AppTheme.greenOnline),
+                  if (browserIp.isNotEmpty)
+                    InkWell(
+                      onTap: () => _openBrowser(user),
+                      child: _buildMiniPill('🌐 $browserIp', Colors.cyan),
                     ),
-                    const SizedBox(width: 4),
+                  if (note.isNotEmpty)
                     Text(
-                      _formatUptime(uptime),
+                      '📝 $note',
                       style: TextStyle(
-                        color: onSurface.withOpacity(0.8),
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
+                        color: onSurface.withOpacity(0.6),
+                        fontSize: 10,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
-                  ],
-                ),
-              ],
-              const SizedBox(height: 12),
-              if (phone.isNotEmpty) _buildInfoLine('الهاتف', phone),
-              if (expiry.isNotEmpty) _buildInfoLine('الصلاحية', expiry),
-              if (note.isNotEmpty) _buildInfoLine('الكومنت', note),
-              const SizedBox(height: 8),
-              if (status == 'active')
-                Text(
-                  'متصل الآن',
-                  style: TextStyle(
-                    color: AppTheme.greenOnline,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
-              else if (status == 'disabled')
-                Text(
-                  'معطل',
-                  style: TextStyle(
-                    color: Colors.red,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
-              else if (status == 'expired')
-                Text(
-                  isActive
-                      ? 'منتهي - ما زال يعمل'
-                      : 'منتهي - سيُنقل إلى بروفايل Xpirer',
-                  style: TextStyle(
-                    color: Colors.orange,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
-              else if (isNew)
-                Text(
-                  'حساب جديد لم يتصل بعد',
-                  style: TextStyle(
-                    color: Colors.amber,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                )
-              else
-                Text(
-                  'غير متصل',
-                  style: TextStyle(
-                    color: Colors.blue,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                ],
+              ),
             ],
           ),
         ),
@@ -1611,7 +1706,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         children: chips.map((item) {
           final selected = _filter == item.$1;
           return Padding(
-            padding: const EdgeInsets.only(left: 8),
+            padding: const EdgeInsets.only(left: 6),
             child: ChoiceChip(
               label: Text('${item.$2} (${item.$3})'),
               selected: selected,
@@ -1641,15 +1736,15 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           children: [
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: onMain ? () => _load(background: true) : () => Navigator.of(context).pop(),
+                onPressed: onMain ? () => _load(background: true) : _handleBackNavigation,
                 icon: const Icon(Icons.people_alt_outlined),
                 label: const Text('المستخدمين'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: onMain ? AppTheme.gold : Theme.of(context).cardColor,
                   foregroundColor: onMain ? Colors.black : Theme.of(context).colorScheme.onSurface,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -1665,9 +1760,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                   side: BorderSide(
                     color: onMain ? Theme.of(context).dividerColor : AppTheme.gold,
                   ),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -1684,55 +1779,115 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     final filteredList = filtered;
 
     return PopScope(
-      // ✅ تم تعديل سلوك زر الرجوع للعودة للداشبورد
-      canPop: true,
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBackNavigation();
+      },
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
-            onPressed: () => Navigator.pop(context),
+            icon: Icon(_isSelectionMode ? Icons.close : Icons.arrow_back),
+            onPressed: _handleBackNavigation,
           ),
-          title: const Text('البرودباند'),
+          title: Text(_isSelectionMode ? 'تم تحديد ${_selectedIds.length}' : 'البرودباند'),
           actions: [
-            IconButton(
-              onPressed: () => _load(background: true),
-              icon: const Icon(Icons.refresh),
-              tooltip: 'تحديث',
-            ),
-            IconButton(
-              onPressed: _addNewAccount,
-              icon: const Icon(Icons.person_add),
-              tooltip: 'إضافة مستخدم',
-            ),
+            if (_isSelectionMode) ...[
+              IconButton(
+                icon: Icon(_selectedIds.length == filteredList.length ? Icons.deselect : Icons.select_all),
+                tooltip: _selectedIds.length == filteredList.length ? 'إلغاء التحديد' : 'تحديد الكل',
+                onPressed: () => _selectAll(filteredList),
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: AppTheme.gold),
+                onSelected: (val) {
+                  if (val == 'disconnect') _bulkDisconnect();
+                  if (val == 'toggle_paid') _bulkTogglePaid();
+                  if (val == 'delete') _bulkDelete();
+                },
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'disconnect',
+                    child: Row(
+                      children: [
+                        Icon(Icons.link_off, color: Colors.red, size: 18),
+                        SizedBox(width: 8),
+                        Text('قطع اتصال المحدد'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'toggle_paid',
+                    child: Row(
+                      children: [
+                        Icon(Icons.attach_money, color: Colors.green, size: 18),
+                        SizedBox(width: 8),
+                        Text('تغيير حالة الدفع للمحدد'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete_forever, color: Colors.red, size: 18),
+                        SizedBox(width: 8),
+                        Text('حذف المحدد'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ] else ...[
+              IconButton(
+                onPressed: _kickAllActive,
+                icon: const Icon(Icons.power_settings_new, color: Colors.red),
+                tooltip: 'طرد جميع المتصلين',
+              ),
+              IconButton(
+                onPressed: () => _load(background: true),
+                icon: const Icon(Icons.refresh),
+                tooltip: 'تحديث',
+              ),
+              IconButton(
+                onPressed: _addNewAccount,
+                icon: const Icon(Icons.person_add),
+                tooltip: 'إضافة مستخدم',
+              ),
+            ],
           ],
         ),
         body: Column(
           children: [
             if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
               child: _buildFilters(),
             ),
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
               child: Row(
                 children: [
                   Expanded(
-                    child: TextField(
-                      decoration: InputDecoration(
-                        hintText: 'بحث...',
-                        prefixIcon: const Icon(Icons.search, color: AppTheme.gold),
-                        filled: true,
-                        fillColor: Theme.of(context).cardColor,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(16),
-                          borderSide: BorderSide.none,
+                    child: SizedBox(
+                      height: 40,
+                      child: TextField(
+                        decoration: InputDecoration(
+                          hintText: 'بحث...',
+                          contentPadding: const EdgeInsets.symmetric(vertical: 8),
+                          prefixIcon: const Icon(Icons.search, color: AppTheme.gold, size: 20),
+                          filled: true,
+                          fillColor: Theme.of(context).cardColor,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                          hintStyle: TextStyle(color: onSurface.withOpacity(0.4), fontSize: 13),
                         ),
-                        hintStyle: TextStyle(color: onSurface.withOpacity(0.4)),
+                        style: TextStyle(color: onSurface, fontSize: 13),
+                        onChanged: (q) => setState(() => _searchQuery = q),
                       ),
-                      style: TextStyle(color: onSurface),
-                      onChanged: (q) => setState(() => _searchQuery = q),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1740,7 +1895,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                     value: _sortBy,
                     dropdownColor: Theme.of(context).cardColor,
                     underline: const SizedBox(),
-                    style: TextStyle(color: onSurface),
+                    style: TextStyle(color: onSurface, fontSize: 13),
                     icon: Icon(Icons.sort, color: AppTheme.gold),
                     items: const [
                       DropdownMenuItem(value: 'status', child: Text('الحالة')),
@@ -1778,14 +1933,42 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                     : ListView.builder(
                         physics: const AlwaysScrollableScrollPhysics(),
                         padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
+                          horizontal: 12,
+                          vertical: 4,
                         ),
                         itemCount: filteredList.length,
                         itemBuilder: (_, i) => _buildAccountCard(filteredList[i]),
                       ),
               ),
             ),
+            if (_isSelectionMode)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                color: AppTheme.semiBlack,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red.withOpacity(0.8)),
+                      onPressed: _bulkDisconnect,
+                      icon: const Icon(Icons.link_off, size: 16),
+                      label: const Text('طرد المحدد', style: TextStyle(fontSize: 11)),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green.withOpacity(0.8)),
+                      onPressed: _bulkTogglePaid,
+                      icon: const Icon(Icons.attach_money, size: 16),
+                      label: const Text('تعديل الدفع', style: TextStyle(fontSize: 11)),
+                    ),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade900),
+                      onPressed: _bulkDelete,
+                      icon: const Icon(Icons.delete, size: 16),
+                      label: const Text('حذف', style: TextStyle(fontSize: 11)),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
         bottomNavigationBar: _buildBottomBar(onMain: true),
@@ -2329,6 +2512,14 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     );
   }
 
+  void _handleBackNavigation() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.of(context).pushReplacementNamed('/dashboard');
+    }
+  }
+
   Widget _buildBottomBar() {
     return SafeArea(
       top: false,
@@ -2338,15 +2529,15 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
           children: [
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: _handleBackNavigation,
                 icon: const Icon(Icons.people_alt_outlined),
                 label: const Text('المستخدمين'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Theme.of(context).cardColor,
                   foregroundColor: Theme.of(context).colorScheme.onSurface,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -2360,9 +2551,9 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.gold,
                   foregroundColor: Colors.black,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
@@ -2378,13 +2569,16 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     final list = _filteredProfiles;
 
     return PopScope(
-      // ✅ تم تعديل سلوك زر الرجوع للعودة للداشبورد
-      canPop: true,
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _handleBackNavigation();
+      },
       child: Scaffold(
         appBar: AppBar(
           leading: IconButton(
             icon: const Icon(Icons.arrow_back),
-            onPressed: () => Navigator.pop(context),
+            onPressed: _handleBackNavigation,
           ),
           title: const Text('البروفايلات'),
           actions: [
