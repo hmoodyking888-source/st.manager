@@ -22,11 +22,11 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     _loadLocalBackups();
   }
 
-  // الحصول على مسار مجلد ST_Backup على الهاتف
+  // الحصول على مسار مجلد ST_Backup على الهاتف (مع دعم حماية الأندرويد الحديثة)
   Future<String> _getAppDirectory() async {
     Directory? directory;
     if (Platform.isAndroid) {
-      // المحاولة لإنشاء المجلد في الذاكرة الخارجية الرئيسية باسم ST_Backup
+      // 1. المحاولة لإنشاء المجلد في الذاكرة الخارجية الرئيسية باسم ST_Backup
       directory = Directory('/storage/emulated/0/ST_Backup');
       try {
         if (!await directory.exists()) {
@@ -34,11 +34,20 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
         }
         return directory.path;
       } catch (e) {
-        // في حال عدم وجود صلاحيات الوصول المباشر، سيتم استخدام المسار الآمن
+        // 2. في حال عدم وجود صلاحيات (مثل أندرويد 11 وأحدث)، ننشئ المجلد داخل التنزيلات ليكون مرئياً
+        try {
+          directory = Directory('/storage/emulated/0/Download/ST_Backup');
+          if (!await directory.exists()) {
+            await directory.create(recursive: true);
+          }
+          return directory.path;
+        } catch (e2) {
+          // سيتم استخدام المسار الآمن بالأسفل في حال فشل كل المحاولات
+        }
       }
     }
 
-    // المسار الافتراضي والآمن في النظام
+    // 3. المسار الافتراضي والآمن في النظام كحل أخير
     directory = await getApplicationDocumentsDirectory();
     final folder = Directory('${directory.path}/ST_Backup');
     if (!await folder.exists()) {
@@ -90,7 +99,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               title: const Text('نسخ احتياطي عام للسيرفر'),
               onTap: () {
                 Navigator.pop(ctx);
-                _executeBackup('full_backup', 'نسخة عامة');
+                _executeBackup('Server', 'نسخة عامة للسيرفر');
               },
             ),
             const Divider(),
@@ -99,7 +108,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               title: const Text('نسخة برودباند (حسابات وبروفايلات)'),
               onTap: () {
                 Navigator.pop(ctx);
-                _executeBackup('broadband', 'برودباند');
+                _executeBackup('Broadband', 'برودباند');
               },
             ),
             const Divider(),
@@ -108,7 +117,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               title: const Text('نسخة هوتسبوت (حسابات وبروفايلات)'),
               onTap: () {
                 Navigator.pop(ctx);
-                _executeBackup('hotspot', 'هوتسبوت');
+                _executeBackup('Hotspot', 'هوتسبوت');
               },
             ),
           ],
@@ -124,11 +133,13 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
 
     try {
       final now = DateTime.now();
-      final dateFormatted =
-          "${now.day.toString().padLeft(2, '0')}-${now.month.toString().padLeft(2, '0')}-${now.year}_${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}";
       
-      // اسم الملف مثل: broadband_15-09-2026_15-30
-      final backupName = '${prefix}_$dateFormatted';
+      // تنسيق التاريخ والوقت ليكون جزءاً من اسم الملف
+      final dateFormatted = "${now.day.toString().padLeft(2, '0')}-${now.month.toString().padLeft(2, '0')}-${now.year}";
+      final timeFormatted = "${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}";
+      
+      // اسم الملف النهائي مثل: Broadband_15-09-2026_15-30
+      final backupName = '${prefix}_${dateFormatted}_$timeFormatted';
 
       // أمر إنشاء النسخة على السيرفر
       await widget.routerService!.sendCommand(
@@ -139,7 +150,7 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       // حفظ ملف النسخة المرجعي داخل مجلد ST_Backup على الهاتف
       final path = await _getAppDirectory();
       final file = File('$path/$backupName.backup');
-      await file.writeAsString('Backup Type: $label\nDate: $now\nThis file represents the backup stored on the server.');
+      await file.writeAsString('Backup Type: $label\nDate: ${_formatDate(now)}\nThis file represents the backup stored on the server.');
 
       await _loadLocalBackups(); // تحديث القائمة
 
