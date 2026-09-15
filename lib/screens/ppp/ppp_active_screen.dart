@@ -1,4 +1,4 @@
-Import 'dart:async';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -1651,7 +1651,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
               Wrap(
                 spacing: 6,
                 runSpacing: 4,
-                cross: WrapCrossAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   if (profile.isNotEmpty) _buildMiniPill(profile, AppTheme.gold),
                   _buildMiniPill(
