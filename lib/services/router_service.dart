@@ -2,21 +2,6 @@ import 'dart:async';
 import 'package:routeros_api/routeros_api.dart';
 
 /// خدمة للتواصل مع جهاز RouterOS عبر واجهة API.
-/// تدعم إعادة المحاولة، التخزين المؤقت، والمراقبة الفورية للحركة.
-///
-/// الإصلاحات المطبقة:
-/// [FIX-1] تراكم الطلبات: كل طلب اتصال يُضاف إلى قائمة انتظار واحدة
-/// [FIX-2] تسلسل الأوامر العادية فقط: Semaphore يمنع تراكم إعادة الاتصال
-///         لكن traffic requests تبقى متوازية عبر قناة منفصلة
-/// [FIX-3] إعادة الاتصال السريعة: backoff تدريجي 500ms→1s→2s
-/// [FIX-4] Completer آمن: لا يمكن تسريب حالة خاطئة بعد الخطأ
-/// [FIX-5] Cache مستقل: كاش دائم لا يُمسح مع clearCache()
-/// [FIX-6] Streams تتوقف بشكل صحيح عند الانقطاع
-/// [FIX-7] traffic مجمّع حقيقي: Completer مشترك يمنع الطلبات المتكررة
-/// [FIX-A] _trafficFetchCompleter يعمل فعلاً (كان معرَّفاً لكن غير مُستخدَم)
-/// [FIX-B] traffic لا يمر عبر Semaphore العادي لتبقى متوازية
-/// [FIX-C] إعادة الاتصال تحرر القفل أولاً لتجنب الـ Deadlock
-
 class RouterService {
   final String host;
   final int port;
@@ -26,34 +11,27 @@ class RouterService {
   bool _connected = false;
   RouterOSClient? _client;
 
-  // [FIX-1] قائمة انتظار الاتصال: جميع الطلبات المتزامنة تنتظر completer واحد
   Completer<bool>? _connectCompleter;
 
-  // [FIX-2] Semaphore للأوامر العادية فقط (ليس traffic)
   bool _commandLocked = false;
   final List<Completer<void>> _commandQueue = [];
 
   final Map<String, dynamic> _cache = {};
   final Map<String, DateTime> _cacheTimestamps = {};
 
-  // [FIX-5] كاش منفصل لا يُمسح مع clearCache()
   final Map<String, dynamic> _persistentCache = {};
   final Map<String, DateTime> _persistentCacheTimestamps = {};
 
   static const Duration _cacheDuration = Duration(seconds: 120);
 
-  // [FIX-3] timeouts محسّنة
   static const Duration _connectTimeout = Duration(seconds: 5);
   static const Duration _commandTimeout = Duration(seconds: 12);
   static const Duration _trafficTimeout = Duration(seconds: 4);
 
-  // [FIX-7 + FIX-A] كاش traffic مع Completer حقيقي يمنع الطلبات المتكررة
   final Map<String, Map<String, double>> _trafficCache = {};
   DateTime? _trafficCacheTime;
   static const Duration _trafficCacheDuration = Duration(milliseconds: 900);
 
-  // [FIX-A] الـ Completer الآن يُستخدَم فعلاً لمنع طلبات traffic المتزامنة
-  // على نفس الواجهة من التكرار
   final Map<String, Completer<Map<String, double>>> _trafficFetchCompleters =
       {};
 
@@ -64,24 +42,16 @@ class RouterService {
     required this.password,
   });
 
-  // ==================== الاتصال ====================
-
-  /// [FIX-1 + FIX-3 + FIX-4]
-  /// - جميع الطلبات المتزامنة تنتظر نفس الـ completer
-  /// - backoff تدريجي: 500ms → 1s → 2s
-  /// - الـ completer يُصفَّر بأمان عبر مرجع محلي
   Future<bool> connect({bool forceReconnect = false}) async {
     if (!forceReconnect && _connected && _client != null) {
       return true;
     }
 
-    // [FIX-1] إذا يوجد اتصال جارٍ، انتظره
     if (_connectCompleter != null) {
       return _connectCompleter!.future;
     }
 
     _connectCompleter = Completer<bool>();
-    // [FIX-4] مرجع محلي لتجنب null race في finally
     final localCompleter = _connectCompleter!;
 
     try {
@@ -89,7 +59,6 @@ class RouterService {
         _safeCloseClient();
       }
 
-      // [FIX-3] backoff تدريجي
       const delays = [500, 1000, 2000];
 
       for (int i = 0; i < 3; i++) {
@@ -127,13 +96,11 @@ class RouterService {
     } catch (e) {
       _connected = false;
       _safeCloseClient();
-      // [FIX-4] complete(false) بدلاً من completeError لتجنب unhandled exceptions
       if (!localCompleter.isCompleted) {
         localCompleter.complete(false);
       }
       return false;
     } finally {
-      // [FIX-4] نصفّر فقط إذا كان المرجع لا يزال نفس الـ completer
       if (_connectCompleter == localCompleter) {
         _connectCompleter = null;
       }
@@ -155,9 +122,6 @@ class RouterService {
     }
   }
 
-  // ==================== Semaphore للأوامر العادية ====================
-
-  /// [FIX-2] يمنع تراكم الأوامر العادية التي قد تُسبب تنافساً على إعادة الاتصال
   Future<void> _acquireLock() async {
     if (!_commandLocked) {
       _commandLocked = true;
@@ -177,8 +141,6 @@ class RouterService {
     }
   }
 
-  // [FIX-B] Semaphore منفصل للـ traffic بحد أقصى 5 طلبات متزامنة
-  // بدلاً من تسلسل كامل أو فوضى كاملة
   static const int _maxConcurrentTraffic = 5;
   int _activeTrafficRequests = 0;
   final List<Completer<void>> _trafficWaitQueue = [];
@@ -202,8 +164,6 @@ class RouterService {
     }
   }
 
-  // ==================== معالجة الردود ====================
-
   List<Map<String, dynamic>> _normalizeResponse(dynamic response) {
     if (response is List) {
       return response.map((row) {
@@ -226,26 +186,19 @@ class RouterService {
     return [];
   }
 
-  // ==================== إرسال الأوامر الأساسي ====================
-
-  /// إرسال أمر عادي إلى RouterOS مع Semaphore وإعادة المحاولة والكاش.
-  /// - [usePost] محجوز للتوافق مع الإصدارات السابقة (لا يُستخدم حالياً).
-  /// - [persistent] إذا كان true، يستخدم كاش لا يُمسح بـ clearCache()
   Future<List<Map<String, dynamic>>> sendCommand(
     String command, {
     Map<String, dynamic>? params,
-    bool usePost = false, // محجوز للتوافق مع side_drawer وغيره
+    bool usePost = false,
     bool useCache = false,
-    bool persistent = false, // [FIX-5]
+    bool persistent = false,
   }) async {
     final cacheKey = '$command${params?.toString() ?? ''}';
 
-    // [FIX-5] اختيار الكاش المناسب
     final activeCache = persistent ? _persistentCache : _cache;
     final activeCacheTimestamps =
         persistent ? _persistentCacheTimestamps : _cacheTimestamps;
 
-    // تحقق من الكاش قبل الحصول على القفل
     if (useCache &&
         activeCache.containsKey(cacheKey) &&
         activeCacheTimestamps.containsKey(cacheKey)) {
@@ -255,7 +208,6 @@ class RouterService {
       }
     }
 
-    // [FIX-2] انتظر دورك
     await _acquireLock();
 
     try {
@@ -266,15 +218,13 @@ class RouterService {
           dynamic response;
 
           if (params == null || params.isEmpty) {
-            response =
-                await _client!.execute(command).timeout(_commandTimeout);
+            response = await _client!.execute(command).timeout(_commandTimeout);
           } else {
             final sentence = <String>[
               command,
               ...params.entries.map((e) => '=${e.key}=${e.value}'),
             ];
-            response =
-                await _client!.talk(sentence).timeout(_commandTimeout);
+            response = await _client!.talk(sentence).timeout(_commandTimeout);
           }
 
           final converted = _normalizeResponse(response);
@@ -289,11 +239,9 @@ class RouterService {
           _connected = false;
 
           if (i < 2) {
-            // [FIX-C] نحرر القفل أثناء إعادة الاتصال لتجنب الـ Deadlock
             _releaseLock();
             await connect(forceReconnect: true);
             await Future.delayed(Duration(milliseconds: 300 * (i + 1)));
-            // نستعيد القفل بعد إعادة الاتصال
             await _acquireLock();
           }
         }
@@ -301,13 +249,10 @@ class RouterService {
 
       throw Exception('Failed after retries: $command');
     } finally {
-      // [FIX-2] تحرير القفل دائماً
       _releaseLock();
     }
   }
 
-  /// [FIX-B] إرسال أمر traffic مباشرةً بدون Semaphore عام
-  /// يستخدم Semaphore منفصل بحد أقصى 5 طلبات متزامنة
   Future<List<Map<String, dynamic>>> _sendTrafficCommand(
     String command,
     Map<String, dynamic> params,
@@ -322,8 +267,7 @@ class RouterService {
         ...params.entries.map((e) => '=${e.key}=${e.value}'),
       ];
 
-      final response =
-          await _client!.talk(sentence).timeout(_trafficTimeout);
+      final response = await _client!.talk(sentence).timeout(_trafficTimeout);
 
       return _normalizeResponse(response);
     } catch (_) {
@@ -333,37 +277,26 @@ class RouterService {
     }
   }
 
-  /// مسح الكاش العادي فقط (لا يمس الكاش الدائم).
   void clearCache() {
     _cache.clear();
     _cacheTimestamps.clear();
     _trafficCache.clear();
     _trafficCacheTime = null;
-    // مسح أي traffic completers معلقة
     _trafficFetchCompleters.clear();
   }
 
-  /// مسح الكاش الدائم أيضاً (عند تسجيل الخروج أو تغيير الراوتر).
   void clearAllCache() {
     clearCache();
     _persistentCache.clear();
     _persistentCacheTimestamps.clear();
   }
 
-  // ==================== دوال مساعدة ====================
-
-  /// [FIX-7 + FIX-A] جلب بيانات traffic لواجهة واحدة
-  /// - كاش مشترك صالح 900ms
-  /// - [FIX-A] Completer حقيقي يمنع الطلبات المتزامنة على نفس الواجهة
-  /// - [FIX-B] لا يمر عبر Semaphore العام لتبقى التجميعات متوازية
   Future<Map<String, double>> getPortCurrentRate(String interfaceName) async {
-    // [FIX-A] إذا يوجد طلب جارٍ لنفس الواجهة، انتظر نتيجته
     final existingCompleter = _trafficFetchCompleters[interfaceName];
     if (existingCompleter != null) {
       return existingCompleter.future;
     }
 
-    // تحقق من الكاش أولاً
     final now = DateTime.now();
     if (_trafficCacheTime != null &&
         now.difference(_trafficCacheTime!) < _trafficCacheDuration &&
@@ -371,12 +304,10 @@ class RouterService {
       return _trafficCache[interfaceName]!;
     }
 
-    // [FIX-A] أنشئ completer حقيقي يمنع الطلبات المتزامنة على نفس الواجهة
     final completer = Completer<Map<String, double>>();
     _trafficFetchCompleters[interfaceName] = completer;
 
     try {
-      // [FIX-B] استخدم _sendTrafficCommand بدلاً من sendCommand
       final result = await _sendTrafficCommand(
         '/interface/monitor-traffic',
         {
@@ -420,7 +351,6 @@ class RouterService {
         };
       }
 
-      // حفظ في الكاش
       _trafficCache[interfaceName] = trafficData;
       _trafficCacheTime = now;
 
@@ -434,19 +364,15 @@ class RouterService {
       if (!completer.isCompleted) completer.complete(empty);
       return empty;
     } finally {
-      // [FIX-A] أزل الـ completer بعد الانتهاء
       _trafficFetchCompleters.remove(interfaceName);
     }
   }
 
-  /// [FIX-7] جلب traffic لقائمة واجهات دفعةً
-  /// دفعات من 5 طلبات متوازية بدلاً من 100 معاً أو 100 متسلسلة
   Future<Map<String, Map<String, double>>> getBulkTraffic(
     List<String> interfaceNames,
   ) async {
     if (interfaceNames.isEmpty) return {};
 
-    // تحقق من الكاش أولاً
     final now = DateTime.now();
     if (_trafficCacheTime != null &&
         now.difference(_trafficCacheTime!) < _trafficCacheDuration) {
@@ -463,7 +389,6 @@ class RouterService {
       if (allCached) return cached;
     }
 
-    // [FIX-B] دفعات بحجم _maxConcurrentTraffic للتوازي المحكوم
     final results = <String, Map<String, double>>{};
     const batchSize = _maxConcurrentTraffic;
 
@@ -488,13 +413,8 @@ class RouterService {
     return results;
   }
 
-  // ==================== ستريمات المراقبة ====================
-
-  /// [FIX-6] ستريم يبث إجمالي الاستخدام (Mbps) كل ثانية.
-  /// يتحقق من الاتصال في كل دورة وليس مرة واحدة فقط.
   Stream<double> monitorTrafficStream(String interface) async* {
     while (true) {
-      // [FIX-6] التحقق في كل دورة
       if (!_connected || _client == null) {
         yield 0;
         await Future.delayed(const Duration(seconds: 2));
@@ -514,12 +434,9 @@ class RouterService {
     }
   }
 
-  /// [FIX-6] ستريم يبث تفاصيل RX/TX كل ثانية.
-  /// يتحقق من الاتصال في كل دورة.
   Stream<Map<String, double>> monitorTrafficDetailsStream(
       String interface) async* {
     while (true) {
-      // [FIX-6] التحقق في كل دورة
       if (!_connected || _client == null) {
         yield {'rx-bits-per-second': 0, 'tx-bits-per-second': 0};
         await Future.delayed(const Duration(seconds: 2));
@@ -535,8 +452,6 @@ class RouterService {
       await Future.delayed(const Duration(seconds: 1));
     }
   }
-
-  // ==================== دوال جلب البيانات المختلفة ====================
 
   Future<List<Map<String, dynamic>>> getSystemHealth() =>
       sendCommand('/system/health/print', useCache: true);
@@ -574,12 +489,10 @@ class RouterService {
   Future<List<Map<String, dynamic>>> getUserManagerSessions() =>
       sendCommand('/tool/user-manager/session/print', useCache: true);
 
-  // ==================== إنهاء الخدمة ====================
-
   void disconnect() {
     _safeCloseClient();
     _connected = false;
-    // تنظيف قوائم الانتظار
+
     for (final c in _commandQueue) {
       if (!c.isCompleted) c.completeError(Exception('Disconnected'));
     }

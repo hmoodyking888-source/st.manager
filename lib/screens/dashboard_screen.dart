@@ -9,7 +9,7 @@ import 'package:st_manager/screens/devices_screen.dart';
 import 'package:st_manager/screens/backup_restore_screen.dart';
 import 'package:st_manager/screens/interface_screen.dart';
 import 'package:st_manager/screens/simple_queue_screen.dart';
-import 'package:st_manager/screens/applications/scripts_screen.dart'; // استيراد شاشة تسريع التطبيقات
+import 'package:st_manager/screens/applications/scripts_screen.dart';
 import 'package:st_manager/widgets/side_drawer.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -272,127 +272,139 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return '${(speed * 1000).toStringAsFixed(0)} Kbps';
   }
 
-  // ──────────────────────────────────────────
-  // الشريط السفلي - التنقل
-  // ──────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(widget.routerData['name'] ?? 'ST_Manager'),
-            Text(
-              'ربطك بالعالم بسرعة وثقة',
-              style:
-                  Theme.of(context).textTheme.bodySmall?.copyWith(fontSize: 10),
+    // إمكانية العودة بالزر المادي أو الزر العلوي للرئيسية دون الخروج من الراوتر
+    return PopScope(
+      canPop: _currentIndex == 0,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _currentIndex != 0) {
+          setState(() {
+            _currentIndex = 0;
+          });
+        }
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          leading: _currentIndex != 0
+              ? IconButton(
+                  icon: const Icon(Icons.arrow_back),
+                  onPressed: () => setState(() => _currentIndex = 0),
+                  tooltip: 'العودة للرئيسية',
+                )
+              : null,
+          title: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(widget.routerData['name'] ?? 'ST_Manager'),
+              Text(
+                'ربطك بالعالم بسرعة وثقة',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(fontSize: 10),
+              ),
+            ],
+          ),
+          actions: [
+            Builder(
+              builder: (context) => IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: () => Scaffold.of(context).openDrawer(),
+              ),
             ),
           ],
         ),
-        actions: [
-          Builder(
-            builder: (context) => IconButton(
-              icon: const Icon(Icons.menu),
-              onPressed: () => Scaffold.of(context).openDrawer(),
+        drawer: SideDrawer(routerService: _routerService),
+        body: _buildBody(),
+        bottomNavigationBar: BottomNavigationBar(
+          currentIndex: _currentIndex,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor: AppTheme.semiBlack,
+          selectedItemColor: AppTheme.gold,
+          unselectedItemColor: Colors.white38,
+          selectedFontSize: 11,
+          unselectedFontSize: 10,
+          onTap: (index) {
+            if (index == 4) {
+              Navigator.pushNamed(context, '/settings').then((_) {
+                if (mounted) setState(() => _currentIndex = 0);
+              });
+              return;
+            }
+            setState(() => _currentIndex = index);
+          },
+          items: [
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.home_rounded),
+              label: 'الرئيسية',
             ),
-          ),
-        ],
-      ),
-      drawer: SideDrawer(routerService: _routerService),
-      body: _buildBody(),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: AppTheme.semiBlack,
-        selectedItemColor: AppTheme.gold,
-        unselectedItemColor: Colors.white38,
-        selectedFontSize: 11,
-        unselectedFontSize: 10,
-        onTap: (index) {
-          if (index == 4) {
-            // الإعدادات: نفتحها كصفحة منفصلة ثم نرجع للرئيسية
-            Navigator.pushNamed(context, '/settings').then((_) {
-              if (mounted) setState(() => _currentIndex = 0);
-            });
-            return;
-          }
-          setState(() => _currentIndex = index);
-        },
-        items: [
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.home_rounded),
-            label: 'الرئيسية',
-          ),
-          // ✅ البرودباند مباشرة في الشريط
-          BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.router_rounded),
-                if (_pppActive > 0)
-                  Positioned(
-                    top: -4,
-                    right: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: AppTheme.greenOnline,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '$_pppActive',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold),
+            BottomNavigationBarItem(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.router_rounded),
+                  if (_pppActive > 0)
+                    Positioned(
+                      top: -4,
+                      right: -6,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: AppTheme.greenOnline,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '$_pppActive',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
+              label: 'برودباند',
             ),
-            label: 'برودباند',
-          ),
-          // ✅ الهوتسبوت مباشرة في الشريط
-          BottomNavigationBarItem(
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.wifi_rounded),
-                if (_activeUsers > 0)
-                  Positioned(
-                    top: -4,
-                    right: -6,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: Colors.blue,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Text(
-                        '$_activeUsers',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 8,
-                            fontWeight: FontWeight.bold),
+            BottomNavigationBarItem(
+              icon: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  const Icon(Icons.wifi_rounded),
+                  if (_activeUsers > 0)
+                    Positioned(
+                      top: -4,
+                      right: -6,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Colors.blue,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          '$_activeUsers',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
+              label: 'هوتسبوت',
             ),
-            label: 'هوتسبوت',
-          ),
-          // ✅ الإشعارات
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.notifications_rounded),
-            label: 'الإشعارات',
-          ),
-          // ✅ الإعدادات
-          const BottomNavigationBarItem(
-            icon: Icon(Icons.settings_rounded),
-            label: 'الإعدادات',
-          ),
-        ],
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.notifications_rounded),
+              label: 'الإشعارات',
+            ),
+            const BottomNavigationBarItem(
+              icon: Icon(Icons.settings_rounded),
+              label: 'الإعدادات',
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -401,32 +413,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     switch (_currentIndex) {
       case 0:
         return _buildDashboardContent();
-
-      // ✅ البرودباند - شاشة كاملة مدمجة
       case 1:
         return PppActiveScreen(routerService: _routerService);
-
-      // ✅ الهوتسبوت - شاشة كاملة مدمجة
       case 2:
         return HotspotActiveUsersScreen(routerService: _routerService);
-
-      // ✅ الإشعارات - شاشة مخصصة
       case 3:
         return _buildNotificationsTab();
-
-      // ✅ الإعدادات - لا يصل هنا لأنه يُعالج في onTap
       default:
         return _buildDashboardContent();
     }
   }
 
-  // ──────────────────────────────────────────
-  // ✅ تبويب الإشعارات
-  // ──────────────────────────────────────────
   Widget _buildNotificationsTab() {
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
-    // قائمة أحداث تُبنى من البيانات الحية
     final events = <Map<String, dynamic>>[];
 
     if (_pppActive > 0) {
@@ -471,7 +471,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     return Column(
       children: [
-        // ── رأس التبويب ──
         Container(
           width: double.infinity,
           padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
@@ -508,8 +507,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
         ),
-
-        // ── الإحصائيات السريعة ──
         Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
@@ -534,10 +531,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
         ),
-
         const Divider(height: 1, color: Colors.white12),
-
-        // ── قائمة الأحداث ──
         Expanded(
           child: events.isEmpty
               ? Center(
@@ -618,8 +612,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   },
                 ),
         ),
-
-        // ── تلميح إعداد التلجرام ──
         Container(
           margin: const EdgeInsets.all(12),
           padding: const EdgeInsets.all(12),
@@ -678,9 +670,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  // ──────────────────────────────────────────
-  // محتوى الداشبورد الرئيسي
-  // ──────────────────────────────────────────
   Widget _buildDashboardContent() {
     final onSurface = Theme.of(context).colorScheme.onSurface;
 
@@ -793,7 +782,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 );
               }),
-              // ✅ زر تسريع التطبيقات بدلاً من User Manager
               _buildMenuButton('تسريع التطبيقات', Icons.flash_on, () {
                 Navigator.push(
                   context,

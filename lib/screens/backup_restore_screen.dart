@@ -14,19 +14,17 @@ class BackupRestoreScreen extends StatefulWidget {
 
 class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
   bool _loading = false;
-  List<File> _localBackups = [];
+  List<Map<String, dynamic>> _backups = [];
 
   @override
   void initState() {
     super.initState();
-    _loadLocalBackups();
+    _loadBackups();
   }
 
-  // الحصول على مسار مجلد ST_Backup على الهاتف (مع دعم حماية الأندرويد الحديثة)
   Future<String> _getAppDirectory() async {
     Directory? directory;
     if (Platform.isAndroid) {
-      // 1. المحاولة لإنشاء المجلد في الذاكرة الخارجية الرئيسية باسم ST_Backup
       directory = Directory('/storage/emulated/0/ST_Backup');
       try {
         if (!await directory.exists()) {
@@ -34,20 +32,16 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
         }
         return directory.path;
       } catch (e) {
-        // 2. في حال عدم وجود صلاحيات (مثل أندرويد 11 وأحدث)، ننشئ المجلد داخل التنزيلات ليكون مرئياً
         try {
           directory = Directory('/storage/emulated/0/Download/ST_Backup');
           if (!await directory.exists()) {
             await directory.create(recursive: true);
           }
           return directory.path;
-        } catch (e2) {
-          // سيتم استخدام المسار الآمن بالأسفل في حال فشل كل المحاولات
-        }
+        } catch (_) {}
       }
     }
 
-    // 3. المسار الافتراضي والآمن في النظام كحل أخير
     directory = await getApplicationDocumentsDirectory();
     final folder = Directory('${directory.path}/ST_Backup');
     if (!await folder.exists()) {
@@ -56,65 +50,101 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     return folder.path;
   }
 
-  // تحميل قائمة النسخ من مجلد ST_Backup
-  Future<void> _loadLocalBackups() async {
+  /// تحميل ملفات النسخ الاحتياطي من الراوتر مباشرة ومطابقتها محلياً دون خطأ
+  Future<void> _loadBackups() async {
+    final router = widget.routerService;
+    final backupsList = <Map<String, dynamic>>[];
+
+    if (router != null && router.isConnected) {
+      try {
+        final files = await router.sendCommand('/file/print');
+        for (var f in files) {
+          final name = f['name']?.toString() ?? '';
+          if (name.endsWith('.backup')) {
+            backupsList.add({
+              'name': name,
+              'size': f['size']?.toString() ?? 'غير معروف',
+              'date': f['creation-time']?.toString() ?? 'سيرفر',
+              'id': f['.id']?.toString() ?? '',
+              'isServer': true,
+            });
+          }
+        }
+      } catch (e) {
+        debugPrint("خطأ أثناء جلب ملفات الراوتر: $e");
+      }
+    }
+
     try {
       final path = await _getAppDirectory();
       final folder = Directory(path);
-      final files = folder
+      final localFiles = folder
           .listSync()
           .whereType<File>()
           .where((file) => file.path.endsWith('.backup'))
           .toList();
 
-      // ترتيب النسخ من الأحدث إلى الأقدم
-      files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+      for (var file in localFiles) {
+        final fileName = file.uri.pathSegments.last;
+        if (!backupsList.any((b) => b['name'] == fileName)) {
+          backupsList.add({
+            'name': fileName,
+            'size': '${(file.lengthSync() / 1024).toStringAsFixed(1)} KB',
+            'date': _formatDate(file.lastModifiedSync()),
+            'file': file,
+            'isServer': false,
+          });
+        }
+      }
+    } catch (_) {}
 
+    if (mounted) {
       setState(() {
-        _localBackups = files;
+        _backups = backupsList;
       });
-    } catch (e) {
-      debugPrint("Error loading backups: $e");
     }
   }
 
-  // دالة لتنسيق التاريخ بشكل مقروء
   String _formatDate(DateTime date) {
     return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
   }
 
-  // عرض نافذة اختيار نوع النسخة الاحتياطية
   Future<void> _showBackupTypeDialog() async {
     if (widget.routerService == null) return;
 
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('اختر نوع النسخة الاحتياطية', textAlign: TextAlign.center),
+        backgroundColor: AppTheme.semiBlack,
+        title: const Text('اختر نوع النسخة الاحتياطية',
+            textAlign: TextAlign.center, style: TextStyle(color: Colors.white)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             ListTile(
               leading: const Icon(Icons.dns, color: AppTheme.gold),
-              title: const Text('نسخ احتياطي عام للسيرفر'),
+              title: const Text('نسخ احتياطي عام للسيرفر',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(ctx);
                 _executeBackup('Server', 'نسخة عامة للسيرفر');
               },
             ),
-            const Divider(),
+            const Divider(color: Colors.white12),
             ListTile(
               leading: const Icon(Icons.router, color: Colors.blue),
-              title: const Text('نسخة برودباند (حسابات وبروفايلات)'),
+              title: const Text('نسخة برودباند (حسابات وبروفايلات)',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(ctx);
                 _executeBackup('Broadband', 'برودباند');
               },
             ),
-            const Divider(),
+            const Divider(color: Colors.white12),
             ListTile(
               leading: const Icon(Icons.wifi, color: Colors.orange),
-              title: const Text('نسخة هوتسبوت (حسابات وبروفايلات)'),
+              title: const Text('نسخة هوتسبوت (حسابات وبروفايلات)',
+                  style: TextStyle(color: Colors.white)),
               onTap: () {
                 Navigator.pop(ctx);
                 _executeBackup('Hotspot', 'هوتسبوت');
@@ -126,43 +156,41 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     );
   }
 
-  // تنفيذ عملية إنشاء النسخة الاحتياطية وتخزينها
+  /// تنفيذ إنشاء النسخة الاحتياطية بما يتوافق مع MikroTik RouterOS بدون أخطاء
   Future<void> _executeBackup(String prefix, String label) async {
     if (widget.routerService == null) return;
     setState(() => _loading = true);
 
     try {
       final now = DateTime.now();
-      
-      // تنسيق التاريخ والوقت ليكون جزءاً من اسم الملف
-      final dateFormatted = "${now.day.toString().padLeft(2, '0')}-${now.month.toString().padLeft(2, '0')}-${now.year}";
-      final timeFormatted = "${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}";
-      
-      // اسم الملف النهائي مثل: Broadband_15-09-2026_15-30
+      final dateFormatted =
+          "${now.day.toString().padLeft(2, '0')}-${now.month.toString().padLeft(2, '0')}-${now.year}";
+      final timeFormatted =
+          "${now.hour.toString().padLeft(2, '0')}-${now.minute.toString().padLeft(2, '0')}";
       final backupName = '${prefix}_${dateFormatted}_$timeFormatted';
 
-      // أمر إنشاء النسخة على السيرفر
+      // أمر إنشاء النسخة المتوافق مع ميكروتك (إزالة معيار type الغير مدعوم)
       await widget.routerService!.sendCommand(
-        'system/backup/save',
-        params: {'name': backupName, 'type': prefix},
+        '/system/backup/save',
+        params: {'name': backupName},
       );
 
-      // حفظ ملف النسخة المرجعي داخل مجلد ST_Backup على الهاتف
       final path = await _getAppDirectory();
       final file = File('$path/$backupName.backup');
-      await file.writeAsString('Backup Type: $label\nDate: ${_formatDate(now)}\nThis file represents the backup stored on the server.');
+      await file.writeAsString(
+          'Backup Type: $label\nDate: ${_formatDate(now)}\nStored on MikroTik Server.');
 
-      await _loadLocalBackups(); // تحديث القائمة
+      await _loadBackups();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('تم إنشاء نسخة ($label) وحفظها بنجاح')),
         );
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('فشل إنشاء النسخة الاحتياطية')),
+          SnackBar(content: Text('فشل إنشاء النسخة الاحتياطية: $e')),
         );
       }
     } finally {
@@ -170,23 +198,24 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     }
   }
 
-  // استرجاع النسخة
-  Future<void> _restore(File file) async {
+  Future<void> _restore(Map<String, dynamic> backupItem) async {
     if (widget.routerService == null) return;
     setState(() => _loading = true);
     try {
-      final fileName = file.uri.pathSegments.last;
-      await widget.routerService!.sendCommand('system/backup/load', params: {'name': fileName});
+      final fileName = backupItem['name']?.toString() ?? '';
+      await widget.routerService!
+          .sendCommand('/system/backup/load', params: {'name': fileName});
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تمت الاستعادة بنجاح (سيتم إعادة تشغيل السيرفر)')),
+          const SnackBar(
+              content: Text('تمت الاستعادة بنجاح (سيتم إعادة تشغيل السيرفر)')),
         );
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('فشل الاستعادة')),
+          SnackBar(content: Text('فشل الاستعادة: $e')),
         );
       }
     } finally {
@@ -194,20 +223,20 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     }
   }
 
-  // حذف النسخة
-  Future<void> _delete(File file) async {
-    final fileName = file.uri.pathSegments.last;
+  Future<void> _delete(Map<String, dynamic> backupItem) async {
+    final fileName = backupItem['name']?.toString() ?? '';
 
-    // نافذة تأكيد الحذف
     bool? confirm = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('تأكيد الحذف'),
-        content: Text('هل أنت متأكد من حذف النسخة $fileName؟'),
+        backgroundColor: AppTheme.semiBlack,
+        title: const Text('تأكيد الحذف', style: TextStyle(color: Colors.white)),
+        content: Text('هل أنت متأكد من حذف النسخة $fileName؟',
+            style: const TextStyle(color: Colors.white70)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -221,16 +250,26 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       setState(() => _loading = true);
 
       try {
-        // حذف من السيرفر (تجاهل الخطأ إن لم تكن موجودة هناك)
-        await widget.routerService!.sendCommand('file/remove', params: {'numbers': fileName});
+        if (backupItem['isServer'] == true) {
+          final id = backupItem['id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            await widget.routerService!
+                .sendCommand('/file/remove', params: {'numbers': id});
+          } else {
+            await widget.routerService!
+                .sendCommand('/file/remove', params: {'numbers': fileName});
+          }
+        }
       } catch (_) {}
 
       try {
-        // حذف من الهاتف
-        if (await file.exists()) {
-          await file.delete();
+        if (backupItem['file'] != null && backupItem['file'] is File) {
+          final File f = backupItem['file'];
+          if (await f.exists()) {
+            await f.delete();
+          }
         }
-        await _loadLocalBackups(); // تحديث القائمة
+        await _loadBackups();
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -249,19 +288,21 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     }
   }
 
-  // نافذة تأكيد الاسترجاع
-  Future<void> _confirmRestore(File file) async {
+  Future<void> _confirmRestore(Map<String, dynamic> backupItem) async {
     bool? confirm = await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('تأكيد الاسترجاع'),
+        backgroundColor: AppTheme.semiBlack,
+        title: const Text('تأكيد الاسترجاع',
+            style: TextStyle(color: Colors.white)),
         content: const Text(
           'هل أنت متأكد من استرجاع هذه النسخة؟ سيتم استبدال الإعدادات الحالية وسيعاد تشغيل السيرفر.',
+          style: TextStyle(color: Colors.white70),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('إلغاء'),
+            child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, true),
@@ -272,17 +313,20 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     );
 
     if (confirm == true) {
-      await _restore(file);
+      await _restore(backupItem);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('النسخ الاحتياطي والاستعادة')),
+      backgroundColor: AppTheme.black,
+      appBar: AppBar(
+        title: const Text('النسخ الاحتياطي والاستعادة'),
+        backgroundColor: AppTheme.semiBlack,
+      ),
       body: Column(
         children: [
-          // قسم إنشاء النسخة العُلوي
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: ElevatedButton.icon(
@@ -291,6 +335,8 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               label: const Text('إنشاء نسخة احتياطية جديدة'),
               style: ElevatedButton.styleFrom(
                 minimumSize: const Size(double.infinity, 50),
+                backgroundColor: AppTheme.gold,
+                foregroundColor: Colors.black,
               ),
             ),
           ),
@@ -299,39 +345,52 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
               padding: EdgeInsets.all(8.0),
               child: CircularProgressIndicator(color: AppTheme.gold),
             ),
-          const Divider(),
-
-          // قسم عرض النسخ المحفوظة
+          const Divider(color: Colors.white12),
           Expanded(
-            child: _localBackups.isEmpty
-                ? const Center(child: Text('لا توجد نسخ احتياطية محفوظة'))
+            child: _backups.isEmpty
+                ? const Center(
+                    child: Text('لا توجد نسخ احتياطية محفوظة',
+                        style: TextStyle(color: Colors.white54)))
                 : ListView.builder(
-                    itemCount: _localBackups.length,
+                    itemCount: _backups.length,
                     itemBuilder: (context, index) {
-                      final file = _localBackups[index];
-                      final fileName = file.uri.pathSegments.last;
-                      final fileDate = file.lastModifiedSync();
+                      final item = _backups[index];
+                      final fileName = item['name'] ?? '';
+                      final fileDate = item['date'] ?? '';
 
                       return Card(
-                        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        color: AppTheme.semiBlack,
+                        margin: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 6),
                         child: ListTile(
-                          leading: const Icon(Icons.backup, color: AppTheme.gold),
+                          leading:
+                              const Icon(Icons.backup, color: AppTheme.gold),
                           title: Text(
                             fileName,
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                fontSize: 13),
                           ),
-                          subtitle: Text(_formatDate(fileDate)),
+                          subtitle: Text(fileDate,
+                              style: const TextStyle(
+                                  color: Colors.white38, fontSize: 11)),
                           trailing: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.restore, color: Colors.green),
-                                onPressed: _loading ? null : () => _confirmRestore(file),
+                                icon: const Icon(Icons.restore,
+                                    color: Colors.green),
+                                onPressed: _loading
+                                    ? null
+                                    : () => _confirmRestore(item),
                                 tooltip: 'استعادة هذه النسخة',
                               ),
                               IconButton(
-                                icon: const Icon(Icons.delete, color: Colors.red),
-                                onPressed: _loading ? null : () => _delete(file),
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
+                                onPressed:
+                                    _loading ? null : () => _delete(item),
                                 tooltip: 'حذف هذه النسخة',
                               ),
                             ],

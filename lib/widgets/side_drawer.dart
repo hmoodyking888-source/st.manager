@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
+import 'package:st_manager/services/firebase_service.dart';
 import 'package:st_manager/screens/user_manager_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
@@ -25,20 +26,25 @@ class _SideDrawerState extends State<SideDrawer> {
 
   Future<void> _loadSubscriptionCounter() async {
     try {
-      final rawExpiry = await _storage.read('license_expiry_date');
-      if (rawExpiry == null || rawExpiry.trim().isEmpty) {
-        if (mounted) {
-          setState(() {
-            _subscriptionExpiryDate = null;
-            _subscriptionDaysRemaining = null;
-            _loadingDays = false;
-          });
+      final phone = await _storage.getPhone();
+      DateTime? expiryDate;
+
+      if (phone != null && phone.trim().isNotEmpty) {
+        expiryDate = await FirebaseService.getLicenseExpiry(phone.trim());
+        if (expiryDate != null) {
+          await _storage.write(
+              'license_expiry_date', expiryDate.toIso8601String());
         }
-        return;
       }
 
-      final parsed = DateTime.tryParse(rawExpiry.trim());
-      if (parsed == null) {
+      if (expiryDate == null) {
+        final rawExpiry = await _storage.read('license_expiry_date');
+        if (rawExpiry != null && rawExpiry.trim().isNotEmpty) {
+          expiryDate = DateTime.tryParse(rawExpiry.trim());
+        }
+      }
+
+      if (expiryDate == null) {
         if (mounted) {
           setState(() {
             _subscriptionExpiryDate = null;
@@ -51,14 +57,15 @@ class _SideDrawerState extends State<SideDrawer> {
 
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
-      final expiryDate = DateTime(parsed.year, parsed.month, parsed.day);
+      final expDate =
+          DateTime(expiryDate.year, expiryDate.month, expiryDate.day);
 
-      int daysRemaining = expiryDate.difference(today).inDays;
+      int daysRemaining = expDate.difference(today).inDays;
       if (daysRemaining < 0) daysRemaining = 0;
 
       if (mounted) {
         setState(() {
-          _subscriptionExpiryDate = expiryDate;
+          _subscriptionExpiryDate = expDate;
           _subscriptionDaysRemaining = daysRemaining;
           _loadingDays = false;
         });
@@ -127,7 +134,8 @@ class _SideDrawerState extends State<SideDrawer> {
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('تأكيد وتنفيذ',
-                style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                style: TextStyle(
+                    color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -149,7 +157,8 @@ class _SideDrawerState extends State<SideDrawer> {
       _showSnack('تم تفعيل حماية اللوب (RSTP & Loop-Protect) بنجاح',
           backgroundColor: Colors.green);
     } catch (e) {
-      _showSnack('حدث خطأ أثناء تفعيل الحماية: $e', backgroundColor: Colors.red);
+      _showSnack('حدث خطأ أثناء تفعيل الحماية: $e',
+          backgroundColor: Colors.red);
     }
   }
 
@@ -167,7 +176,8 @@ class _SideDrawerState extends State<SideDrawer> {
     return true;
   }
 
-  String _normalizeLower(Object? value) => (value?.toString() ?? '').trim().toLowerCase();
+  String _normalizeLower(Object? value) =>
+      (value?.toString() ?? '').trim().toLowerCase();
 
   bool _isAutomaticNetwatchCandidate(Map<String, dynamic> device) {
     final ip = _cleanText(device['address']?.toString() ?? '');
@@ -249,14 +259,18 @@ class _SideDrawerState extends State<SideDrawer> {
   }
 
   String _extractMacFromTelegramComment(String comment) {
-    final match = RegExp(r'\[MAC:([^\]]+)\]', caseSensitive: false).firstMatch(comment);
+    final match =
+        RegExp(r'\[MAC:([^\]]+)\]', caseSensitive: false).firstMatch(comment);
     return match?.group(1)?.trim() ?? '';
   }
 
   String _telegramNameFromComment(String comment) {
     if (!comment.startsWith(_telegramCommentPrefix)) return comment;
     final value = comment.substring(_telegramCommentPrefix.length);
-    return value.replaceFirst(RegExp(r'\s*\[MAC:[^\]]+\]\s*$', caseSensitive: false), '').trim();
+    return value
+        .replaceFirst(
+            RegExp(r'\s*\[MAC:[^\]]+\]\s*$', caseSensitive: false), '')
+        .trim();
   }
 
   String _scriptForTelegram({
@@ -280,7 +294,8 @@ class _SideDrawerState extends State<SideDrawer> {
 
     try {
       final neighborResponse = await router.sendCommand('/ip/neighbor/print');
-      final neighbors = neighborResponse is List ? neighborResponse : <dynamic>[];
+      final neighbors =
+          neighborResponse is List ? neighborResponse : <dynamic>[];
       final netwatchResponse = await router.sendCommand('/tool/netwatch/print');
       final entries = netwatchResponse is List ? netwatchResponse : <dynamic>[];
 
@@ -313,9 +328,8 @@ class _SideDrawerState extends State<SideDrawer> {
         final name = _automaticDisplayName(device, index++);
         final normalizedMac = mac.toLowerCase();
 
-        Map<String, dynamic>? existing = normalizedMac.isNotEmpty
-            ? managedEntries[normalizedMac]
-            : null;
+        Map<String, dynamic>? existing =
+            normalizedMac.isNotEmpty ? managedEntries[normalizedMac] : null;
         existing ??= managedByHost[ip.toLowerCase()];
 
         final upMessage = '✅ القطعة $name ($ip) عادت إلى العمل.';
@@ -332,7 +346,9 @@ class _SideDrawerState extends State<SideDrawer> {
           if (id.isNotEmpty) {
             final oldComment = existing['comment']?.toString() ?? '';
             final savedName = _telegramNameFromComment(oldComment);
-            final displayName = savedName.isNotEmpty && savedName != oldComment ? savedName : name;
+            final displayName = savedName.isNotEmpty && savedName != oldComment
+                ? savedName
+                : name;
             final comment = _buildTelegramComment(displayName, mac);
             await router.sendCommand('/tool/netwatch/set', params: {
               'numbers': id,
@@ -356,7 +372,8 @@ class _SideDrawerState extends State<SideDrawer> {
       }
 
       if (added > 0 || updated > 0) {
-        _showSnack('✅ تمت مزامنة قطع UBNT وراوترات/AP تلقائياً: أضيف $added، حُدّث $updated',
+        _showSnack(
+            '✅ تمت مزامنة قطع UBNT وراوترات/AP تلقائياً: أضيف $added، حُدّث $updated',
             backgroundColor: Colors.green);
       }
     } catch (e) {
@@ -372,7 +389,8 @@ class _SideDrawerState extends State<SideDrawer> {
     bool notifyUp = await _storage.read('tg_notify_up') == 'true';
     bool notifyDown = await _storage.read('tg_notify_down') == 'true';
     bool notifyExpiry = await _storage.read('tg_notify_expiry') == 'true';
-    bool notifyHighUsage = await _storage.read('tg_notify_high_usage') == 'true';
+    bool notifyHighUsage =
+        await _storage.read('tg_notify_high_usage') == 'true';
     bool notifyRestart = await _storage.read('tg_notify_restart') == 'true';
 
     final ipsController = TextEditingController();
@@ -410,7 +428,10 @@ class _SideDrawerState extends State<SideDrawer> {
                 ),
                 const SizedBox(height: 12),
                 const Text('خيارات الإشعارات:',
-                    style: TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
+                    style: TextStyle(
+                        color: AppTheme.gold,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 _buildNotifToggle(
                   ctx,
@@ -459,7 +480,10 @@ class _SideDrawerState extends State<SideDrawer> {
                 ),
                 const Divider(color: Colors.white24, height: 20),
                 const Text('إضافة قطع متعددة إلى Netwatch:',
-                    style: TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
+                    style: TextStyle(
+                        color: AppTheme.gold,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 _buildField(
                   controller: ipsController,
@@ -472,7 +496,8 @@ class _SideDrawerState extends State<SideDrawer> {
                   hint: 'مثال: قطعة1, قطعة2',
                 ),
                 const SizedBox(height: 8),
-                const Text('ملاحظة: سيتم اكتشاف أجهزة UBNT وراوترات/AP تلقائياً عند تفعيل إشعار Up أو Down.',
+                const Text(
+                    'ملاحظة: سيتم اكتشاف أجهزة UBNT وراوترات/AP تلقائياً عند تفعيل إشعار Up أو Down.',
                     style: TextStyle(color: Colors.white38, fontSize: 11)),
               ],
             ),
@@ -480,10 +505,12 @@ class _SideDrawerState extends State<SideDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+              child:
+                  const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blue.shade700),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blue.shade700),
               onPressed: () async {
                 await _testTelegramBot(
                   tokenCtrl.text.trim(),
@@ -491,7 +518,8 @@ class _SideDrawerState extends State<SideDrawer> {
                 );
               },
               icon: const Icon(Icons.send, color: Colors.white),
-              label: const Text('اختبار', style: TextStyle(color: Colors.white)),
+              label:
+                  const Text('اختبار', style: TextStyle(color: Colors.white)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
@@ -503,9 +531,12 @@ class _SideDrawerState extends State<SideDrawer> {
                 await _storage.write('telegram_chat_id', chat);
                 await _storage.write('tg_notify_up', notifyUp.toString());
                 await _storage.write('tg_notify_down', notifyDown.toString());
-                await _storage.write('tg_notify_expiry', notifyExpiry.toString());
-                await _storage.write('tg_notify_high_usage', notifyHighUsage.toString());
-                await _storage.write('tg_notify_restart', notifyRestart.toString());
+                await _storage.write(
+                    'tg_notify_expiry', notifyExpiry.toString());
+                await _storage.write(
+                    'tg_notify_high_usage', notifyHighUsage.toString());
+                await _storage.write(
+                    'tg_notify_restart', notifyRestart.toString());
 
                 final ips = ipsController.text
                     .split(',')
@@ -560,7 +591,8 @@ class _SideDrawerState extends State<SideDrawer> {
                 );
               },
               child: const Text('حفظ وتحديث الكل',
-                  style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+                  style: TextStyle(
+                      color: Colors.black, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -588,7 +620,8 @@ class _SideDrawerState extends State<SideDrawer> {
           Icon(icon, color: iconColor, size: 16),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+            child: Text(label,
+                style: const TextStyle(color: Colors.white70, fontSize: 12)),
           ),
           Switch(
             value: value,
@@ -668,7 +701,10 @@ class _SideDrawerState extends State<SideDrawer> {
         if (id.isNotEmpty) {
           await router.sendCommand('/tool/netwatch/set', params: {
             'numbers': id,
-            'comment': _buildTelegramComment(name, _extractMacFromTelegramComment(existing['comment']?.toString() ?? '')),
+            'comment': _buildTelegramComment(
+                name,
+                _extractMacFromTelegramComment(
+                    existing['comment']?.toString() ?? '')),
             'up-script': upScript,
             'down-script': downScript,
           });
@@ -732,7 +768,8 @@ class _SideDrawerState extends State<SideDrawer> {
       return;
     }
     if (token.isEmpty || chat.isEmpty) {
-      _showSnack('⚠️ أدخل التوكن والـ Chat ID أولاً', backgroundColor: Colors.orange);
+      _showSnack('⚠️ أدخل التوكن والـ Chat ID أولاً',
+          backgroundColor: Colors.orange);
       return;
     }
 
@@ -757,8 +794,7 @@ class _SideDrawerState extends State<SideDrawer> {
         }
       } catch (_) {}
 
-      final message =
-          '📊 *معلومات الراوتر*\n'
+      final message = '📊 *معلومات الراوتر*\n'
           '------------------------\n'
           '🖥️ الجهاز: $boardName\n'
           '📦 الإصدار: $version\n'
@@ -777,7 +813,8 @@ class _SideDrawerState extends State<SideDrawer> {
         'keep-result': 'no',
       });
 
-      _showSnack('📨 تم إرسال رسالة الاختبار إلى التلجرام', backgroundColor: Colors.blue);
+      _showSnack('📨 تم إرسال رسالة الاختبار إلى التلجرام',
+          backgroundColor: Colors.blue);
     } catch (e) {
       _showSnack('❌ فشل إرسال رسالة الاختبار: $e', backgroundColor: Colors.red);
     }
@@ -799,37 +836,47 @@ class _SideDrawerState extends State<SideDrawer> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
           backgroundColor: AppTheme.semiBlack,
-          title: const Text('فتح السرعات الشامل المؤقت', style: TextStyle(color: Colors.white)),
+          title: const Text('فتح السرعات الشامل المؤقت',
+              style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('حدد وقت البداية والنهاية لفتح السرعات:', style: TextStyle(color: Colors.white70)),
+              const Text('حدد وقت البداية والنهاية لفتح السرعات:',
+                  style: TextStyle(color: Colors.white70)),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
                   Column(
                     children: [
-                      const Text('من الساعة:', style: TextStyle(color: Colors.white70)),
+                      const Text('من الساعة:',
+                          style: TextStyle(color: Colors.white70)),
                       TextButton(
                         onPressed: () async {
-                          final t = await showTimePicker(context: ctx, initialTime: fromTime);
+                          final t = await showTimePicker(
+                              context: ctx, initialTime: fromTime);
                           if (t != null) setDialogState(() => fromTime = t);
                         },
-                        child: Text(fromTime.format(ctx), style: const TextStyle(color: AppTheme.gold, fontSize: 18)),
+                        child: Text(fromTime.format(ctx),
+                            style: const TextStyle(
+                                color: AppTheme.gold, fontSize: 18)),
                       ),
                     ],
                   ),
                   const Icon(Icons.arrow_forward, color: Colors.white38),
                   Column(
                     children: [
-                      const Text('إلى الساعة:', style: TextStyle(color: Colors.white70)),
+                      const Text('إلى الساعة:',
+                          style: TextStyle(color: Colors.white70)),
                       TextButton(
                         onPressed: () async {
-                          final t = await showTimePicker(context: ctx, initialTime: toTime);
+                          final t = await showTimePicker(
+                              context: ctx, initialTime: toTime);
                           if (t != null) setDialogState(() => toTime = t);
                         },
-                        child: Text(toTime.format(ctx), style: const TextStyle(color: AppTheme.gold, fontSize: 18)),
+                        child: Text(toTime.format(ctx),
+                            style: const TextStyle(
+                                color: AppTheme.gold, fontSize: 18)),
                       ),
                     ],
                   ),
@@ -840,7 +887,8 @@ class _SideDrawerState extends State<SideDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+              child:
+                  const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
@@ -856,27 +904,133 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
+  /// إصلاح عملية فتح السرعات لحقن سكربت وجدولة الإعادة أوتوماتيكياً
   Future<void> _applySpeedBoost(TimeOfDay from, TimeOfDay to) async {
     final router = widget.routerService;
     if (router == null) return;
     try {
-      final profiles = await router.getHotspotProfiles();
-      for (var profile in profiles) {
+      final now = DateTime.now();
+      var toDateTime =
+          DateTime(now.year, now.month, now.day, to.hour, to.minute);
+      if (toDateTime.isBefore(now)) {
+        toDateTime = toDateTime.add(const Duration(days: 1));
+      }
+      final duration = toDateTime.difference(now);
+      final hours = duration.inHours.toString().padLeft(2, '0');
+      final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
+      final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
+      final intervalStr = '$hours:$minutes:$seconds';
+
+      // 1. حفظ الليميت الحالي وإزالته من بروفايلات الهوتسبوت
+      final hsProfiles = await router.getHotspotProfiles();
+      for (var profile in hsProfiles) {
         final id = profile['.id']?.toString() ?? '';
-        if (id.isNotEmpty) {
-          await router.sendCommand('/ip/hotspot/user/profile/set', params: {'numbers': id, 'rate-limit': ''});
+        final rateLimit = profile['rate-limit']?.toString() ?? '';
+        final comment = profile['comment']?.toString() ?? '';
+        if (id.isNotEmpty && rateLimit.isNotEmpty) {
+          await router.sendCommand('/ip/hotspot/user/profile/set', params: {
+            'numbers': id,
+            'rate-limit': '',
+            'comment':
+                'ORIG_LIMIT:$rateLimit ${comment.isEmpty ? "" : "($comment)"}',
+          });
         }
       }
 
-      final activeUsers = await router.getHotspotActive();
-      for (var user in activeUsers) {
+      // 2. حفظ الليميت الحالي وإزالته من بروفايلات البرودباند
+      final pppProfiles = await router.getPppProfiles();
+      for (var profile in pppProfiles) {
+        final id = profile['.id']?.toString() ?? '';
+        final rateLimit = profile['rate-limit']?.toString() ?? '';
+        final comment = profile['comment']?.toString() ?? '';
+        if (id.isNotEmpty && rateLimit.isNotEmpty) {
+          await router.sendCommand('/ppp/profile/set', params: {
+            'numbers': id,
+            'rate-limit': '',
+            'comment':
+                'ORIG_LIMIT:$rateLimit ${comment.isEmpty ? "" : "($comment)"}',
+          });
+        }
+      }
+
+      // 3. طرد جميع المتصلين حالياً
+      final hsActive = await router.getHotspotActive();
+      for (var user in hsActive) {
         final id = user['.id']?.toString() ?? '';
         if (id.isNotEmpty) {
-          await router.sendCommand('/ip/hotspot/active/remove', params: {'numbers': id});
+          await router.sendCommand('/ip/hotspot/active/remove',
+              params: {'numbers': id});
+        }
+      }
+      final pppActive = await router.getPppActive();
+      for (var user in pppActive) {
+        final id = user['.id']?.toString() ?? '';
+        if (id.isNotEmpty) {
+          await router
+              .sendCommand('/ppp/active/remove', params: {'numbers': id});
         }
       }
 
-      _showSnack('🚀 تم فتح السرعات من ${from.format(context)} إلى ${to.format(context)}', backgroundColor: Colors.green);
+      // 4. تنظيف أي سكربت سابق بنفس الاسم
+      try {
+        final oldScheds = await router.sendCommand('/system/scheduler/print');
+        for (var s in oldScheds) {
+          if (s['name'] == 'restore_speed_sched') {
+            await router.sendCommand('/system/scheduler/remove',
+                params: {'numbers': s['.id']});
+          }
+        }
+        final oldScripts = await router.sendCommand('/system/script/print');
+        for (var sc in oldScripts) {
+          if (sc['name'] == 'restore_speed_limits') {
+            await router.sendCommand('/system/script/remove',
+                params: {'numbers': sc['.id']});
+          }
+        }
+      } catch (_) {}
+
+      // 5. كتابة وحقن السكربت والجدولة داخل الميكروتك
+      const scriptSource = ':foreach p in=[/ip/hotspot/user/profile find] do={'
+          ':local c [/ip/hotspot/user/profile get \$p comment];'
+          ':if (\$c ~ "ORIG_LIMIT:") do={'
+          ':local idx [:find \$c "ORIG_LIMIT:"];'
+          ':local rest [:pick \$c (\$idx + 11) [:len \$c]];'
+          ':local spaceIdx [:find \$rest " "];'
+          ':local rl "";'
+          ':if (\$spaceIdx != nil) do={:set rl [:pick \$rest 0 \$spaceIdx]} else={:set rl \$rest};'
+          '/ip/hotspot/user/profile set \$p rate-limit=\$rl comment="";'
+          '}'
+          '};'
+          ':foreach p in=[/ppp/profile find] do={'
+          ':local c [/ppp/profile get \$p comment];'
+          ':if (\$c ~ "ORIG_LIMIT:") do={'
+          ':local idx [:find \$c "ORIG_LIMIT:"];'
+          ':local rest [:pick \$c (\$idx + 11) [:len \$c]];'
+          ':local spaceIdx [:find \$rest " "];'
+          ':local rl "";'
+          ':if (\$spaceIdx != nil) do={:set rl [:pick \$rest 0 \$spaceIdx]} else={:set rl \$rest};'
+          '/ppp/profile set \$p rate-limit=\$rl comment="";'
+          '}'
+          '};'
+          '/ip/hotspot/active/remove [find];'
+          '/ppp/active/remove [find];'
+          '/system/scheduler remove [find name="restore_speed_sched"];'
+          '/system/script remove [find name="restore_speed_limits"];';
+
+      await router.sendCommand('/system/script/add', params: {
+        'name': 'restore_speed_limits',
+        'source': scriptSource,
+      });
+
+      await router.sendCommand('/system/scheduler/add', params: {
+        'name': 'restore_speed_sched',
+        'interval': intervalStr,
+        'on-event': 'restore_speed_limits',
+      });
+
+      _showSnack(
+          '🚀 تم فتح السرعات وطرد المتصلين وحقن سكربت الإعادة التلقائي بعد $intervalStr',
+          backgroundColor: Colors.green);
     } catch (e) {
       _showSnack('❌ فشل فتح السرعات: $e', backgroundColor: Colors.red);
     }
@@ -889,11 +1043,13 @@ class _SideDrawerState extends State<SideDrawer> {
         context: context,
         builder: (ctx) => AlertDialog(
           backgroundColor: AppTheme.semiBlack,
-          title: const Text('فتح سرعة مستخدم', style: TextStyle(color: Colors.white)),
+          title: const Text('فتح سرعة مستخدم',
+              style: TextStyle(color: Colors.white)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Text('أدخل اسم المستخدم:', style: TextStyle(color: Colors.white70, fontSize: 12)),
+              const Text('أدخل اسم المستخدم:',
+                  style: TextStyle(color: Colors.white70, fontSize: 12)),
               const SizedBox(height: 8),
               TextField(
                 controller: nameController,
@@ -904,7 +1060,9 @@ class _SideDrawerState extends State<SideDrawer> {
                   hintStyle: const TextStyle(color: Colors.white30),
                   filled: true,
                   fillColor: Colors.white10,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(8),
+                      borderSide: BorderSide.none),
                 ),
               ),
             ],
@@ -912,7 +1070,8 @@ class _SideDrawerState extends State<SideDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+              child:
+                  const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
@@ -935,37 +1094,44 @@ class _SideDrawerState extends State<SideDrawer> {
     if (router == null || username.isEmpty) return;
 
     try {
-      final secrets = await router.sendCommand('/ppp/secret/print', useCache: false);
+      final secrets =
+          await router.sendCommand('/ppp/secret/print', useCache: false);
       final secret = secrets.firstWhere(
         (s) => s['name']?.toString().toLowerCase() == username.toLowerCase(),
         orElse: () => {},
       );
 
       if (secret.isEmpty) {
-        _showSnack('⚠️ المستخدم "$username" غير موجود', backgroundColor: Colors.orange);
+        _showSnack('⚠️ المستخدم "$username" غير موجود',
+            backgroundColor: Colors.orange);
         return;
       }
 
       final secretId = secret['.id']?.toString() ?? '';
       if (secretId.isNotEmpty) {
         try {
-          await router.sendCommand('/ppp/profile/add', params: {'name': 'Speed', 'rate-limit': '', 'only-one': 'no'});
+          await router.sendCommand('/ppp/profile/add',
+              params: {'name': 'Speed', 'rate-limit': '', 'only-one': 'no'});
         } catch (_) {}
-        await router.sendCommand('/ppp/secret/set', params: {'numbers': secretId, 'profile': 'Speed'});
+        await router.sendCommand('/ppp/secret/set',
+            params: {'numbers': secretId, 'profile': 'Speed'});
       }
 
-      final active = await router.sendCommand('/ppp/active/print', useCache: false);
+      final active =
+          await router.sendCommand('/ppp/active/print', useCache: false);
       for (final session in active) {
         final sessionName = session['name']?.toString().toLowerCase() ?? '';
         if (sessionName == username.toLowerCase()) {
           final activeId = session['.id']?.toString() ?? '';
           if (activeId.isNotEmpty) {
-            await router.sendCommand('/ppp/active/remove', params: {'numbers': activeId});
+            await router.sendCommand('/ppp/active/remove',
+                params: {'numbers': activeId});
           }
         }
       }
 
-      _showSnack('✅ تم فتح سرعة "$username" بنجاح', backgroundColor: Colors.green);
+      _showSnack('✅ تم فتح سرعة "$username" بنجاح',
+          backgroundColor: Colors.green);
     } catch (e) {
       _showSnack('❌ فشل: $e', backgroundColor: Colors.red);
     }
@@ -1015,9 +1181,21 @@ class _SideDrawerState extends State<SideDrawer> {
               _infoRow('الجهاز', res['board-name'] ?? '-'),
               _infoRow('الإصدار', res['version'] ?? '-'),
               _infoRow('المعالج', res['cpu'] ?? '-'),
-              _infoRow('RAM الكلي', _formatBytes(int.tryParse(res['total-memory']?.toString() ?? '0') ?? 0)),
-              _infoRow('RAM المتاح', _formatBytes(int.tryParse(res['free-memory']?.toString() ?? '0') ?? 0)),
-              _infoRow('التخزين الكلي', _formatBytes(int.tryParse(res['total-hdd-space']?.toString() ?? '0') ?? 0)),
+              _infoRow(
+                  'RAM الكلي',
+                  _formatBytes(
+                      int.tryParse(res['total-memory']?.toString() ?? '0') ??
+                          0)),
+              _infoRow(
+                  'RAM المتاح',
+                  _formatBytes(
+                      int.tryParse(res['free-memory']?.toString() ?? '0') ??
+                          0)),
+              _infoRow(
+                  'التخزين الكلي',
+                  _formatBytes(
+                      int.tryParse(res['total-hdd-space']?.toString() ?? '0') ??
+                          0)),
               _infoRow('وقت التشغيل', res['uptime'] ?? '-'),
               _infoRow('درجة الحرارة', '${res['temperature'] ?? '-'}°C'),
             ],
@@ -1025,7 +1203,8 @@ class _SideDrawerState extends State<SideDrawer> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('إغلاق', style: TextStyle(color: AppTheme.gold)),
+              child:
+                  const Text('إغلاق', style: TextStyle(color: AppTheme.gold)),
             ),
           ],
         ),
@@ -1043,8 +1222,14 @@ class _SideDrawerState extends State<SideDrawer> {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          Text('$label: ', style: const TextStyle(color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.bold)),
-          Expanded(child: Text(value, style: const TextStyle(color: Colors.white70, fontSize: 12))),
+          Text('$label: ',
+              style: const TextStyle(
+                  color: AppTheme.gold,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold)),
+          Expanded(
+              child: Text(value,
+                  style: const TextStyle(color: Colors.white70, fontSize: 12))),
         ],
       ),
     );
@@ -1052,8 +1237,10 @@ class _SideDrawerState extends State<SideDrawer> {
 
   String _formatBytes(int bytes) {
     if (bytes <= 0) return '0 B';
-    if (bytes >= 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
-    if (bytes >= 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes >= 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    if (bytes >= 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
     return '$bytes B';
   }
@@ -1072,7 +1259,8 @@ class _SideDrawerState extends State<SideDrawer> {
     return ListTile(
       dense: true,
       leading: Icon(icon, color: iconColor, size: 20),
-      title: Text(label, style: TextStyle(color: labelColor ?? Colors.white, fontSize: 13)),
+      title: Text(label,
+          style: TextStyle(color: labelColor ?? Colors.white, fontSize: 13)),
       onTap: onTap,
     );
   }
@@ -1080,7 +1268,12 @@ class _SideDrawerState extends State<SideDrawer> {
   Widget _sectionHeader(String title) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      child: Text(title, style: const TextStyle(color: AppTheme.gold, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+      child: Text(title,
+          style: const TextStyle(
+              color: AppTheme.gold,
+              fontSize: 11,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 0.5)),
     );
   }
 
@@ -1088,15 +1281,25 @@ class _SideDrawerState extends State<SideDrawer> {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
-      decoration: const BoxDecoration(border: Border(top: BorderSide(color: Colors.white12, width: 1)),),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Colors.white12, width: 1)),
+      ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('ST Manager', style: TextStyle(color: AppTheme.gold.withOpacity(0.95), fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.6)),
+          Text('ST Manager',
+              style: TextStyle(
+                  color: AppTheme.gold.withOpacity(0.95),
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.6)),
           const SizedBox(height: 4),
-          Text('الإصدار $_appVersion • برمجة م.احمد النعيمي', textAlign: TextAlign.center, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+          Text('الإصدار $_appVersion • برمجة م.احمد النعيمي',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white38, fontSize: 11)),
           const SizedBox(height: 2),
-          const Text('+963995870655', style: TextStyle(color: Colors.white38, fontSize: 11)),
+          const Text('+963995870655',
+              style: TextStyle(color: Colors.white38, fontSize: 11)),
         ],
       ),
     );
@@ -1104,7 +1307,8 @@ class _SideDrawerState extends State<SideDrawer> {
 
   Widget _buildSubscriptionHeader() {
     final color = _subscriptionColor();
-    final text = _loadingDays ? 'جارٍ التحقق من الترخيص...' : _subscriptionText();
+    final text =
+        _loadingDays ? 'جارٍ التحقق من الترخيص...' : _subscriptionText();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1113,16 +1317,22 @@ class _SideDrawerState extends State<SideDrawer> {
           children: [
             Icon(Icons.router, color: AppTheme.gold, size: 28),
             SizedBox(width: 10),
-            Text('ST Manager', style: TextStyle(color: AppTheme.gold, fontSize: 18, fontWeight: FontWeight.bold)),
+            Text('ST Manager',
+                style: TextStyle(
+                    color: AppTheme.gold,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
           ],
         ),
         const SizedBox(height: 4),
-        const Text('إدارة الشبكة والتحكم الذكي', style: TextStyle(color: Colors.white54, fontSize: 11)),
+        const Text('إدارة الشبكة والتحكم الذكي',
+            style: TextStyle(color: Colors.white54, fontSize: 11)),
         const SizedBox(height: 8),
         Row(
           children: [
             Icon(
-              _subscriptionDaysRemaining != null && _subscriptionDaysRemaining! <= 0
+              _subscriptionDaysRemaining != null &&
+                      _subscriptionDaysRemaining! <= 0
                   ? Icons.error_outline
                   : Icons.verified_user,
               color: color,
@@ -1130,14 +1340,19 @@ class _SideDrawerState extends State<SideDrawer> {
             ),
             const SizedBox(width: 6),
             _loadingDays
-                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.gold))
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppTheme.gold))
                 : Text(text, style: TextStyle(color: color, fontSize: 12)),
           ],
         ),
         if (_subscriptionExpiryDate != null && !_loadingDays)
           Padding(
             padding: const EdgeInsets.only(top: 2),
-            child: Text('ينتهي: ${_formatSubscriptionDate()}', style: const TextStyle(color: Colors.white38, fontSize: 10)),
+            child: Text('ينتهي: ${_formatSubscriptionDate()}',
+                style: const TextStyle(color: Colors.white38, fontSize: 10)),
           ),
       ],
     );
@@ -1182,7 +1397,11 @@ class _SideDrawerState extends State<SideDrawer> {
                     label: 'User Manager',
                     onTap: () {
                       Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute(builder: (_) => UserManagerScreen(routerService: widget.routerService)));
+                      Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => UserManagerScreen(
+                                  routerService: widget.routerService)));
                     },
                   ),
                   _buildTile(
@@ -1259,21 +1478,29 @@ class _SideDrawerState extends State<SideDrawer> {
             Text('تأكيد إعادة التشغيل', style: TextStyle(color: Colors.white)),
           ],
         ),
-        content: const Text('هل أنت متأكد من إعادة تشغيل الراوتر؟\nسيتم قطع جميع الاتصالات مؤقتاً.', style: TextStyle(color: Colors.white70)),
+        content: const Text(
+            'هل أنت متأكد من إعادة تشغيل الراوتر؟\nسيتم قطع جميع الاتصالات مؤقتاً.',
+            style: TextStyle(color: Colors.white70)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء', style: TextStyle(color: Colors.white54))),
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child:
+                  const Text('إلغاء', style: TextStyle(color: Colors.white54))),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('إعادة تشغيل', style: TextStyle(color: Colors.white)),
+            child: const Text('إعادة تشغيل',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
     if (confirmed == true && widget.routerService != null) {
       try {
-        await widget.routerService!.sendCommand('/system/reboot', usePost: true);
-        _showSnack('🔄 جاري إعادة تشغيل الراوتر...', backgroundColor: Colors.orange);
+        await widget.routerService!
+            .sendCommand('/system/reboot', usePost: true);
+        _showSnack('🔄 جاري إعادة تشغيل الراوتر...',
+            backgroundColor: Colors.orange);
       } catch (e) {
         _showSnack('❌ فشل: $e', backgroundColor: Colors.red);
       }

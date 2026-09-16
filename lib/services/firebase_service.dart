@@ -16,7 +16,7 @@ class FirebaseService {
     }
   }
 
-  /// ✅ دالة جديدة: جلب تاريخ انتهاء الترخيص
+  /// جلب تاريخ انتهاء الترخيص المباشر من الفيربيس
   static Future<DateTime?> getLicenseExpiry(String phoneNumber) async {
     try {
       final doc =
