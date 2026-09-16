@@ -373,8 +373,9 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
   }
 
   String _formatSpeed(double speedMbps) {
-    if (speedMbps >= 1000)
+    if (speedMbps >= 1000) {
       return '${(speedMbps / 1000).toStringAsFixed(1)} Gbps';
+    }
     if (speedMbps >= 1) return '${speedMbps.toStringAsFixed(1)} Mbps';
     return '${(speedMbps * 1000).toStringAsFixed(0)} Kbps';
   }
@@ -407,10 +408,25 @@ class _HotspotActiveUsersScreenState extends State<HotspotActiveUsersScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        // ✅ تمت إضافة زر الرجوع للعودة إلى الداشبورد
+        // ✅ تم الإصلاح: زر الرجوع للعودة إلى الداشبورد وحذف مسار تسجيل الدخول
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () {
+            // الطريقة الأولى: استخدام المسار المسمى للوحة التحكم (قم بتعديل '/dashboard' إذا كان مسارك مختلفاً مثل '/home' أو '/')
+            Navigator.pushNamedAndRemoveUntil(
+                context, '/dashboard', (route) => false);
+
+            /* 
+            // الطريقة الثانية: في حال عدم استخدامك للمسارات المسماة (Named Routes)، 
+            // قم بإلغاء التعليق عن الكود التالي وتأكد من عمل استيراد لصفحة لوحة التحكم DashboardScreen في أعلى الملف:
+            
+            Navigator.pushAndRemoveUntil(
+              context,
+              MaterialPageRoute(builder: (context) => DashboardScreen(routerService: widget.routerService)),
+              (route) => false,
+            );
+            */
+          },
         ),
         title: const Text('جميع حسابات الهوتسبوت'),
         actions: [

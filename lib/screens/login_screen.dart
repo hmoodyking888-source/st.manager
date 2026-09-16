@@ -12,11 +12,6 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  static const String _licenseCachePhoneKey = 'license_cache_phone';
-  static const String _licenseCacheValueKey = 'license_cache_value';
-  static const String _licenseCacheCheckedAtKey = 'license_cache_checked_at';
-  static const Duration _licenseCacheDuration = Duration(hours: 12);
-
   final _phoneController = TextEditingController();
   final _pinController = TextEditingController();
   final _pinConfirmController = TextEditingController();
@@ -54,52 +49,44 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  Future<bool?> _readCachedLicense(String phone) async {
-    final cachedPhone = await _storage.read(_licenseCachePhoneKey);
-    final cachedValue = await _storage.read(_licenseCacheValueKey);
-    final cachedAt = await _storage.read(_licenseCacheCheckedAtKey);
-
-    if (cachedPhone == null ||
-        cachedValue == null ||
-        cachedAt == null ||
-        cachedPhone.trim() != phone.trim()) {
-      return null;
-    }
-
-    final parsedAt = DateTime.tryParse(cachedAt);
-    if (parsedAt == null) return null;
-
-    if (DateTime.now().difference(parsedAt) > _licenseCacheDuration) {
-      return null;
-    }
-
-    return cachedValue == 'true';
-  }
-
-  Future<void> _saveCachedLicense(String phone, bool licensed) async {
-    await _storage.write(_licenseCachePhoneKey, phone);
-    await _storage.write(_licenseCacheValueKey, licensed ? 'true' : 'false');
-    await _storage.write(
-      _licenseCacheCheckedAtKey,
-      DateTime.now().toIso8601String(),
-    );
-  }
-
   Future<bool> _resolveLicense(String phone) async {
-    final cached = await _readCachedLicense(phone);
-    if (cached != null) return cached;
+    DateTime? expiryDate;
+    bool isError = false;
 
     try {
-      final licensed = await FirebaseService.checkLicense(phone).timeout(
+      // جلب التاريخ الفعلي ليتوافق مع القائمة الجانبية
+      expiryDate = await FirebaseService.getLicenseExpiry(phone).timeout(
         const Duration(seconds: 10),
       );
-      await _saveCachedLicense(phone, licensed);
-      return licensed;
+
+      if (expiryDate != null) {
+        await _storage.write(
+            'license_expiry_date', expiryDate.toIso8601String());
+        await _storage.write('license_phone', phone);
+      }
     } catch (_) {
-      final fallback = await _readCachedLicense(phone);
-      if (fallback != null) return fallback;
-      rethrow;
+      isError = true;
     }
+
+    // الاعتماد على التخزين المؤقت في حال غياب الإنترنت
+    if (expiryDate == null && isError) {
+      final cachedPhone = await _storage.read('license_phone');
+      if (cachedPhone != null && cachedPhone.trim() == phone.trim()) {
+        final rawExpiry = await _storage.read('license_expiry_date');
+        if (rawExpiry != null && rawExpiry.trim().isNotEmpty) {
+          expiryDate = DateTime.tryParse(rawExpiry.trim());
+        }
+      }
+    }
+
+    if (expiryDate == null) return false;
+
+    // حساب الأيام تماماً كما في القائمة الجانبية
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final expDate = DateTime(expiryDate.year, expiryDate.month, expiryDate.day);
+
+    return expDate.difference(today).inDays > 0;
   }
 
   Future<void> _submit() async {
@@ -160,18 +147,29 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
+      // حساب الفترة التجريبية وتخزينها ليتم قراءتها من القائمة الجانبية بشكل مطابق
       final firstLaunchStr = await _storage.getFirstLaunch();
+      DateTime firstLaunch;
 
       if (firstLaunchStr == null) {
-        await _storage.setFirstLaunch(DateTime.now().toIso8601String());
-        _navigateTo('/routers');
-        return;
+        firstLaunch = DateTime.now();
+        await _storage.setFirstLaunch(firstLaunch.toIso8601String());
+      } else {
+        firstLaunch = DateTime.parse(firstLaunchStr);
       }
 
-      final firstLaunch = DateTime.parse(firstLaunchStr);
-      final trialEnd = firstLaunch.add(const Duration(days: 3));
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final launchDay =
+          DateTime(firstLaunch.year, firstLaunch.month, firstLaunch.day);
 
-      if (DateTime.now().isBefore(trialEnd)) {
+      final trialEnd = launchDay.add(const Duration(days: 30));
+
+      if (trialEnd.difference(today).inDays > 0) {
+        // مزامنة تاريخ الانتهاء مع القائمة الجانبية ليتوافق عدد الأيام
+        await _storage.write('license_expiry_date', trialEnd.toIso8601String());
+        await _storage.write('license_phone', phone);
+
         _navigateTo('/routers');
         return;
       }

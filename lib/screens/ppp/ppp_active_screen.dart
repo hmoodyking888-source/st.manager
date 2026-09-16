@@ -119,7 +119,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   ) {
     if (isActive || isDisabled || isExpired) return false;
 
-    final lastLoggedOut = _normalizeText(secret['last-logged-out']).toLowerCase();
+    final lastLoggedOut =
+        _normalizeText(secret['last-logged-out']).toLowerCase();
 
     if (lastLoggedOut.isNotEmpty &&
         !lastLoggedOut.contains('jan/01/1970') &&
@@ -130,7 +131,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     return true;
   }
 
-  String _dateOnlyString(DateTime date) => DateFormat('yyyy-MM-dd').format(date);
+  String _dateOnlyString(DateTime date) =>
+      DateFormat('yyyy-MM-dd').format(date);
 
   String _formatUptime(String uptime) {
     final v = uptime.trim();
@@ -206,7 +208,14 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   }
 
   String _sessionKey(Map<String, dynamic> item) {
-    for (final key in ['.id', 'name', 'user', 'username', 'caller-id', 'address']) {
+    for (final key in [
+      '.id',
+      'name',
+      'user',
+      'username',
+      'caller-id',
+      'address'
+    ]) {
       final v = _normalizeText(item[key]);
       if (v.isNotEmpty) return v;
     }
@@ -388,19 +397,23 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     }
 
     try {
-      final result = await widget.routerService!.sendCommand(
-        '/interface/monitor-traffic',
-        params: {
-          'interface': ifName,
-          'once': '',
-        },
-        useCache: false,
-      ).timeout(_trafficTimeout);
+      final result = await widget.routerService!
+          .sendCommand(
+            '/interface/monitor-traffic',
+            params: {
+              'interface': ifName,
+              'once': '',
+            },
+            useCache: false,
+          )
+          .timeout(_trafficTimeout);
 
       if (result.isNotEmpty) {
         final row = result.first;
-        final rx = double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ?? 0;
-        final tx = double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ?? 0;
+        final rx =
+            double.tryParse(row['rx-bits-per-second']?.toString() ?? '') ?? 0;
+        final tx =
+            double.tryParse(row['tx-bits-per-second']?.toString() ?? '') ?? 0;
         return {'rx': rx / 1000000, 'tx': tx / 1000000};
       }
     } catch (_) {}
@@ -420,7 +433,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final trafficBySession = <String, Map<String, double>>{};
 
       for (var i = 0; i < activeList.length; i += batchSize) {
-        final end = (i + batchSize < activeList.length) ? i + batchSize : activeList.length;
+        final end = (i + batchSize < activeList.length)
+            ? i + batchSize
+            : activeList.length;
         final batch = activeList.sublist(i, end);
 
         final entries = await Future.wait(
@@ -594,8 +609,10 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
         parsed,
       );
 
-      final rx = sessionKey != null ? (_trafficCache[sessionKey]?['rx'] ?? 0) : 0;
-      final tx = sessionKey != null ? (_trafficCache[sessionKey]?['tx'] ?? 0) : 0;
+      final rx =
+          sessionKey != null ? (_trafficCache[sessionKey]?['rx'] ?? 0) : 0;
+      final tx =
+          sessionKey != null ? (_trafficCache[sessionKey]?['tx'] ?? 0) : 0;
       final totalSpeed = rx + tx;
       final uptime = _normalizeText(activeEntry?['uptime']);
 
@@ -615,9 +632,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       final address = _normalizeText(activeEntry?['address']);
       final remote = _normalizeText(secret['remote-address']);
       final local = _normalizeText(secret['local-address']);
-      final browserIp = address.isNotEmpty
-          ? address
-          : (remote.isNotEmpty ? remote : local);
+      final browserIp =
+          address.isNotEmpty ? address : (remote.isNotEmpty ? remote : local);
 
       return {
         ...secret,
@@ -904,7 +920,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
   // طرد جميع المتصلين
   Future<void> _kickAllActive() async {
     final activeAccounts = _accounts
-        .where((u) => u['active'] == true && _normalizeText(u['active-id']).isNotEmpty)
+        .where((u) =>
+            u['active'] == true && _normalizeText(u['active-id']).isNotEmpty)
         .toList();
 
     if (activeAccounts.isEmpty) {
@@ -921,7 +938,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppTheme.semiBlack,
-        title: const Text('طرد جميع المتصلين', style: TextStyle(color: Colors.white)),
+        title: const Text('طرد جميع المتصلين',
+            style: TextStyle(color: Colors.white)),
         content: Text(
           'هل أنت متأكد من قطع اتصال جميع المستخدمين المتصلين؟\n(العدد: ${activeAccounts.length})',
           style: const TextStyle(color: Colors.white70),
@@ -934,7 +952,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('طرد الجميع', style: TextStyle(color: Colors.white)),
+            child:
+                const Text('طرد الجميع', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -961,7 +980,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('تم قطع اتصال $count من أصل ${activeAccounts.length} مستخدم'),
+          content: Text(
+              'تم قطع اتصال $count من أصل ${activeAccounts.length} مستخدم'),
           backgroundColor: Colors.green,
         ),
       );
@@ -971,8 +991,13 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   // طرد المحدد
   Future<void> _bulkDisconnect() async {
-    final selectedUsers = _accounts.where((u) => _selectedIds.contains(_normalizeText(u['.id']))).toList();
-    final activeSelected = selectedUsers.where((u) => u['active'] == true && _normalizeText(u['active-id']).isNotEmpty).toList();
+    final selectedUsers = _accounts
+        .where((u) => _selectedIds.contains(_normalizeText(u['.id'])))
+        .toList();
+    final activeSelected = selectedUsers
+        .where((u) =>
+            u['active'] == true && _normalizeText(u['active-id']).isNotEmpty)
+        .toList();
 
     if (activeSelected.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1013,7 +1038,9 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
 
   // تغيير حالة الدفع للمحدد
   Future<void> _bulkTogglePaid() async {
-    final selectedUsers = _accounts.where((u) => _selectedIds.contains(_normalizeText(u['.id']))).toList();
+    final selectedUsers = _accounts
+        .where((u) => _selectedIds.contains(_normalizeText(u['.id'])))
+        .toList();
     if (selectedUsers.isEmpty) return;
 
     setState(() => _loading = true);
@@ -1042,7 +1069,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: AppTheme.semiBlack,
-        title: const Text('تأكيد الحذف الجماعي', style: TextStyle(color: Colors.white)),
+        title: const Text('تأكيد الحذف الجماعي',
+            style: TextStyle(color: Colors.white)),
         content: Text(
           'هل أنت متأكد من حذف الحسابات المحددة؟ (${_selectedIds.length} حساب)',
           style: const TextStyle(color: Colors.white70),
@@ -1055,7 +1083,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('حذف الحسابات', style: TextStyle(color: Colors.white)),
+            child: const Text('حذف الحسابات',
+                style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -1083,11 +1112,7 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       _clearSelection();
       return;
     }
-    if (Navigator.of(context).canPop()) {
-      Navigator.of(context).pop();
-    } else {
-      Navigator.of(context).pushReplacementNamed('/dashboard');
-    }
+    Navigator.of(context).pushReplacementNamed('/dashboard');
   }
 
   Future<void> _togglePaid(Map<String, dynamic> user) async {
@@ -1189,7 +1214,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+              child:
+                  const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, controller.text.trim()),
@@ -1653,15 +1679,19 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 runSpacing: 4,
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  if (profile.isNotEmpty) _buildMiniPill(profile, AppTheme.gold),
+                  if (profile.isNotEmpty)
+                    _buildMiniPill(profile, AppTheme.gold),
                   _buildMiniPill(
                     isPaid ? 'مدفوع' : 'غير مدفوع',
                     isPaid ? Colors.green : Colors.red,
                   ),
-                  if (expiry.isNotEmpty) _buildMiniPill('تاريخ: $expiry', Colors.teal),
-                  if (phone.isNotEmpty) _buildMiniPill('📱 $phone', Colors.blue),
+                  if (expiry.isNotEmpty)
+                    _buildMiniPill('تاريخ: $expiry', Colors.teal),
+                  if (phone.isNotEmpty)
+                    _buildMiniPill('📱 $phone', Colors.blue),
                   if (isActive && uptime.isNotEmpty)
-                    _buildMiniPill('⏱ ${_formatUptime(uptime)}', AppTheme.greenOnline),
+                    _buildMiniPill(
+                        '⏱ ${_formatUptime(uptime)}', AppTheme.greenOnline),
                   if (browserIp.isNotEmpty)
                     InkWell(
                       onTap: () => _openBrowser(user),
@@ -1736,12 +1766,17 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
           children: [
             Expanded(
               child: ElevatedButton.icon(
-                onPressed: onMain ? () => _load(background: true) : _handleBackNavigation,
+                onPressed: onMain
+                    ? () => _load(background: true)
+                    : _handleBackNavigation,
                 icon: const Icon(Icons.people_alt_outlined),
                 label: const Text('المستخدمين'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: onMain ? AppTheme.gold : Theme.of(context).cardColor,
-                  foregroundColor: onMain ? Colors.black : Theme.of(context).colorScheme.onSurface,
+                  backgroundColor:
+                      onMain ? AppTheme.gold : Theme.of(context).cardColor,
+                  foregroundColor: onMain
+                      ? Colors.black
+                      : Theme.of(context).colorScheme.onSurface,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
@@ -1756,9 +1791,12 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                 icon: const Icon(Icons.folder_open),
                 label: const Text('بروفايل'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: onMain ? Theme.of(context).colorScheme.onSurface : AppTheme.gold,
+                  foregroundColor: onMain
+                      ? Theme.of(context).colorScheme.onSurface
+                      : AppTheme.gold,
                   side: BorderSide(
-                    color: onMain ? Theme.of(context).dividerColor : AppTheme.gold,
+                    color:
+                        onMain ? Theme.of(context).dividerColor : AppTheme.gold,
                   ),
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(
@@ -1790,12 +1828,18 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
             icon: Icon(_isSelectionMode ? Icons.close : Icons.arrow_back),
             onPressed: _handleBackNavigation,
           ),
-          title: Text(_isSelectionMode ? 'تم تحديد ${_selectedIds.length}' : 'البرودباند'),
+          title: Text(_isSelectionMode
+              ? 'تم تحديد ${_selectedIds.length}'
+              : 'البرودباند'),
           actions: [
             if (_isSelectionMode) ...[
               IconButton(
-                icon: Icon(_selectedIds.length == filteredList.length ? Icons.deselect : Icons.select_all),
-                tooltip: _selectedIds.length == filteredList.length ? 'إلغاء التحديد' : 'تحديد الكل',
+                icon: Icon(_selectedIds.length == filteredList.length
+                    ? Icons.deselect
+                    : Icons.select_all),
+                tooltip: _selectedIds.length == filteredList.length
+                    ? 'إلغاء التحديد'
+                    : 'تحديد الكل',
                 onPressed: () => _selectAll(filteredList),
               ),
               PopupMenuButton<String>(
@@ -1875,15 +1919,18 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       child: TextField(
                         decoration: InputDecoration(
                           hintText: 'بحث...',
-                          contentPadding: const EdgeInsets.symmetric(vertical: 8),
-                          prefixIcon: const Icon(Icons.search, color: AppTheme.gold, size: 20),
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 8),
+                          prefixIcon: const Icon(Icons.search,
+                              color: AppTheme.gold, size: 20),
                           filled: true,
                           fillColor: Theme.of(context).cardColor,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
                             borderSide: BorderSide.none,
                           ),
-                          hintStyle: TextStyle(color: onSurface.withOpacity(0.4), fontSize: 13),
+                          hintStyle: TextStyle(
+                              color: onSurface.withOpacity(0.4), fontSize: 13),
                         ),
                         style: TextStyle(color: onSurface, fontSize: 13),
                         onChanged: (q) => setState(() => _searchQuery = q),
@@ -1902,7 +1949,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                       DropdownMenuItem(value: 'new', child: Text('الجديدة')),
                       DropdownMenuItem(value: 'name', child: Text('الاسم')),
                       DropdownMenuItem(value: 'uptime', child: Text('الوقت')),
-                      DropdownMenuItem(value: 'usage', child: Text('الاستخدام')),
+                      DropdownMenuItem(
+                          value: 'usage', child: Text('الاستخدام')),
                       DropdownMenuItem(value: 'profile', child: Text('الباقة')),
                     ],
                     onChanged: (val) {
@@ -1923,9 +1971,12 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                           Center(
                             child: Text(
                               _accounts.isEmpty
-                                  ? (_loading ? 'جاري التحميل...' : 'لا توجد حسابات')
+                                  ? (_loading
+                                      ? 'جاري التحميل...'
+                                      : 'لا توجد حسابات')
                                   : 'لا توجد نتائج',
-                              style: TextStyle(color: onSurface.withOpacity(0.6)),
+                              style:
+                                  TextStyle(color: onSurface.withOpacity(0.6)),
                             ),
                           ),
                         ],
@@ -1937,31 +1988,38 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
                           vertical: 4,
                         ),
                         itemCount: filteredList.length,
-                        itemBuilder: (_, i) => _buildAccountCard(filteredList[i]),
+                        itemBuilder: (_, i) =>
+                            _buildAccountCard(filteredList[i]),
                       ),
               ),
             ),
             if (_isSelectionMode)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 color: AppTheme.semiBlack,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red.withOpacity(0.8)),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.withOpacity(0.8)),
                       onPressed: _bulkDisconnect,
                       icon: const Icon(Icons.link_off, size: 16),
-                      label: const Text('طرد المحدد', style: TextStyle(fontSize: 11)),
+                      label: const Text('طرد المحدد',
+                          style: TextStyle(fontSize: 11)),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green.withOpacity(0.8)),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green.withOpacity(0.8)),
                       onPressed: _bulkTogglePaid,
                       icon: const Icon(Icons.attach_money, size: 16),
-                      label: const Text('تعديل الدفع', style: TextStyle(fontSize: 11)),
+                      label: const Text('تعديل الدفع',
+                          style: TextStyle(fontSize: 11)),
                     ),
                     ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade900),
+                      style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red.shade900),
                       onPressed: _bulkDelete,
                       icon: const Icon(Icons.delete, size: 16),
                       label: const Text('حذف', style: TextStyle(fontSize: 11)),
@@ -2220,7 +2278,8 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
+                child: const Text('إلغاء',
+                    style: TextStyle(color: Colors.white54)),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
@@ -2238,7 +2297,7 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     if (result != true) return;
     final name = _nameController.text.trim();
     final rateLimit = _rateLimitController.text.trim();
-    
+
     if (name.isEmpty) return;
 
     final numbers = isEdit ? _normalize(profile['.id']) : '';
@@ -2246,31 +2305,37 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     Map<String, String> params = {
       'name': name,
     };
-    
+
     if (rateLimit.isNotEmpty) params['rate-limit'] = rateLimit;
     if (selectedPool.isNotEmpty) params['remote-address'] = selectedPool;
 
     try {
       if (isEdit) {
         params['numbers'] = numbers;
-        await widget.routerService?.sendCommand(
-          '/ppp/profile/set',
-          params: params,
-        ).timeout(_actionTimeout);
+        await widget.routerService
+            ?.sendCommand(
+              '/ppp/profile/set',
+              params: params,
+            )
+            .timeout(_actionTimeout);
       } else {
         params['only-one'] = 'yes';
         params['change-tcp-mss'] = 'yes';
-        await widget.routerService?.sendCommand(
-          '/ppp/profile/add',
-          params: params,
-        ).timeout(_actionTimeout);
+        await widget.routerService
+            ?.sendCommand(
+              '/ppp/profile/add',
+              params: params,
+            )
+            .timeout(_actionTimeout);
       }
       await _load(background: true);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(isEdit ? 'تعذر تعديل البروفايل: $e' : 'تعذر إضافة البروفايل: $e'),
+            content: Text(isEdit
+                ? 'تعذر تعديل البروفايل: $e'
+                : 'تعذر إضافة البروفايل: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -2364,21 +2429,78 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
       _ProfileField('السرعة', rateLimit.isEmpty ? '-' : rateLimit),
       _ProfileField('رنج الآيبي', remoteAddress.isEmpty ? '-' : remoteAddress),
       _ProfileField('Rate Limit', rateLimit.isEmpty ? '-' : rateLimit),
-      _ProfileField('Only One', _pick(profile, ['only-one']).isEmpty ? '-' : _pick(profile, ['only-one'])),
-      _ProfileField('Change TCP MSS', _pick(profile, ['change-tcp-mss']).isEmpty ? '-' : _pick(profile, ['change-tcp-mss'])),
-      _ProfileField('Local Address', _pick(profile, ['local-address']).isEmpty ? '-' : _pick(profile, ['local-address'])),
-      _ProfileField('Remote Address', remoteAddress.isEmpty ? '-' : remoteAddress),
-      _ProfileField('Session Timeout', _pick(profile, ['session-timeout']).isEmpty ? '-' : _pick(profile, ['session-timeout'])),
-      _ProfileField('Keepalive Timeout', _pick(profile, ['keepalive-timeout']).isEmpty ? '-' : _pick(profile, ['keepalive-timeout'])),
-      _ProfileField('Address List', _pick(profile, ['address-list']).isEmpty ? '-' : _pick(profile, ['address-list'])),
-      _ProfileField('Incoming Filter', _pick(profile, ['incoming-filter']).isEmpty ? '-' : _pick(profile, ['incoming-filter'])),
-      _ProfileField('Outgoing Filter', _pick(profile, ['outgoing-filter']).isEmpty ? '-' : _pick(profile, ['outgoing-filter'])),
-      _ProfileField('DNS', _pick(profile, ['dns-server']).isEmpty ? '-' : _pick(profile, ['dns-server'])),
-      _ProfileField('Parent Queue', _pick(profile, ['parent-queue']).isEmpty ? '-' : _pick(profile, ['parent-queue'])),
-      _ProfileField('Bridge Path Cost', _pick(profile, ['bridge-path-cost']).isEmpty ? '-' : _pick(profile, ['bridge-path-cost'])),
-      _ProfileField('Bridge Horizon', _pick(profile, ['bridge-horizon']).isEmpty ? '-' : _pick(profile, ['bridge-horizon'])),
-      _ProfileField('Bridge Learning', _pick(profile, ['bridge-learning']).isEmpty ? '-' : _pick(profile, ['bridge-learning'])),
-      _ProfileField('Comment', _pick(profile, ['comment']).isEmpty ? '-' : _pick(profile, ['comment'])),
+      _ProfileField(
+          'Only One',
+          _pick(profile, ['only-one']).isEmpty
+              ? '-'
+              : _pick(profile, ['only-one'])),
+      _ProfileField(
+          'Change TCP MSS',
+          _pick(profile, ['change-tcp-mss']).isEmpty
+              ? '-'
+              : _pick(profile, ['change-tcp-mss'])),
+      _ProfileField(
+          'Local Address',
+          _pick(profile, ['local-address']).isEmpty
+              ? '-'
+              : _pick(profile, ['local-address'])),
+      _ProfileField(
+          'Remote Address', remoteAddress.isEmpty ? '-' : remoteAddress),
+      _ProfileField(
+          'Session Timeout',
+          _pick(profile, ['session-timeout']).isEmpty
+              ? '-'
+              : _pick(profile, ['session-timeout'])),
+      _ProfileField(
+          'Keepalive Timeout',
+          _pick(profile, ['keepalive-timeout']).isEmpty
+              ? '-'
+              : _pick(profile, ['keepalive-timeout'])),
+      _ProfileField(
+          'Address List',
+          _pick(profile, ['address-list']).isEmpty
+              ? '-'
+              : _pick(profile, ['address-list'])),
+      _ProfileField(
+          'Incoming Filter',
+          _pick(profile, ['incoming-filter']).isEmpty
+              ? '-'
+              : _pick(profile, ['incoming-filter'])),
+      _ProfileField(
+          'Outgoing Filter',
+          _pick(profile, ['outgoing-filter']).isEmpty
+              ? '-'
+              : _pick(profile, ['outgoing-filter'])),
+      _ProfileField(
+          'DNS',
+          _pick(profile, ['dns-server']).isEmpty
+              ? '-'
+              : _pick(profile, ['dns-server'])),
+      _ProfileField(
+          'Parent Queue',
+          _pick(profile, ['parent-queue']).isEmpty
+              ? '-'
+              : _pick(profile, ['parent-queue'])),
+      _ProfileField(
+          'Bridge Path Cost',
+          _pick(profile, ['bridge-path-cost']).isEmpty
+              ? '-'
+              : _pick(profile, ['bridge-path-cost'])),
+      _ProfileField(
+          'Bridge Horizon',
+          _pick(profile, ['bridge-horizon']).isEmpty
+              ? '-'
+              : _pick(profile, ['bridge-horizon'])),
+      _ProfileField(
+          'Bridge Learning',
+          _pick(profile, ['bridge-learning']).isEmpty
+              ? '-'
+              : _pick(profile, ['bridge-learning'])),
+      _ProfileField(
+          'Comment',
+          _pick(profile, ['comment']).isEmpty
+              ? '-'
+              : _pick(profile, ['comment'])),
     ];
 
     return Container(
@@ -2404,7 +2526,8 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: AppTheme.gold.withOpacity(0.12),
-                      border: Border.all(color: AppTheme.gold.withOpacity(0.35)),
+                      border:
+                          Border.all(color: AppTheme.gold.withOpacity(0.35)),
                     ),
                     child: const Icon(Icons.folder, color: AppTheme.gold),
                   ),
@@ -2426,7 +2549,9 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            _pill('السرعة: ${rateLimit.isEmpty ? '-' : rateLimit}', Colors.green),
+                            _pill(
+                                'السرعة: ${rateLimit.isEmpty ? '-' : rateLimit}',
+                                Colors.green),
                             if (remoteAddress.isNotEmpty)
                               _pill('IP Pool: $remoteAddress', Colors.cyan),
                           ],
@@ -2450,7 +2575,8 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
                 itemBuilder: (_, index) {
                   final item = fields[index];
                   return Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.04),
                       borderRadius: BorderRadius.circular(14),
@@ -2639,7 +2765,9 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
                               Center(
                                 child: Text(
                                   _profiles.isEmpty
-                                      ? (_loading ? 'جاري التحميل...' : 'لا توجد بروفايلات')
+                                      ? (_loading
+                                          ? 'جاري التحميل...'
+                                          : 'لا توجد بروفايلات')
                                       : 'لا توجد نتائج',
                                   style: const TextStyle(color: Colors.white70),
                                 ),

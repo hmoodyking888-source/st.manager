@@ -183,7 +183,8 @@ class _PppUserScreenState extends State<PppUserScreen> {
         setState(() => _loadingProfiles = false);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('فشل جلب البروفايلات: يُرجى التحقق من الاتصال بالراوتر'),
+            content:
+                Text('فشل جلب البروفايلات: يُرجى التحقق من الاتصال بالراوتر'),
             backgroundColor: Colors.red,
           ),
         );
@@ -237,8 +238,9 @@ class _PppUserScreenState extends State<PppUserScreen> {
         // حماية في حال عدم رجوع الـ .id من المايكروتيك
         final id = widget.initialData!['.id']?.toString();
         final nameFallback = widget.initialData!['name']?.toString();
-        params['numbers'] = (id != null && id.isNotEmpty) ? id : (nameFallback ?? '');
-        
+        params['numbers'] =
+            (id != null && id.isNotEmpty) ? id : (nameFallback ?? '');
+
         await widget.routerService!.sendCommand(
           '/ppp/secret/set',
           params: params,

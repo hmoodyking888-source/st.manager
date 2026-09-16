@@ -891,6 +891,16 @@ class _SideDrawerState extends State<SideDrawer> {
                   const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _cancelSpeedBoost();
+              },
+              child: const Text('إلغاء وإيقاف الفتح',
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
+            ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
               onPressed: () {
                 Navigator.pop(ctx);
@@ -904,135 +914,200 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  /// إصلاح عملية فتح السرعات لحقن سكربت وجدولة الإعادة أوتوماتيكياً
-  Future<void> _applySpeedBoost(TimeOfDay from, TimeOfDay to) async {
+  Future<void> _cancelSpeedBoost() async {
     final router = widget.routerService;
     if (router == null) return;
     try {
-      final now = DateTime.now();
-      var toDateTime =
-          DateTime(now.year, now.month, now.day, to.hour, to.minute);
-      if (toDateTime.isBefore(now)) {
-        toDateTime = toDateTime.add(const Duration(days: 1));
-      }
-      final duration = toDateTime.difference(now);
-      final hours = duration.inHours.toString().padLeft(2, '0');
-      final minutes = (duration.inMinutes % 60).toString().padLeft(2, '0');
-      final seconds = (duration.inSeconds % 60).toString().padLeft(2, '0');
-      final intervalStr = '$hours:$minutes:$seconds';
+      _showSnack('⏳ جاري إلغاء وإيقاف الفتح وإرجاع السرعات...',
+          backgroundColor: Colors.orange);
 
-      // 1. حفظ الليميت الحالي وإزالته من بروفايلات الهوتسبوت
+      // تنظيف المجدولات والسكربتات المحفوظة بالمايكروتك
+      await _cleanUpMikrotikScripts(router);
+
+      // استرجاع السرعات المحفوظة في التعليقات من الهوتسبوت
       final hsProfiles = await router.getHotspotProfiles();
       for (var profile in hsProfiles) {
         final id = profile['.id']?.toString() ?? '';
-        final rateLimit = profile['rate-limit']?.toString() ?? '';
         final comment = profile['comment']?.toString() ?? '';
-        if (id.isNotEmpty && rateLimit.isNotEmpty) {
+        if (id.isNotEmpty && comment.contains('ORIG_LIMIT:')) {
+          final idx = comment.indexOf('ORIG_LIMIT:');
+          final rest = comment.substring(idx + 11);
+          final spaceIdx = rest.indexOf(' ');
+          final rateLimit = spaceIdx != -1 ? rest.substring(0, spaceIdx) : rest;
+          final newComment = spaceIdx != -1 ? rest.substring(spaceIdx + 1) : '';
+
           await router.sendCommand('/ip/hotspot/user/profile/set', params: {
             'numbers': id,
-            'rate-limit': '',
-            'comment':
-                'ORIG_LIMIT:$rateLimit ${comment.isEmpty ? "" : "($comment)"}',
+            'rate-limit': rateLimit,
+            'comment': newComment.trim(),
           });
         }
       }
 
-      // 2. حفظ الليميت الحالي وإزالته من بروفايلات البرودباند
+      // استرجاع السرعات المحفوظة في التعليقات من البرودباند
       final pppProfiles = await router.getPppProfiles();
       for (var profile in pppProfiles) {
         final id = profile['.id']?.toString() ?? '';
-        final rateLimit = profile['rate-limit']?.toString() ?? '';
         final comment = profile['comment']?.toString() ?? '';
-        if (id.isNotEmpty && rateLimit.isNotEmpty) {
+        if (id.isNotEmpty && comment.contains('ORIG_LIMIT:')) {
+          final idx = comment.indexOf('ORIG_LIMIT:');
+          final rest = comment.substring(idx + 11);
+          final spaceIdx = rest.indexOf(' ');
+          final rateLimit = spaceIdx != -1 ? rest.substring(0, spaceIdx) : rest;
+          final newComment = spaceIdx != -1 ? rest.substring(spaceIdx + 1) : '';
+
           await router.sendCommand('/ppp/profile/set', params: {
             'numbers': id,
-            'rate-limit': '',
-            'comment':
-                'ORIG_LIMIT:$rateLimit ${comment.isEmpty ? "" : "($comment)"}',
+            'rate-limit': rateLimit,
+            'comment': newComment.trim(),
           });
         }
       }
 
-      // 3. طرد جميع المتصلين حالياً
+      // طرد المتصلين لتطبيق السرعات الجديدة (المرجعة)
       final hsActive = await router.getHotspotActive();
       for (var user in hsActive) {
         final id = user['.id']?.toString() ?? '';
-        if (id.isNotEmpty) {
+        if (id.isNotEmpty)
           await router.sendCommand('/ip/hotspot/active/remove',
               params: {'numbers': id});
-        }
       }
       final pppActive = await router.getPppActive();
       for (var user in pppActive) {
         final id = user['.id']?.toString() ?? '';
-        if (id.isNotEmpty) {
+        if (id.isNotEmpty)
           await router
               .sendCommand('/ppp/active/remove', params: {'numbers': id});
-        }
       }
 
-      // 4. تنظيف أي سكربت سابق بنفس الاسم
-      try {
-        final oldScheds = await router.sendCommand('/system/scheduler/print');
-        for (var s in oldScheds) {
-          if (s['name'] == 'restore_speed_sched') {
-            await router.sendCommand('/system/scheduler/remove',
-                params: {'numbers': s['.id']});
-          }
-        }
-        final oldScripts = await router.sendCommand('/system/script/print');
-        for (var sc in oldScripts) {
-          if (sc['name'] == 'restore_speed_limits') {
-            await router.sendCommand('/system/script/remove',
-                params: {'numbers': sc['.id']});
-          }
-        }
-      } catch (_) {}
+      _showSnack('✅ تم إيقاف الفتح واسترجاع جميع السرعات القديمة بنجاح',
+          backgroundColor: Colors.green);
+    } catch (e) {
+      _showSnack('❌ حدث خطأ أثناء إيقاف فتح السرعات: $e',
+          backgroundColor: Colors.red);
+    }
+  }
 
-      // 5. كتابة وحقن السكربت والجدولة داخل الميكروتك
-      const scriptSource = ':foreach p in=[/ip/hotspot/user/profile find] do={'
+  Future<void> _cleanUpMikrotikScripts(RouterService router) async {
+    try {
+      final scheds = await router.sendCommand('/system/scheduler/print');
+      for (var s in scheds) {
+        final name = s['name']?.toString() ?? '';
+        if (name == 'start_speed_sched' || name == 'stop_speed_sched') {
+          await router.sendCommand('/system/scheduler/remove',
+              params: {'numbers': s['.id']});
+        }
+      }
+      final scripts = await router.sendCommand('/system/script/print');
+      for (var sc in scripts) {
+        final name = sc['name']?.toString() ?? '';
+        if (name == 'start_speed_boost' || name == 'stop_speed_boost') {
+          await router.sendCommand('/system/script/remove',
+              params: {'numbers': sc['.id']});
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _applySpeedBoost(TimeOfDay from, TimeOfDay to) async {
+    final router = widget.routerService;
+    if (router == null) return;
+    try {
+      final startTimeStr =
+          '${from.hour.toString().padLeft(2, '0')}:${from.minute.toString().padLeft(2, '0')}:00';
+      final endTimeStr =
+          '${to.hour.toString().padLeft(2, '0')}:${to.minute.toString().padLeft(2, '0')}:00';
+
+      // 1. تنظيف أي سكربتات أو مجدولات سابقة لتفادي التكرار
+      await _cleanUpMikrotikScripts(router);
+
+      // 2. سكربت البداية (إزالة السرعات وحفظها بالتعليقات ثم طرد المتصلين)
+      const startScript = ':foreach p in=[/ip/hotspot/user/profile find] do={'
+          ':local rl [/ip/hotspot/user/profile get \$p rate-limit];'
           ':local c [/ip/hotspot/user/profile get \$p comment];'
-          ':if (\$c ~ "ORIG_LIMIT:") do={'
-          ':local idx [:find \$c "ORIG_LIMIT:"];'
-          ':local rest [:pick \$c (\$idx + 11) [:len \$c]];'
-          ':local spaceIdx [:find \$rest " "];'
+          ':if (\$rl != "") do={'
+          '/ip/hotspot/user/profile set \$p rate-limit="" comment=("ORIG_LIMIT:" . \$rl . " " . \$c);'
+          '}'
+          '};'
+          ':foreach p in=[/ppp/profile find] do={'
+          ':local rl [/ppp/profile get \$p rate-limit];'
+          ':local c [/ppp/profile get \$p comment];'
+          ':if (\$rl != "") do={'
+          '/ppp/profile set \$p rate-limit="" comment=("ORIG_LIMIT:" . \$rl . " " . \$c);'
+          '}'
+          '};'
+          '/ip/hotspot/active/remove [find];'
+          '/ppp/active/remove [find];';
+
+      // 3. سكربت النهاية (استرجاع السرعات من التعليقات، طرد المتصلين، وحذف نفسه)
+      const stopScript = ':foreach p in=[/ip/hotspot/user/profile find] do={'
+          ':local c [/ip/hotspot/user/profile get \$p comment];'
+          ':if ([:typeof [:find \$c "ORIG_LIMIT:"]] != "nil") do={'
+          ':local start ([:find \$c "ORIG_LIMIT:"] + 11);'
+          ':local space [:find \$c " " \$start];'
           ':local rl "";'
-          ':if (\$spaceIdx != nil) do={:set rl [:pick \$rest 0 \$spaceIdx]} else={:set rl \$rest};'
-          '/ip/hotspot/user/profile set \$p rate-limit=\$rl comment="";'
+          ':local newC "";'
+          ':if ([:typeof \$space] != "nil") do={'
+          ':set rl [:pick \$c \$start \$space];'
+          ':set newC [:pick \$c (\$space + 1) [:len \$c]];'
+          '} else={'
+          ':set rl [:pick \$c \$start [:len \$c]];'
+          '}'
+          '/ip/hotspot/user/profile set \$p rate-limit=\$rl comment=\$newC;'
           '}'
           '};'
           ':foreach p in=[/ppp/profile find] do={'
           ':local c [/ppp/profile get \$p comment];'
-          ':if (\$c ~ "ORIG_LIMIT:") do={'
-          ':local idx [:find \$c "ORIG_LIMIT:"];'
-          ':local rest [:pick \$c (\$idx + 11) [:len \$c]];'
-          ':local spaceIdx [:find \$rest " "];'
+          ':if ([:typeof [:find \$c "ORIG_LIMIT:"]] != "nil") do={'
+          ':local start ([:find \$c "ORIG_LIMIT:"] + 11);'
+          ':local space [:find \$c " " \$start];'
           ':local rl "";'
-          ':if (\$spaceIdx != nil) do={:set rl [:pick \$rest 0 \$spaceIdx]} else={:set rl \$rest};'
-          '/ppp/profile set \$p rate-limit=\$rl comment="";'
+          ':local newC "";'
+          ':if ([:typeof \$space] != "nil") do={'
+          ':set rl [:pick \$c \$start \$space];'
+          ':set newC [:pick \$c (\$space + 1) [:len \$c]];'
+          '} else={'
+          ':set rl [:pick \$c \$start [:len \$c]];'
+          '}'
+          '/ppp/profile set \$p rate-limit=\$rl comment=\$newC;'
           '}'
           '};'
           '/ip/hotspot/active/remove [find];'
           '/ppp/active/remove [find];'
-          '/system/scheduler remove [find name="restore_speed_sched"];'
-          '/system/script remove [find name="restore_speed_limits"];';
+          '/system/scheduler remove [find name="start_speed_sched"];'
+          '/system/scheduler remove [find name="stop_speed_sched"];'
+          '/system/script remove [find name="start_speed_boost"];'
+          '/system/script remove [find name="stop_speed_boost"];';
+
+      // 4. إضافة السكربتات للمايكروتك
+      await router.sendCommand('/system/script/add', params: {
+        'name': 'start_speed_boost',
+        'source': startScript,
+      });
 
       await router.sendCommand('/system/script/add', params: {
-        'name': 'restore_speed_limits',
-        'source': scriptSource,
+        'name': 'stop_speed_boost',
+        'source': stopScript,
+      });
+
+      // 5. إضافة المجدولات (Schedulers)
+      await router.sendCommand('/system/scheduler/add', params: {
+        'name': 'start_speed_sched',
+        'start-time': startTimeStr,
+        'on-event': 'start_speed_boost',
       });
 
       await router.sendCommand('/system/scheduler/add', params: {
-        'name': 'restore_speed_sched',
-        'interval': intervalStr,
-        'on-event': 'restore_speed_limits',
+        'name': 'stop_speed_sched',
+        'start-time': endTimeStr,
+        'on-event': 'stop_speed_boost',
       });
 
       _showSnack(
-          '🚀 تم فتح السرعات وطرد المتصلين وحقن سكربت الإعادة التلقائي بعد $intervalStr',
+          '🚀 تمت جدولة فتح السرعات بنجاح. ستبدأ الساعة $startTimeStr وتنتهي $endTimeStr.',
           backgroundColor: Colors.green);
     } catch (e) {
-      _showSnack('❌ فشل فتح السرعات: $e', backgroundColor: Colors.red);
+      _showSnack('❌ فشل إعداد جدولة السرعات: $e', backgroundColor: Colors.red);
     }
   }
 
