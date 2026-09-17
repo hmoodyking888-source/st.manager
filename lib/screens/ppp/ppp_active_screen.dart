@@ -24,7 +24,16 @@ class _CommentData {
 
 class PppActiveScreen extends StatefulWidget {
   final RouterService? routerService;
-  const PppActiveScreen({super.key, required this.routerService});
+
+  /// عند عرض الصفحة داخل Dashboard يتم استدعاؤها لإرجاع المؤشر
+  /// إلى صفحة التحكم الرئيسية بدلاً من إنشاء Dashboard جديد.
+  final VoidCallback? onBackToDashboard;
+
+  const PppActiveScreen({
+    super.key,
+    required this.routerService,
+    this.onBackToDashboard,
+  });
 
   @override
   State<PppActiveScreen> createState() => _PppActiveScreenState();
@@ -1112,8 +1121,24 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       _clearSelection();
       return;
     }
-    // تم التعديل لحذف مسار تسجيل الدخول والعودة للوحة التحكم تماماً كما في الهوتسبوت
-    Navigator.pushNamedAndRemoveUntil(context, '/dashboard', (route) => false);
+
+    // عند عرض البرودباند داخل Dashboard، نعيد المؤشر إلى الرئيسية
+    // بدلاً من إنشاء Dashboard جديد فوق الصفحة الحالية.
+    if (widget.onBackToDashboard != null) {
+      widget.onBackToDashboard!();
+      return;
+    }
+
+    // مسار احتياطي إذا تم فتح الصفحة كـ Route مستقلة.
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      Navigator.pushNamedAndRemoveUntil(
+        context,
+        '/dashboard',
+        (route) => false,
+      );
+    }
   }
 
   Future<void> _togglePaid(Map<String, dynamic> user) async {
