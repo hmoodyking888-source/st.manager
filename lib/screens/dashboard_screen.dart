@@ -9,8 +9,7 @@ import 'package:st_manager/screens/devices_screen.dart';
 import 'package:st_manager/screens/backup_restore_screen.dart';
 import 'package:st_manager/screens/interface_screen.dart';
 import 'package:st_manager/screens/simple_queue_screen.dart';
-// ملاحظة: عدّل المسار التالي إن كان مختلفًا في مشروعك
-import 'package:st_manager/screens/applications/app_priority_screen.dart';
+import 'package:st_manager/screens/applications/scripts_screen.dart';
 import 'package:st_manager/widgets/side_drawer.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -22,8 +21,6 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
-
   RouterService? _routerService;
 
   double _cpuLoad = 0;
@@ -90,24 +87,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
 
     if (_selectedInterface != null) {
-      _subscribeToInterface(_selectedInterface!);
-    }
-  }
-
-  /// اشتراك موحّد في مراقبة سرعة الواجهة (بدون تكرار الاشتراكات)
-  void _subscribeToInterface(String interfaceName) {
-    _speedSubscription?.cancel();
-    _speedSubscription = _routerService!
-        .monitorTrafficDetailsStream(interfaceName)
-        .listen((speed) {
-      if (!mounted) return;
-      setState(() {
-        _rxSpeed = (speed['rx-bits-per-second'] ?? 0) / 1000000;
-        _txSpeed = (speed['tx-bits-per-second'] ?? 0) / 1000000;
+      _speedSubscription?.cancel();
+      _speedSubscription = _routerService!
+          .monitorTrafficDetailsStream(_selectedInterface!)
+          .listen((speed) {
+        if (!mounted) return;
+        setState(() {
+          _rxSpeed = (speed['rx-bits-per-second'] ?? 0) / 1000000;
+          _txSpeed = (speed['tx-bits-per-second'] ?? 0) / 1000000;
+        });
       });
-    }, onError: (_) {
-      // تجاهل أخطاء البث اللحظي دون كسر الواجهة
-    });
+    }
   }
 
   bool _isPortOrBridge(Map<String, dynamic> iface) {
@@ -143,32 +133,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         });
 
-        _subscribeToInterface(_selectedInterface!);
+        _speedSubscription?.cancel();
+        _speedSubscription = _routerService!
+            .monitorTrafficDetailsStream(_selectedInterface!)
+            .listen((speed) {
+          if (!mounted) return;
+          setState(() {
+            _rxSpeed = (speed['rx-bits-per-second'] ?? 0) / 1000000;
+            _txSpeed = (speed['tx-bits-per-second'] ?? 0) / 1000000;
+          });
+        });
       }
-    } catch (e) {
-      debugPrint('loadInterfaces error: $e');
-    }
+    } catch (_) {}
   }
 
   Future<void> _fetchStats() async {
     if (_routerService == null || !_routerService!.isConnected) return;
 
     try {
-      final results = await Future.wait<List<Map<String, dynamic>>>([
-        _routerService!.getSystemResource(),
-        _routerService!.getSystemHealth(),
-        _routerService!.getHotspotActive(),
-        _routerService!.getHotspotUsers(),
-        _routerService!.getPppActive(),
-        _routerService!.getPppSecrets(),
-      ]);
-
-      final resource = results[0];
-      final health = results[1];
-      final active = results[2];
-      final allUsers = results[3];
-      final pppActive = results[4];
-      final pppSecrets = results[5];
+      final resource = await _routerService!.getSystemResource();
+      final health = await _routerService!.getSystemHealth();
+      final active = await _routerService!.getHotspotActive();
+      final allUsers = await _routerService!.getHotspotUsers();
+      final pppActive = await _routerService!.getPppActive();
+      final pppSecrets = await _routerService!.getPppSecrets();
 
       if (!mounted) return;
 
@@ -191,9 +179,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         _pppActive = pppActive.length;
         _pppTotal = pppSecrets.length;
       });
-    } catch (e) {
-      debugPrint('fetchStats error: $e');
-    }
+    } catch (_) {}
   }
 
   double _parseTemperature(List<Map<String, dynamic>> health) {
@@ -261,7 +247,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           onChanged: (val) {
             if (val == null) return;
             setState(() => _selectedInterface = val);
-            _subscribeToInterface(val);
+            _speedSubscription?.cancel();
+            _speedSubscription = _routerService!
+                .monitorTrafficDetailsStream(val)
+                .listen((speed) {
+              if (!mounted) return;
+              setState(() {
+                _rxSpeed = (speed['rx-bits-per-second'] ?? 0) / 1000000;
+                _txSpeed = (speed['tx-bits-per-second'] ?? 0) / 1000000;
+              });
+            });
             Navigator.pop(context);
           },
         ),
@@ -279,6 +274,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // إمكانية العودة بالزر المادي أو الزر العلوي للرئيسية دون الخروج من الراوتر
     return PopScope(
       canPop: _currentIndex == 0,
       onPopInvokedWithResult: (didPop, result) {
@@ -289,7 +285,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
       },
       child: Scaffold(
-        key: _scaffoldKey,
         appBar: AppBar(
           leading: _currentIndex != 0
               ? IconButton(
@@ -312,9 +307,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ],
           ),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.menu),
-              onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+            Builder(
+              builder: (context) => IconButton(
+                icon: const Icon(Icons.menu),
+                onPressed: () => Scaffold.of(context).openDrawer(),
+              ),
             ),
           ],
         ),
@@ -548,7 +545,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.check_circle_outline,
+                      Icon(Icons.check_circle_outline,
                           color: AppTheme.greenOnline, size: 48),
                       const SizedBox(height: 12),
                       Text(
@@ -641,7 +638,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
               ),
               TextButton(
-                onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                onPressed: () => Scaffold.of(context).openDrawer(),
                 child: const Text('إعداد',
                     style: TextStyle(
                         color: Color(0xFF29B6F6),
@@ -737,13 +734,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
               _buildMenuButtonWithCounter(
                 'هوتسبوت',
                 Icons.wifi_rounded,
-                '$_activeUsers/$_totalUsers',
+                '$_totalUsers/$_activeUsers',
                 () => setState(() => _currentIndex = 2),
               ),
               _buildMenuButtonWithCounter(
                 'برودباند',
                 Icons.router_rounded,
-                '$_pppActive/$_pppTotal',
+                '$_pppTotal/$_pppActive',
                 () => setState(() => _currentIndex = 1),
               ),
               _buildMenuButton('بطاقات', Icons.credit_card, () {
@@ -818,7 +815,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           colors: [AppTheme.black, AppTheme.darkGrey, AppTheme.semiBlack],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
