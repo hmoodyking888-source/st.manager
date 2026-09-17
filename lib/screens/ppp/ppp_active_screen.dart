@@ -1112,7 +1112,8 @@ class _PppActiveScreenState extends State<PppActiveScreen> {
       _clearSelection();
       return;
     }
-    Navigator.of(context).pushReplacementNamed('/dashboard');
+    // تم التعديل لحذف مسار تسجيل الدخول والعودة للوحة التحكم تماماً كما في الهوتسبوت
+    Navigator.pushNamedAndRemoveUntil(context, '/dashboard', (route) => false);
   }
 
   Future<void> _togglePaid(Map<String, dynamic> user) async {
@@ -2642,7 +2643,9 @@ class _PppProfilesScreenState extends State<_PppProfilesScreen> {
     if (Navigator.of(context).canPop()) {
       Navigator.of(context).pop();
     } else {
-      Navigator.of(context).pushReplacementNamed('/dashboard');
+      // تم التعديل هنا ليتوافق مع صفحة الهوتسبوت
+      Navigator.pushNamedAndRemoveUntil(
+          context, '/dashboard', (route) => false);
     }
   }
 
