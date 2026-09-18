@@ -47,7 +47,7 @@ class _GeneratedCard {
   final String pass;
   final String profile;
   final String network;
-  final String duration; // النص المطبوع على الكرت
+  final String duration;
   final String notes;
 
   const _GeneratedCard({
@@ -61,7 +61,7 @@ class _GeneratedCard {
 }
 
 // ─────────────────────────────────────────────
-// الشاشة الرئيسية (تحتوي على التبويبات)
+// الشاشة الرئيسية
 // ─────────────────────────────────────────────
 class CardsScreen extends StatefulWidget {
   final RouterService? routerService;
@@ -106,18 +106,16 @@ class _CardsScreenState extends State<CardsScreen>
 
   final _mNetworkCtrl = TextEditingController(text: 'سلطان نت');
   final _mNotesCtrl = TextEditingController();
-  
-  // حقول الإعداد الفعلي للمايكروتك للبطاقات المتعددة
+
   final _mValidityCtrl = TextEditingController(text: '30');
   String _mValidityUnit = 'يوم';
   final _mVolumeCtrl = TextEditingController(text: 'مفتوح');
   String _mVolumeUnit = 'مفتوح';
-  String _mProfile = ''; // استبدلنا الـ Controller بمتغير للـ Dropdown
+  String _mProfile = '';
 
-  // النص الذي سيتم طباعته على الكرت للتعبير عن الصلاحية
   final _mPrintedDurationCtrl = TextEditingController(text: '30 يوم - مفتوح');
 
-  String _charType = 'numbers'; // الافتراضي أرقام فقط بناء على طلبات الشبكات
+  String _charType = 'numbers';
   bool _isGeneratingPdf = false;
   File? _templateImage;
   bool _useCustomImage = false;
@@ -127,24 +125,38 @@ class _CardsScreenState extends State<CardsScreen>
   bool _showNetwork = true;
   bool _showDuration = true;
   bool _showNotes = true;
+  bool _showUserLabel = true;
+  bool _showPassLabel = true;
 
-  // مواضع الحقول (X, Y)
-  double _userX = 0.35, _userY = 0.20;
-  double _passX = 0.35, _passY = 0.50;
+  // مواضع الحقول (X, Y) المستقلة
+  double _userLabelX = 0.35, _userLabelY = 0.15; // كلمة "اسم المستخدم"
+  double _userX = 0.35, _userY = 0.25; // القيمة المولدة لاسم المستخدم
+
+  double _passLabelX = 0.35, _passLabelY = 0.40; // كلمة "كلمة المرور"
+  double _passX = 0.35, _passY = 0.50; // القيمة المولدة لكلمة المرور
+
   double _netX = 0.05, _netY = 0.05;
   double _durX = 0.05, _durY = 0.70;
   double _notesX = 0.40, _notesY = 0.80;
 
   // أحجام الخطوط / العناصر
+  double _userLabelSize = 12;
   double _userSize = 18;
+
+  double _passLabelSize = 12;
   double _passSize = 18;
+
   double _netSize = 14;
   double _durSize = 12;
   double _notesSize = 10;
 
   // ألوان الخطوط الافتراضية
+  Color _userLabelColor = Colors.black54;
   Color _userColor = Colors.black;
+
+  Color _passLabelColor = Colors.black54;
   Color _passColor = Colors.black;
+
   Color _netColor = Colors.blue.shade900;
   Color _durColor = Colors.white;
   Color _notesColor = Colors.white;
@@ -153,7 +165,6 @@ class _CardsScreenState extends State<CardsScreen>
   String _previewUser = '123456';
   String _previewPass = '12345';
 
-  // النماذج المحدثة والجديدة المطابقة للصور
   final List<_CardTemplate> _templates = const [
     _CardTemplate(
       name: 'سماوي سهم',
@@ -165,7 +176,7 @@ class _CardsScreenState extends State<CardsScreen>
       border: Color(0xFF0097A7),
       text: Color(0xFF006064),
       mutedText: Color(0xFF00838F),
-      shapeType: 1, // شكل سهم
+      shapeType: 1,
     ),
     _CardTemplate(
       name: 'برتقالي سهم',
@@ -184,12 +195,12 @@ class _CardsScreenState extends State<CardsScreen>
       subtitle: 'فخم',
       background: Color(0xFFFFFDE7),
       backgroundSoft: Color(0xFFFFF59D),
-      accent: Color(0xFF004D40), // لمسة خضراء داكنة مع خلفية صفراء/ذهبية
+      accent: Color(0xFF004D40),
       accentSoft: Color(0x66004D40),
       border: Color(0xFF00695C),
       text: Color(0xFF004D40),
       mutedText: Color(0xFF00695C),
-      shapeType: 2, // دائري منحني
+      shapeType: 2,
     ),
     _CardTemplate(
       name: 'وردي دائري',
@@ -249,7 +260,7 @@ class _CardsScreenState extends State<CardsScreen>
       border: Color(0xFF6A1B9A),
       text: Color(0xFF4A148C),
       mutedText: Color(0xFF6A1B9A),
-      shapeType: 0, // مستطيل كلاسيكي
+      shapeType: 0,
     ),
     _CardTemplate(
       name: 'داكن كلاسيك',
@@ -279,6 +290,7 @@ class _CardsScreenState extends State<CardsScreen>
 
   final List<Color> _availableColors = [
     Colors.black,
+    Colors.black54,
     Colors.white,
     Colors.red,
     Colors.green,
@@ -287,7 +299,7 @@ class _CardsScreenState extends State<CardsScreen>
     Colors.purple,
     Colors.cyan,
     Colors.grey,
-    Color(0xFFD4AF37), // ذهبي
+    const Color(0xFFD4AF37), // ذهبي
   ];
 
   bool _arabicFontLoadFailed = false;
@@ -328,8 +340,7 @@ class _CardsScreenState extends State<CardsScreen>
   // ─────────────────────────────────────────────
   // دوال مساعدة للمايكروتك
   // ─────────────────────────────────────────────
-  
-  // تحويل الوقت إلى صيغة المايكروتك لبدء الحساب عند تسجيل الدخول
+
   String? _getMikrotikUptime(String val, String unit) {
     if (val.isEmpty || val == '0') return null;
     if (unit == 'يوم') return '${val}d';
@@ -337,7 +348,6 @@ class _CardsScreenState extends State<CardsScreen>
     return null;
   }
 
-  // تحويل الحجم إلى بايتات للمايكروتك
   String? _getMikrotikBytes(String val, String unit) {
     if (val.isEmpty || unit == 'مفتوح') return null;
     final double? numVal = double.tryParse(val);
@@ -392,12 +402,16 @@ class _CardsScreenState extends State<CardsScreen>
 
   void _refreshPreview() {
     setState(() {
-      _previewUser = _generateRandom(length: int.tryParse(_userLenCtrl.text) ?? 6);
-      _previewPass = _generateRandom(length: int.tryParse(_passLenCtrl.text) ?? 5);
-      
-      // تحديث النص المطبوع كمسودة إذا أراد المستخدم رؤية التغيير
-      String volText = _mVolumeUnit == 'مفتوح' ? 'مفتوح' : '${_mVolumeCtrl.text} ${_mVolumeUnit}';
-      _mPrintedDurationCtrl.text = '${_mValidityCtrl.text} ${_mValidityUnit} - $volText';
+      _previewUser =
+          _generateRandom(length: int.tryParse(_userLenCtrl.text) ?? 6);
+      _previewPass =
+          _generateRandom(length: int.tryParse(_passLenCtrl.text) ?? 5);
+
+      String volText = _mVolumeUnit == 'مفتوح'
+          ? 'مفتوح'
+          : '${_mVolumeCtrl.text} ${_mVolumeUnit}';
+      _mPrintedDurationCtrl.text =
+          '${_mValidityCtrl.text} ${_mValidityUnit} - $volText';
     });
   }
 
@@ -416,14 +430,13 @@ class _CardsScreenState extends State<CardsScreen>
     setState(() => _sIsGenerating = true);
     try {
       final comment = 'Price:${_sPriceCtrl.text} | Note:${_sNotesCtrl.text}';
-      
+
       final uptime = _getMikrotikUptime(_sValidityCtrl.text, _sValidityUnit);
       final bytes = _getMikrotikBytes(_sVolumeCtrl.text, _sVolumeUnit);
 
-      // تحديد وتضمين الإيميل ليمثل عدد الأيام كجزء من الطلب مع التمييز بين الأيام والساعات
       final validityText = _sValidityCtrl.text;
-      final emailValue = _sValidityUnit == 'ساعة' 
-          ? '${validityText}h@nobind.com' 
+      final emailValue = _sValidityUnit == 'ساعة'
+          ? '${validityText}h@nobind.com'
           : '$validityText@nobind.com';
 
       final params = {
@@ -492,9 +505,9 @@ class _CardsScreenState extends State<CardsScreen>
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.semiBlack,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
+        title: const Row(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
+          children: [
             Icon(Icons.check_circle, color: Colors.blue),
             SizedBox(width: 8),
             Text('إنشاء البطاقة', style: TextStyle(color: Colors.white)),
@@ -516,7 +529,8 @@ class _CardsScreenState extends State<CardsScreen>
                     color: Colors.amber,
                     fontSize: 18,
                     fontWeight: FontWeight.bold)),
-            Text('الحجم: ${_sVolumeUnit == 'مفتوح' ? 'مفتوح' : '${_sVolumeCtrl.text} $_sVolumeUnit'}',
+            Text(
+                'الحجم: ${_sVolumeUnit == 'مفتوح' ? 'مفتوح' : '${_sVolumeCtrl.text} $_sVolumeUnit'}',
                 style: const TextStyle(color: Colors.white70)),
             Text('المدة: ${_sValidityCtrl.text} $_sValidityUnit',
                 style: const TextStyle(color: Colors.white70)),
@@ -648,8 +662,8 @@ class _CardsScreenState extends State<CardsScreen>
                       .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                       .toList(),
                   onChanged: (v) => setState(() {
-                     _sVolumeUnit = v!;
-                     if(v == 'مفتوح') _sVolumeCtrl.text = '';
+                    _sVolumeUnit = v!;
+                    if (v == 'مفتوح') _sVolumeCtrl.text = '';
                   }),
                 ),
               ),
@@ -792,14 +806,12 @@ class _CardsScreenState extends State<CardsScreen>
       child: Stack(
         clipBehavior: Clip.hardEdge,
         children: [
-          // الخلفية
           if (_useCustomImage && _templateImage != null)
             Positioned.fill(
                 child: Image.file(_templateImage!, fit: BoxFit.cover)),
-          
-          // العناصر الرسومية الملونة الجانبية حسب شكل البطاقة (دائري، سهم، مستطيل)
+
           if (!_useCustomImage)
-            if (t.shapeType == 2) // دائري منحني
+            if (t.shapeType == 2)
               Positioned(
                 left: -h * 0.75,
                 top: -h * 0.25,
@@ -812,12 +824,12 @@ class _CardsScreenState extends State<CardsScreen>
                   ),
                 ),
               )
-            else if (t.shapeType == 1) // سهم
+            else if (t.shapeType == 1)
               Positioned(
                 left: -h * 0.6,
                 top: -h * 0.1,
                 child: Transform.rotate(
-                  angle: 0.785398, // دوران بزاوية 45 درجة لتشكيل السهم
+                  angle: 0.785398,
                   child: Container(
                     width: h * 1.2,
                     height: h * 1.2,
@@ -825,7 +837,7 @@ class _CardsScreenState extends State<CardsScreen>
                   ),
                 ),
               )
-            else // مستطيل كلاسيكي
+            else
               Positioned(
                 left: 0,
                 top: 0,
@@ -834,7 +846,6 @@ class _CardsScreenState extends State<CardsScreen>
                 child: Container(color: t.accent),
               ),
 
-          // العناصر القابلة للسحب
           if (_showNetwork)
             _draggableItem(
               x: _netX,
@@ -852,6 +863,23 @@ class _CardsScreenState extends State<CardsScreen>
                       fontWeight: FontWeight.bold)),
             ),
 
+          // كلمة التوضيح "اسم المستخدم" مفصولة
+          if (_showUserLabel)
+            _draggableItem(
+              x: _userLabelX,
+              y: _userLabelY,
+              parentW: w,
+              parentH: h,
+              onMove: (d) => setState(() {
+                _userLabelX = _clamp01(_userLabelX + d.dx / w);
+                _userLabelY = _clamp01(_userLabelY + d.dy / h);
+              }),
+              child: Text('اسم المستخدم:',
+                  style: TextStyle(
+                      color: _userLabelColor, fontSize: _userLabelSize)),
+            ),
+
+          // القيمة المولدة "اسم المستخدم" مفصولة
           _draggableItem(
             x: _userX,
             y: _userY,
@@ -861,20 +889,30 @@ class _CardsScreenState extends State<CardsScreen>
               _userX = _clamp01(_userX + d.dx / w);
               _userY = _clamp01(_userY + d.dy / h);
             }),
-            child: Row(
-              children: [
-                Text('اسم المستخدم: ',
-                    style: TextStyle(
-                        color: t.mutedText, fontSize: _userSize * 0.7)),
-                Text(_previewUser,
-                    style: TextStyle(
-                        color: _userColor,
-                        fontSize: _userSize,
-                        fontWeight: FontWeight.bold)),
-              ],
-            ),
+            child: Text(_previewUser,
+                style: TextStyle(
+                    color: _userColor,
+                    fontSize: _userSize,
+                    fontWeight: FontWeight.bold)),
           ),
 
+          // كلمة التوضيح "كلمة المرور" مفصولة
+          if (_showPassLabel)
+            _draggableItem(
+              x: _passLabelX,
+              y: _passLabelY,
+              parentW: w,
+              parentH: h,
+              onMove: (d) => setState(() {
+                _passLabelX = _clamp01(_passLabelX + d.dx / w);
+                _passLabelY = _clamp01(_passLabelY + d.dy / h);
+              }),
+              child: Text('كلمة المرور:',
+                  style: TextStyle(
+                      color: _passLabelColor, fontSize: _passLabelSize)),
+            ),
+
+          // القيمة المولدة "كلمة المرور" مفصولة
           _draggableItem(
             x: _passX,
             y: _passY,
@@ -884,18 +922,11 @@ class _CardsScreenState extends State<CardsScreen>
               _passX = _clamp01(_passX + d.dx / w);
               _passY = _clamp01(_passY + d.dy / h);
             }),
-            child: Row(
-              children: [
-                Text('كلمة المرور: ',
-                    style: TextStyle(
-                        color: t.mutedText, fontSize: _passSize * 0.7)),
-                Text(_previewPass,
-                    style: TextStyle(
-                        color: _passColor,
-                        fontSize: _passSize,
-                        fontWeight: FontWeight.bold)),
-              ],
-            ),
+            child: Text(_previewPass,
+                style: TextStyle(
+                    color: _passColor,
+                    fontSize: _passSize,
+                    fontWeight: FontWeight.bold)),
           ),
 
           if (_showDuration)
@@ -989,7 +1020,7 @@ class _CardsScreenState extends State<CardsScreen>
                 Expanded(
                   child: Slider(
                     value: sizeValue,
-                    min: 8,
+                    min: 6,
                     max: 40,
                     onChanged: onSizeChanged,
                     activeColor: AppTheme.gold,
@@ -1018,6 +1049,151 @@ class _CardsScreenState extends State<CardsScreen>
         ],
       ),
     );
+  }
+
+  // دالة لإظهار وحذف الطباعات السابقة
+  Future<void> _showBatchHistoryDialog() async {
+    if (widget.routerService == null) return;
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      final list =
+          await widget.routerService!.sendCommand('/ip/hotspot/user/print');
+      Navigator.pop(context); // إغلاق اللودر
+
+      final Map<String, int> batches = {};
+      for (var u in list) {
+        final comment = u['comment']?.toString() ?? '';
+        if (comment.startsWith('Batch_')) {
+          batches[comment] = (batches[comment] ?? 0) + 1;
+        }
+      }
+
+      if (mounted) {
+        showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppTheme.semiBlack,
+            title: const Text('الطباعات السابقة (دفعات)',
+                style: TextStyle(color: Colors.white)),
+            content: batches.isEmpty
+                ? const Text('لا توجد دفعات سابقة مسجلة.',
+                    style: TextStyle(color: Colors.white70))
+                : SizedBox(
+                    width: double.maxFinite,
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      itemCount: batches.keys.length,
+                      itemBuilder: (context, index) {
+                        String batchName = batches.keys.elementAt(index);
+                        int count = batches[batchName]!;
+                        // استخراج التاريخ من اسم الدفعة (اختياري) للجمالية
+                        String timeStr = batchName.replaceAll('Batch_', '');
+                        DateTime? date;
+                        try {
+                          date = DateTime.fromMillisecondsSinceEpoch(
+                              int.parse(timeStr));
+                        } catch (_) {}
+
+                        String displayTitle = date != null
+                            ? '${date.year}/${date.month}/${date.day} - ${date.hour}:${date.minute}'
+                            : batchName;
+
+                        return ListTile(
+                          title: Text('دفعة: $displayTitle',
+                              style: const TextStyle(color: Colors.white)),
+                          subtitle: Text('عدد الكروت: $count',
+                              style: const TextStyle(color: Colors.amber)),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: ctx,
+                                builder: (_) => AlertDialog(
+                                  backgroundColor: AppTheme.semiBlack,
+                                  title: const Text('تأكيد الحذف',
+                                      style: TextStyle(color: Colors.white)),
+                                  content: Text(
+                                      'هل أنت متأكد من حذف هذه الدفعة بالكامل ($count كرت)؟',
+                                      style: const TextStyle(
+                                          color: Colors.white70)),
+                                  actions: [
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, false),
+                                        child: const Text('إلغاء',
+                                            style: TextStyle(
+                                                color: Colors.white54))),
+                                    TextButton(
+                                        onPressed: () =>
+                                            Navigator.pop(ctx, true),
+                                        child: const Text('حذف',
+                                            style:
+                                                TextStyle(color: Colors.red))),
+                                  ],
+                                ),
+                              );
+
+                              if (confirm == true) {
+                                Navigator.pop(ctx); // إغلاق القائمة
+                                _deleteBatch(batchName);
+                              }
+                            },
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child:
+                    const Text('إغلاق', style: TextStyle(color: Colors.blue)),
+              )
+            ],
+          ),
+        );
+      }
+    } catch (e) {
+      Navigator.pop(context); // إغلاق اللودر في حال الخطأ
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('خطأ في جلب البيانات: $e')));
+      }
+    }
+  }
+
+  Future<void> _deleteBatch(String batchComment) async {
+    if (widget.routerService == null) return;
+    try {
+      final list = await widget.routerService!.sendCommand(
+          '/ip/hotspot/user/print',
+          params: {'?comment': batchComment});
+      int deletedCount = 0;
+      for (var u in list) {
+        final id = u['.id']?.toString() ?? '';
+        if (id.isNotEmpty) {
+          await widget.routerService!
+              .sendCommand('/ip/hotspot/user/remove', params: {'numbers': id});
+          deletedCount++;
+        }
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('تم حذف $deletedCount كرت من سيرفر المايكروتك بنجاح'),
+            backgroundColor: Colors.green));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('تعذر الحذف: $e')));
+      }
+    }
   }
 
   Widget _buildMultipleCardsTab() {
@@ -1090,8 +1266,8 @@ class _CardsScreenState extends State<CardsScreen>
           // ── Preview ──
           Container(
             height: 200,
-            decoration:
-                BoxDecoration(border: Border.all(color: Colors.white24, width: 1)),
+            decoration: BoxDecoration(
+                border: Border.all(color: Colors.white24, width: 1)),
             child: LayoutBuilder(
               builder: (_, c) =>
                   _buildMultiPreviewCard(c.maxWidth, c.maxHeight),
@@ -1122,7 +1298,7 @@ class _CardsScreenState extends State<CardsScreen>
                               dropdownColor: AppTheme.semiBlack,
                               style: const TextStyle(color: Colors.white),
                               decoration: const InputDecoration(
-                                  labelText: 'اختر باقة هوتسبوت',
+                                  labelText: 'اختر باقة هوتسبوت (بروفايل)',
                                   contentPadding:
                                       EdgeInsets.symmetric(horizontal: 8)),
                               items: _profiles
@@ -1141,11 +1317,15 @@ class _CardsScreenState extends State<CardsScreen>
                         style: const TextStyle(color: Colors.white),
                         decoration: const InputDecoration(
                             labelText: 'نوع التوليد',
-                            contentPadding: EdgeInsets.symmetric(horizontal: 8)),
+                            contentPadding:
+                                EdgeInsets.symmetric(horizontal: 8)),
                         items: const [
-                          DropdownMenuItem(value: 'numbers', child: Text('أرقام فقط')),
-                          DropdownMenuItem(value: 'letters', child: Text('أحرف فقط')),
-                          DropdownMenuItem(value: 'mixed', child: Text('مختلط')),
+                          DropdownMenuItem(
+                              value: 'numbers', child: Text('أرقام فقط')),
+                          DropdownMenuItem(
+                              value: 'letters', child: Text('أحرف فقط')),
+                          DropdownMenuItem(
+                              value: 'mixed', child: Text('مختلط')),
                         ],
                         onChanged: (v) {
                           setState(() {
@@ -1158,8 +1338,6 @@ class _CardsScreenState extends State<CardsScreen>
                   ],
                 ),
                 const SizedBox(height: 12),
-                
-                // إعدادات وقت وحجم الكرت للمايكروتك
                 Row(
                   children: [
                     Expanded(
@@ -1168,11 +1346,13 @@ class _CardsScreenState extends State<CardsScreen>
                         value: _mValidityUnit,
                         dropdownColor: AppTheme.semiBlack,
                         style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(labelText: 'وحدة الوقت'),
+                        decoration:
+                            const InputDecoration(labelText: 'وحدة الوقت'),
                         items: ['يوم', 'ساعة']
-                            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                            .map((e) =>
+                                DropdownMenuItem(value: e, child: Text(e)))
                             .toList(),
-                        onChanged: (v) => setState((){
+                        onChanged: (v) => setState(() {
                           _mValidityUnit = v!;
                           _refreshPreview();
                         }),
@@ -1182,11 +1362,12 @@ class _CardsScreenState extends State<CardsScreen>
                     Expanded(
                       flex: 1,
                       child: TextField(
-                          controller: _mValidityCtrl,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'وقت الكرت'),
-                          style: const TextStyle(color: Colors.white),
-                          onChanged: (_) => _refreshPreview(),
+                        controller: _mValidityCtrl,
+                        keyboardType: TextInputType.number,
+                        decoration:
+                            const InputDecoration(labelText: 'وقت الكرت'),
+                        style: const TextStyle(color: Colors.white),
+                        onChanged: (_) => _refreshPreview(),
                       ),
                     ),
                   ],
@@ -1200,13 +1381,15 @@ class _CardsScreenState extends State<CardsScreen>
                         value: _mVolumeUnit,
                         dropdownColor: AppTheme.semiBlack,
                         style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(labelText: 'وحدة الحجم'),
+                        decoration:
+                            const InputDecoration(labelText: 'وحدة الحجم'),
                         items: ['مفتوح', 'ميغا', 'جيغا']
-                            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                            .map((e) =>
+                                DropdownMenuItem(value: e, child: Text(e)))
                             .toList(),
-                        onChanged: (v) => setState((){
+                        onChanged: (v) => setState(() {
                           _mVolumeUnit = v!;
-                          if(v == 'مفتوح') _mVolumeCtrl.text = '';
+                          if (v == 'مفتوح') _mVolumeCtrl.text = '';
                           _refreshPreview();
                         }),
                       ),
@@ -1215,17 +1398,17 @@ class _CardsScreenState extends State<CardsScreen>
                     Expanded(
                       flex: 1,
                       child: TextField(
-                          controller: _mVolumeCtrl,
-                          enabled: _mVolumeUnit != 'مفتوح',
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(labelText: 'حجم الكرت'),
-                          style: const TextStyle(color: Colors.white),
-                          onChanged: (_) => _refreshPreview(),
+                        controller: _mVolumeCtrl,
+                        enabled: _mVolumeUnit != 'مفتوح',
+                        keyboardType: TextInputType.number,
+                        decoration:
+                            const InputDecoration(labelText: 'حجم الكرت'),
+                        style: const TextStyle(color: Colors.white),
+                        onChanged: (_) => _refreshPreview(),
                       ),
                     ),
                   ],
                 ),
-                
                 const SizedBox(height: 12),
                 Row(
                   children: [
@@ -1262,7 +1445,7 @@ class _CardsScreenState extends State<CardsScreen>
                             controller: _pdfColsCtrl,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(
-                                labelText: 'أعمدة (PDF)'),
+                                labelText: 'أعمدة (حجم البطاقات)'),
                             style: const TextStyle(color: Colors.white))),
                     const SizedBox(width: 8),
                     Expanded(
@@ -1270,7 +1453,7 @@ class _CardsScreenState extends State<CardsScreen>
                             controller: _pdfRowsCtrl,
                             keyboardType: TextInputType.number,
                             decoration: const InputDecoration(
-                                labelText: 'صفوف (PDF)'),
+                                labelText: 'صفوف (حجم البطاقات)'),
                             style: const TextStyle(color: Colors.white))),
                   ],
                 ),
@@ -1298,7 +1481,18 @@ class _CardsScreenState extends State<CardsScreen>
           ),
 
           _buildAdvancedSettingRow(
-            label: 'اسم المستخدم',
+            label: 'نص (اسم المستخدم:)',
+            showToggle: true,
+            toggleValue: _showUserLabel,
+            onToggle: (v) => setState(() => _showUserLabel = v),
+            sizeValue: _userLabelSize,
+            onSizeChanged: (v) => setState(() => _userLabelSize = v),
+            colorValue: _userLabelColor,
+            onColorChanged: (c) => setState(() => _userLabelColor = c),
+          ),
+
+          _buildAdvancedSettingRow(
+            label: 'القيمة (الرقم المولد للمستخدم)',
             showToggle: false,
             sizeValue: _userSize,
             onSizeChanged: (v) => setState(() => _userSize = v),
@@ -1307,7 +1501,18 @@ class _CardsScreenState extends State<CardsScreen>
           ),
 
           _buildAdvancedSettingRow(
-            label: 'كلمة المرور',
+            label: 'نص (كلمة المرور:)',
+            showToggle: true,
+            toggleValue: _showPassLabel,
+            onToggle: (v) => setState(() => _showPassLabel = v),
+            sizeValue: _passLabelSize,
+            onSizeChanged: (v) => setState(() => _passLabelSize = v),
+            colorValue: _passLabelColor,
+            onColorChanged: (c) => setState(() => _passLabelColor = c),
+          ),
+
+          _buildAdvancedSettingRow(
+            label: 'القيمة (الرقم المولد للسر)',
             showToggle: false,
             sizeValue: _passSize,
             onSizeChanged: (v) => setState(() => _passSize = v),
@@ -1340,19 +1545,47 @@ class _CardsScreenState extends State<CardsScreen>
           ),
 
           const SizedBox(height: 24),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple.shade400,
-              padding: const EdgeInsets.symmetric(vertical: 16),
-            ),
-            onPressed: _isGeneratingPdf ? null : _generatePdfAndShare,
-            child: _isGeneratingPdf
-                ? const CircularProgressIndicator(color: Colors.white)
-                : const Text('حفظ وطباعة (PDF)',
-                    style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white)),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.purple.shade400,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  onPressed: _isGeneratingPdf ? null : _generatePdfAndShare,
+                  child: _isGeneratingPdf
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(
+                              color: Colors.white, strokeWidth: 2))
+                      : const Text('حفظ وطباعة (PDF)',
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white)),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 1,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blueGrey,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                  ),
+                  onPressed: _isGeneratingPdf ? null : _showBatchHistoryDialog,
+                  child: const Text('الطباعات السابقة',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white)),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 30),
         ],
@@ -1463,6 +1696,9 @@ class _CardsScreenState extends State<CardsScreen>
       int addedSuccessfully = 0;
       int addedFailed = 0;
 
+      // إنشاء معرف فريد للدفعة ليسهل التعرف عليها وحذفها لاحقاً
+      final batchId = 'Batch_${DateTime.now().millisecondsSinceEpoch}';
+
       if (widget.routerService != null) {
         final uptime = _getMikrotikUptime(_mValidityCtrl.text, _mValidityUnit);
         final bytes = _getMikrotikBytes(_mVolumeCtrl.text, _mVolumeUnit);
@@ -1476,10 +1712,9 @@ class _CardsScreenState extends State<CardsScreen>
 
           final results = await Future.wait(batch.map((card) async {
             try {
-              // تحديد الإيميل ليمثل عدد الأيام للدفعة مع إضافة حرف h في حالة الساعات
               final validityText = _mValidityCtrl.text;
-              final emailValue = _mValidityUnit == 'ساعة' 
-                  ? '${validityText}h@nobind.com' 
+              final emailValue = _mValidityUnit == 'ساعة'
+                  ? '${validityText}h@nobind.com'
                   : '$validityText@nobind.com';
 
               final params = {
@@ -1487,7 +1722,7 @@ class _CardsScreenState extends State<CardsScreen>
                 'password': card.pass,
                 'profile': card.profile,
                 'email': emailValue,
-                'comment': 'ST_Manager_Batch',
+                'comment': batchId, // تم ربط الكروت بمعرف الدفعة
               };
               if (uptime != null) params['limit-uptime'] = uptime;
               if (bytes != null) params['limit-bytes-total'] = bytes;
@@ -1526,7 +1761,8 @@ class _CardsScreenState extends State<CardsScreen>
       pw.Font? arabicFont;
       _arabicFontLoadFailed = false;
       try {
-        final fontData = await rootBundle.load('assets/fonts/Cairo-Regular.ttf');
+        final fontData =
+            await rootBundle.load('assets/fonts/Cairo-Regular.ttf');
         arabicFont = pw.Font.ttf(fontData);
       } catch (_) {
         _arabicFontLoadFailed = true;
@@ -1569,14 +1805,18 @@ class _CardsScreenState extends State<CardsScreen>
               left: margin + (col * cardW),
               top: 0,
               child: pw.Container(
-                  width: 0.5, height: pageFormat.height, color: PdfColors.grey)));
+                  width: 0.5,
+                  height: pageFormat.height,
+                  color: PdfColors.grey)));
         }
         for (int row = 1; row < rows; row++) {
           children.add(pw.Positioned(
               left: 0,
               top: margin + (row * cardH),
               child: pw.Container(
-                  width: pageFormat.width, height: 0.5, color: PdfColors.grey)));
+                  width: pageFormat.width,
+                  height: 0.5,
+                  color: PdfColors.grey)));
         }
 
         pdf.addPage(pw.Page(
@@ -1584,7 +1824,7 @@ class _CardsScreenState extends State<CardsScreen>
             margin: pw.EdgeInsets.zero,
             build: (_) => pw.Stack(children: children)));
       }
-      
+
       final bytes = await pdf.save();
       final dir = await getTemporaryDirectory();
       final file = File(
@@ -1636,10 +1876,11 @@ class _CardsScreenState extends State<CardsScreen>
         children: [
           if (imageBytes != null)
             pw.Positioned.fill(
-                child: pw.Image(pw.MemoryImage(imageBytes), fit: pw.BoxFit.cover)),
-          
+                child:
+                    pw.Image(pw.MemoryImage(imageBytes), fit: pw.BoxFit.cover)),
+
           if (imageBytes == null)
-            if (t.shapeType == 2) // دائري منحني
+            if (t.shapeType == 2)
               pw.Positioned(
                 left: -cardH * 0.75,
                 top: -cardH * 0.25,
@@ -1652,12 +1893,12 @@ class _CardsScreenState extends State<CardsScreen>
                   ),
                 ),
               )
-            else if (t.shapeType == 1) // سهم
+            else if (t.shapeType == 1)
               pw.Positioned(
                 left: -cardH * 0.6,
                 top: -cardH * 0.1,
                 child: pw.Transform.rotate(
-                  angle: 0.785398, // دوران بزاوية 45 درجة لتشكيل السهم
+                  angle: 0.785398,
                   child: pw.Container(
                     width: cardH * 1.2,
                     height: cardH * 1.2,
@@ -1665,14 +1906,15 @@ class _CardsScreenState extends State<CardsScreen>
                   ),
                 ),
               )
-            else // مستطيل كلاسيكي
+            else
               pw.Positioned(
                 left: 0,
                 top: 0,
                 bottom: 0,
-                child: pw.Container(width: cardW * 0.3, color: toPdfCol(t.accent)),
+                child:
+                    pw.Container(width: cardW * 0.3, color: toPdfCol(t.accent)),
               ),
-              
+
           if (_showNetwork)
             pw.Positioned(
               left: _netX * cardW,
@@ -1684,24 +1926,55 @@ class _CardsScreenState extends State<CardsScreen>
                       color: toPdfCol(_netColor),
                       fontSize: _netSize * (cardW / 300))),
             ),
+
+          // طباعة كلمة "اسم المستخدم:" بالخط العربي وبمكانها المخصص
+          if (_showUserLabel)
+            pw.Positioned(
+              left: _userLabelX * cardW,
+              top: _userLabelY * cardH,
+              child: pw.Text('اسم المستخدم:',
+                  textDirection: pw.TextDirection.rtl,
+                  style: pw.TextStyle(
+                      font: arabicFont,
+                      color: toPdfCol(_userLabelColor),
+                      fontSize: _userLabelSize * (cardW / 300))),
+            ),
+
+          // طباعة القيمة المولدة "اسم المستخدم" بمكانها المخصص
           pw.Positioned(
             left: _userX * cardW,
             top: _userY * cardH,
-            child: pw.Text('User: ${card.user}',
+            child: pw.Text(card.user,
                 style: pw.TextStyle(
                     color: toPdfCol(_userColor),
                     fontSize: _userSize * (cardW / 300),
                     fontWeight: pw.FontWeight.bold)),
           ),
+
+          // طباعة كلمة "كلمة المرور:" بالخط العربي وبمكانها المخصص
+          if (_showPassLabel)
+            pw.Positioned(
+              left: _passLabelX * cardW,
+              top: _passLabelY * cardH,
+              child: pw.Text('كلمة المرور:',
+                  textDirection: pw.TextDirection.rtl,
+                  style: pw.TextStyle(
+                      font: arabicFont,
+                      color: toPdfCol(_passLabelColor),
+                      fontSize: _passLabelSize * (cardW / 300))),
+            ),
+
+          // طباعة القيمة المولدة "كلمة المرور" بمكانها المخصص
           pw.Positioned(
             left: _passX * cardW,
             top: _passY * cardH,
-            child: pw.Text('Pass: ${card.pass}',
+            child: pw.Text(card.pass,
                 style: pw.TextStyle(
                     color: toPdfCol(_passColor),
                     fontSize: _passSize * (cardW / 300),
                     fontWeight: pw.FontWeight.bold)),
           ),
+
           if (_showDuration)
             pw.Positioned(
               left: _durX * cardW,
@@ -1734,13 +2007,12 @@ class _CardsScreenState extends State<CardsScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('بطاقات الهوتسبوت'),
-        // إضافة زر الرجوع ليعود إلى الداشبورد حصراً وبشكل قطعي (مع إزالة ما قبله من المكدس)
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () {
             Navigator.pushNamedAndRemoveUntil(
               context,
-              '/dashboard', // تأكد أن هذا هو المسار (Route) الصحيح لشاشة الداشبورد في مشروعك
+              '/dashboard',
               (route) => false,
             );
           },
@@ -1756,7 +2028,7 @@ class _CardsScreenState extends State<CardsScreen>
       ),
       body: TabBarView(
         controller: _tabController,
-        physics: const NeverScrollableScrollPhysics(), 
+        physics: const NeverScrollableScrollPhysics(),
         children: [
           _buildSingleCardTab(),
           _buildMultipleCardsTab(),
