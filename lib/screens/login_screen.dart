@@ -60,8 +60,11 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (expiryDate != null) {
+        // تعديل: توحيد الوقت ليكون نهاية اليوم (23:59:59) لضمان تطابق حساب الأيام في القائمة الجانبية
+        final endOfDayExpiry = DateTime(
+            expiryDate.year, expiryDate.month, expiryDate.day, 23, 59, 59);
         await _storage.write(
-            'license_expiry_date', expiryDate.toIso8601String());
+            'license_expiry_date', endOfDayExpiry.toIso8601String());
         await _storage.write('license_phone', phone);
       }
     } catch (_) {
@@ -166,8 +169,11 @@ class _LoginScreenState extends State<LoginScreen> {
       final trialEnd = launchDay.add(const Duration(days: 30));
 
       if (trialEnd.difference(today).inDays > 0) {
-        // مزامنة تاريخ الانتهاء مع القائمة الجانبية ليتوافق عدد الأيام
-        await _storage.write('license_expiry_date', trialEnd.toIso8601String());
+        // تعديل: مزامنة تاريخ الانتهاء التجريبي ليكون نهاية اليوم ليتوافق عدد الأيام مع القائمة
+        final endOfDayTrial =
+            DateTime(trialEnd.year, trialEnd.month, trialEnd.day, 23, 59, 59);
+        await _storage.write(
+            'license_expiry_date', endOfDayTrial.toIso8601String());
         await _storage.write('license_phone', phone);
 
         _navigateTo('/routers');
@@ -230,6 +236,30 @@ class _LoginScreenState extends State<LoginScreen> {
       if (mounted) {
         setState(() => _loading = false);
       }
+    }
+  }
+
+  // إضافة: دالة محاولة فتح تطبيق MikroTik Back to Home بشكل آمن
+  Future<void> _launchExternalVPN() async {
+    try {
+      // مخطط التطبيق الافتراضي (يمكنك تغييره إذا كان لديك Scheme دقيق)
+      final Uri appUrl = Uri.parse('bth://');
+
+      if (await canLaunchUrl(appUrl)) {
+        await launchUrl(appUrl, mode: LaunchMode.externalApplication);
+      } else {
+        // في حال لم يتم العثور على التطبيق، محاولة تحويله للمتجر كخيار بديل
+        final Uri storeUrl = Uri.parse(
+            'https://play.google.com/store/apps/details?id=com.mikrotik.bth');
+        if (await canLaunchUrl(storeUrl)) {
+          await launchUrl(storeUrl, mode: LaunchMode.externalApplication);
+        } else {
+          _showError('تطبيق Back to Home غير متوفر');
+        }
+      }
+    } catch (e) {
+      // التقاط أي خطأ بصمت وإظهار رسالة لتجنب هدم أي جزء آخر من التطبيق
+      _showError('حدث خطأ أثناء محاولة فتح التطبيق الخارجي');
     }
   }
 
@@ -391,6 +421,25 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ),
                                   )
                                 : Text(_isPinSet ? 'دخول' : 'متابعة'),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        // إضافة: زر الدخول الخارجي لتطبيق Back to Home
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.vpn_key_outlined,
+                                color: AppTheme.gold),
+                            label: const Text('دخول خارجي (Back to Home)',
+                                style: TextStyle(color: AppTheme.gold)),
+                            style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                    color: AppTheme.gold.withOpacity(0.5)),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
+                                )),
+                            onPressed: _loading ? null : _launchExternalVPN,
                           ),
                         ),
                         if (_isPinSet) ...[
