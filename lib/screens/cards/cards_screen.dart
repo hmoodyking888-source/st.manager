@@ -471,16 +471,18 @@ class _CardsScreenState extends State<CardsScreen>
   Future<void> _deleteJustCreatedUser(String username) async {
     if (widget.routerService == null) return;
     try {
-      final list = await widget.routerService!.sendCommand(
-        '/ip/hotspot/user/print',
-        params: {'?name': username},
+      final list =
+          await widget.routerService!.sendCommand('/ip/hotspot/user/print');
+      final match = list.firstWhere(
+        (u) => (u['name']?.toString().trim() ?? '') == username,
+        orElse: () => {},
       );
-      if (list.isEmpty) return;
-      final id = list.first['.id']?.toString() ?? '';
+      if (match.isEmpty) return;
+      final id = match['.id']?.toString() ?? match['id']?.toString() ?? '';
       if (id.isEmpty) return;
       await widget.routerService!.sendCommand(
         '/ip/hotspot/user/remove',
-        params: {'numbers': id},
+        params: {'.id': id, 'numbers': id},
       );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -796,6 +798,8 @@ class _CardsScreenState extends State<CardsScreen>
 
   Widget _buildMultiPreviewCard(double w, double h) {
     final t = _currentTemplate;
+    final scale = w / 300.0; // معامل التحجيم التناسبي لتطابق المعاينة مع PDF
+
     return Container(
       width: w,
       height: h,
@@ -809,7 +813,6 @@ class _CardsScreenState extends State<CardsScreen>
           if (_useCustomImage && _templateImage != null)
             Positioned.fill(
                 child: Image.file(_templateImage!, fit: BoxFit.cover)),
-
           if (!_useCustomImage)
             if (t.shapeType == 2)
               Positioned(
@@ -845,7 +848,6 @@ class _CardsScreenState extends State<CardsScreen>
                 width: w * 0.3,
                 child: Container(color: t.accent),
               ),
-
           if (_showNetwork)
             _draggableItem(
               x: _netX,
@@ -859,11 +861,9 @@ class _CardsScreenState extends State<CardsScreen>
               child: Text(_mNetworkCtrl.text,
                   style: TextStyle(
                       color: _netColor,
-                      fontSize: _netSize,
+                      fontSize: _netSize * scale,
                       fontWeight: FontWeight.bold)),
             ),
-
-          // كلمة التوضيح "اسم المستخدم" مفصولة
           if (_showUserLabel)
             _draggableItem(
               x: _userLabelX,
@@ -876,10 +876,9 @@ class _CardsScreenState extends State<CardsScreen>
               }),
               child: Text('اسم المستخدم:',
                   style: TextStyle(
-                      color: _userLabelColor, fontSize: _userLabelSize)),
+                      color: _userLabelColor,
+                      fontSize: _userLabelSize * scale)),
             ),
-
-          // القيمة المولدة "اسم المستخدم" مفصولة
           _draggableItem(
             x: _userX,
             y: _userY,
@@ -892,11 +891,9 @@ class _CardsScreenState extends State<CardsScreen>
             child: Text(_previewUser,
                 style: TextStyle(
                     color: _userColor,
-                    fontSize: _userSize,
+                    fontSize: _userSize * scale,
                     fontWeight: FontWeight.bold)),
           ),
-
-          // كلمة التوضيح "كلمة المرور" مفصولة
           if (_showPassLabel)
             _draggableItem(
               x: _passLabelX,
@@ -909,10 +906,9 @@ class _CardsScreenState extends State<CardsScreen>
               }),
               child: Text('كلمة المرور:',
                   style: TextStyle(
-                      color: _passLabelColor, fontSize: _passLabelSize)),
+                      color: _passLabelColor,
+                      fontSize: _passLabelSize * scale)),
             ),
-
-          // القيمة المولدة "كلمة المرور" مفصولة
           _draggableItem(
             x: _passX,
             y: _passY,
@@ -925,10 +921,9 @@ class _CardsScreenState extends State<CardsScreen>
             child: Text(_previewPass,
                 style: TextStyle(
                     color: _passColor,
-                    fontSize: _passSize,
+                    fontSize: _passSize * scale,
                     fontWeight: FontWeight.bold)),
           ),
-
           if (_showDuration)
             _draggableItem(
               x: _durX,
@@ -942,10 +937,9 @@ class _CardsScreenState extends State<CardsScreen>
               child: Text(_mPrintedDurationCtrl.text,
                   style: TextStyle(
                       color: _durColor,
-                      fontSize: _durSize,
+                      fontSize: _durSize * scale,
                       fontWeight: FontWeight.bold)),
             ),
-
           if (_showNotes)
             _draggableItem(
               x: _notesX,
@@ -958,7 +952,8 @@ class _CardsScreenState extends State<CardsScreen>
               }),
               child: Text(
                   _mNotesCtrl.text.isEmpty ? 'ملاحظة' : _mNotesCtrl.text,
-                  style: TextStyle(color: _notesColor, fontSize: _notesSize)),
+                  style: TextStyle(
+                      color: _notesColor, fontSize: _notesSize * scale)),
             ),
         ],
       ),
@@ -1051,7 +1046,7 @@ class _CardsScreenState extends State<CardsScreen>
     );
   }
 
-  // دالة لإظهار وحذف الطباعات السابقة
+  // دالة إظهار وحذف وتعديل الطباعات السابقة
   Future<void> _showBatchHistoryDialog() async {
     if (widget.routerService == null) return;
 
@@ -1066,11 +1061,11 @@ class _CardsScreenState extends State<CardsScreen>
           await widget.routerService!.sendCommand('/ip/hotspot/user/print');
       Navigator.pop(context); // إغلاق اللودر
 
-      final Map<String, int> batches = {};
+      final Map<String, List<Map<String, dynamic>>> batches = {};
       for (var u in list) {
         final comment = u['comment']?.toString() ?? '';
         if (comment.startsWith('Batch_')) {
-          batches[comment] = (batches[comment] ?? 0) + 1;
+          batches.putIfAbsent(comment, () => []).add(u);
         }
       }
 
@@ -1091,8 +1086,8 @@ class _CardsScreenState extends State<CardsScreen>
                       itemCount: batches.keys.length,
                       itemBuilder: (context, index) {
                         String batchName = batches.keys.elementAt(index);
-                        int count = batches[batchName]!;
-                        // استخراج التاريخ من اسم الدفعة (اختياري) للجمالية
+                        int count = batches[batchName]!.length;
+
                         String timeStr = batchName.replaceAll('Batch_', '');
                         DateTime? date;
                         try {
@@ -1109,41 +1104,48 @@ class _CardsScreenState extends State<CardsScreen>
                               style: const TextStyle(color: Colors.white)),
                           subtitle: Text('عدد الكروت: $count',
                               style: const TextStyle(color: Colors.amber)),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () async {
-                              final confirm = await showDialog<bool>(
-                                context: ctx,
-                                builder: (_) => AlertDialog(
-                                  backgroundColor: AppTheme.semiBlack,
-                                  title: const Text('تأكيد الحذف',
-                                      style: TextStyle(color: Colors.white)),
-                                  content: Text(
-                                      'هل أنت متأكد من حذف هذه الدفعة بالكامل ($count كرت)؟',
-                                      style: const TextStyle(
-                                          color: Colors.white70)),
-                                  actions: [
-                                    TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(ctx, false),
-                                        child: const Text('إلغاء',
-                                            style: TextStyle(
-                                                color: Colors.white54))),
-                                    TextButton(
-                                        onPressed: () =>
-                                            Navigator.pop(ctx, true),
-                                        child: const Text('حذف',
-                                            style:
-                                                TextStyle(color: Colors.red))),
-                                  ],
-                                ),
-                              );
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon:
+                                    const Icon(Icons.delete, color: Colors.red),
+                                onPressed: () async {
+                                  final confirm = await showDialog<bool>(
+                                    context: ctx,
+                                    builder: (_) => AlertDialog(
+                                      backgroundColor: AppTheme.semiBlack,
+                                      title: const Text('تأكيد الحذف',
+                                          style:
+                                              TextStyle(color: Colors.white)),
+                                      content: Text(
+                                          'هل أنت متأكد من حذف هذه الدفعة بالكامل ($count كرت)؟',
+                                          style: const TextStyle(
+                                              color: Colors.white70)),
+                                      actions: [
+                                        TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, false),
+                                            child: const Text('إلغاء',
+                                                style: TextStyle(
+                                                    color: Colors.white54))),
+                                        TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, true),
+                                            child: const Text('حذف',
+                                                style: TextStyle(
+                                                    color: Colors.red))),
+                                      ],
+                                    ),
+                                  );
 
-                              if (confirm == true) {
-                                Navigator.pop(ctx); // إغلاق القائمة
-                                _deleteBatch(batchName);
-                              }
-                            },
+                                  if (confirm == true) {
+                                    Navigator.pop(ctx); // إغلاق القائمة
+                                    _deleteBatch(batchName);
+                                  }
+                                },
+                              ),
+                            ],
                           ),
                         );
                       },
@@ -1171,16 +1173,20 @@ class _CardsScreenState extends State<CardsScreen>
   Future<void> _deleteBatch(String batchComment) async {
     if (widget.routerService == null) return;
     try {
-      final list = await widget.routerService!.sendCommand(
-          '/ip/hotspot/user/print',
-          params: {'?comment': batchComment});
+      final list =
+          await widget.routerService!.sendCommand('/ip/hotspot/user/print');
       int deletedCount = 0;
       for (var u in list) {
-        final id = u['.id']?.toString() ?? '';
-        if (id.isNotEmpty) {
-          await widget.routerService!
-              .sendCommand('/ip/hotspot/user/remove', params: {'numbers': id});
-          deletedCount++;
+        final comment = u['comment']?.toString() ?? '';
+        if (comment == batchComment) {
+          final id = u['.id']?.toString() ?? u['id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            await widget.routerService!.sendCommand(
+              '/ip/hotspot/user/remove',
+              params: {'.id': id, 'numbers': id},
+            );
+            deletedCount++;
+          }
         }
       }
       if (mounted) {
@@ -1862,6 +1868,7 @@ class _CardsScreenState extends State<CardsScreen>
     pw.Font? arabicFont,
   }) {
     final t = _currentTemplate;
+    final scale = cardW / 300.0; // معامل التحجيم الموحد للبطاقات في PDF
 
     PdfColor toPdfCol(Color c) => PdfColor.fromInt(c.value);
 
@@ -1878,7 +1885,6 @@ class _CardsScreenState extends State<CardsScreen>
             pw.Positioned.fill(
                 child:
                     pw.Image(pw.MemoryImage(imageBytes), fit: pw.BoxFit.cover)),
-
           if (imageBytes == null)
             if (t.shapeType == 2)
               pw.Positioned(
@@ -1911,91 +1917,113 @@ class _CardsScreenState extends State<CardsScreen>
                 left: 0,
                 top: 0,
                 bottom: 0,
-                child:
-                    pw.Container(width: cardW * 0.3, color: toPdfCol(t.accent)),
+                child: pw.Container(
+                    width: cardW * 0.3,
+                    height: cardH,
+                    color: toPdfCol(t.accent)),
               ),
-
           if (_showNetwork)
             pw.Positioned(
               left: _netX * cardW,
               top: _netY * cardH,
-              child: pw.Text(card.network,
-                  textDirection: pw.TextDirection.rtl,
-                  style: pw.TextStyle(
-                      font: arabicFont,
-                      color: toPdfCol(_netColor),
-                      fontSize: _netSize * (cardW / 300))),
+              child: pw.Text(
+                card.network,
+                textDirection: pw.TextDirection.rtl,
+                textAlign: pw.TextAlign.left,
+                style: pw.TextStyle(
+                  font: arabicFont,
+                  color: toPdfCol(_netColor),
+                  fontSize: _netSize * scale,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
             ),
-
-          // طباعة كلمة "اسم المستخدم:" بالخط العربي وبمكانها المخصص
           if (_showUserLabel)
             pw.Positioned(
               left: _userLabelX * cardW,
               top: _userLabelY * cardH,
-              child: pw.Text('اسم المستخدم:',
-                  textDirection: pw.TextDirection.rtl,
-                  style: pw.TextStyle(
-                      font: arabicFont,
-                      color: toPdfCol(_userLabelColor),
-                      fontSize: _userLabelSize * (cardW / 300))),
+              child: pw.Text(
+                'اسم المستخدم:',
+                textDirection: pw.TextDirection.rtl,
+                textAlign: pw.TextAlign.left,
+                style: pw.TextStyle(
+                  font: arabicFont,
+                  color: toPdfCol(_userLabelColor),
+                  fontSize: _userLabelSize * scale,
+                ),
+              ),
             ),
-
-          // طباعة القيمة المولدة "اسم المستخدم" بمكانها المخصص
           pw.Positioned(
             left: _userX * cardW,
             top: _userY * cardH,
-            child: pw.Text(card.user,
-                style: pw.TextStyle(
-                    color: toPdfCol(_userColor),
-                    fontSize: _userSize * (cardW / 300),
-                    fontWeight: pw.FontWeight.bold)),
+            child: pw.Text(
+              card.user,
+              style: pw.TextStyle(
+                font: arabicFont,
+                color: toPdfCol(_userColor),
+                fontSize: _userSize * scale,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
           ),
-
-          // طباعة كلمة "كلمة المرور:" بالخط العربي وبمكانها المخصص
           if (_showPassLabel)
             pw.Positioned(
               left: _passLabelX * cardW,
               top: _passLabelY * cardH,
-              child: pw.Text('كلمة المرور:',
-                  textDirection: pw.TextDirection.rtl,
-                  style: pw.TextStyle(
-                      font: arabicFont,
-                      color: toPdfCol(_passLabelColor),
-                      fontSize: _passLabelSize * (cardW / 300))),
+              child: pw.Text(
+                'كلمة المرور:',
+                textDirection: pw.TextDirection.rtl,
+                textAlign: pw.TextAlign.left,
+                style: pw.TextStyle(
+                  font: arabicFont,
+                  color: toPdfCol(_passLabelColor),
+                  fontSize: _passLabelSize * scale,
+                ),
+              ),
             ),
-
-          // طباعة القيمة المولدة "كلمة المرور" بمكانها المخصص
           pw.Positioned(
             left: _passX * cardW,
             top: _passY * cardH,
-            child: pw.Text(card.pass,
-                style: pw.TextStyle(
-                    color: toPdfCol(_passColor),
-                    fontSize: _passSize * (cardW / 300),
-                    fontWeight: pw.FontWeight.bold)),
+            child: pw.Text(
+              card.pass,
+              style: pw.TextStyle(
+                font: arabicFont,
+                color: toPdfCol(_passColor),
+                fontSize: _passSize * scale,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
           ),
-
           if (_showDuration)
             pw.Positioned(
               left: _durX * cardW,
               top: _durY * cardH,
-              child: pw.Text(card.duration,
-                  textDirection: pw.TextDirection.rtl,
-                  style: pw.TextStyle(
-                      font: arabicFont,
-                      color: toPdfCol(_durColor),
-                      fontSize: _durSize * (cardW / 300))),
+              child: pw.Text(
+                card.duration,
+                textDirection: pw.TextDirection.rtl,
+                textAlign: pw.TextAlign.left,
+                style: pw.TextStyle(
+                  font: arabicFont,
+                  color: toPdfCol(_durColor),
+                  fontSize: _durSize * scale,
+                  fontWeight: pw.FontWeight.bold,
+                ),
+              ),
             ),
           if (_showNotes)
             pw.Positioned(
               left: _notesX * cardW,
               top: _notesY * cardH,
-              child: pw.Text(card.notes,
-                  textDirection: pw.TextDirection.rtl,
-                  style: pw.TextStyle(
-                      font: arabicFont,
-                      color: toPdfCol(_notesColor),
-                      fontSize: _notesSize * (cardW / 300))),
+              child: pw.Text(
+                card.notes,
+                textDirection: pw.TextDirection.rtl,
+                textAlign: pw.TextAlign.left,
+                style: pw.TextStyle(
+                  font: arabicFont,
+                  color: toPdfCol(_notesColor),
+                  fontSize: _notesSize * scale,
+                ),
+              ),
             ),
         ],
       ),
