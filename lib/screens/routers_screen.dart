@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:st_manager/services/firebase_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class RoutersScreen extends StatefulWidget {
   const RoutersScreen({super.key});
@@ -11,11 +12,6 @@ class RoutersScreen extends StatefulWidget {
 }
 
 class _RoutersScreenState extends State<RoutersScreen> {
-  static const String _licenseCachePhoneKey = 'license_cache_phone';
-  static const String _licenseCacheValueKey = 'license_cache_value';
-  static const String _licenseCacheCheckedAtKey = 'license_cache_checked_at';
-  static const Duration _licenseCacheDuration = Duration(hours: 12);
-
   final SecureStorageService _storage = SecureStorageService();
 
   List<Map<String, String>> _routers = [];
@@ -43,37 +39,7 @@ class _RoutersScreenState extends State<RoutersScreen> {
     setState(() => _routers = routers);
   }
 
-  Future<bool?> _readCachedLicense(String phone) async {
-    final cachedPhone = await _storage.read(_licenseCachePhoneKey);
-    final cachedValue = await _storage.read(_licenseCacheValueKey);
-    final cachedAt = await _storage.read(_licenseCacheCheckedAtKey);
-
-    if (cachedPhone == null ||
-        cachedValue == null ||
-        cachedAt == null ||
-        cachedPhone.trim() != phone.trim()) {
-      return null;
-    }
-
-    final parsedAt = DateTime.tryParse(cachedAt);
-    if (parsedAt == null) return null;
-
-    if (DateTime.now().difference(parsedAt) > _licenseCacheDuration) {
-      return null;
-    }
-
-    return cachedValue == 'true';
-  }
-
-  Future<void> _saveCachedLicense(String phone, bool licensed) async {
-    await _storage.write(_licenseCachePhoneKey, phone);
-    await _storage.write(_licenseCacheValueKey, licensed ? 'true' : 'false');
-    await _storage.write(
-      _licenseCacheCheckedAtKey,
-      DateTime.now().toIso8601String(),
-    );
-  }
-
+  // دالة حساب الأيام المتبقية الدقيقة من فايرباس
   Future<void> _checkRemainingDays() async {
     if (mounted) {
       setState(() => _checkingRemainingDays = true);
@@ -88,45 +54,93 @@ class _RoutersScreenState extends State<RoutersScreen> {
         return;
       }
 
-      final cachedLicense = await _readCachedLicense(phone);
-      bool? licensed = cachedLicense;
+      DateTime? expiryDate;
 
-      if (licensed == null) {
-        try {
-          licensed = await FirebaseService.checkLicense(phone).timeout(
-            const Duration(seconds: 10),
-          );
-          await _saveCachedLicense(phone, licensed);
-        } catch (_) {
-          final fallback = await _readCachedLicense(phone);
-          if (fallback != null) {
-            licensed = fallback;
-          } else {
-            licensed = false;
+      try {
+        // جلب التاريخ الفعلي من فايرباس
+        expiryDate = await FirebaseService.getLicenseExpiry(phone).timeout(
+          const Duration(seconds: 10),
+        );
+
+        // تخزين التاريخ الفعلي لاستخدامه في وضع عدم الاتصال
+        if (expiryDate != null) {
+          await _storage.write(
+              'license_expiry_date', expiryDate.toIso8601String());
+          await _storage.write('license_phone', phone);
+        }
+      } catch (_) {
+        // في حال عدم وجود إنترنت، جلب التاريخ المحفوظ
+        final cachedPhone = await _storage.read('license_phone');
+        if (cachedPhone == phone) {
+          final cachedExpiry = await _storage.read('license_expiry_date');
+          if (cachedExpiry != null && cachedExpiry.isNotEmpty) {
+            expiryDate = DateTime.tryParse(cachedExpiry);
           }
         }
       }
 
       if (!mounted) return;
 
-      if (licensed) {
-        setState(() => _remainingDays = 30);
-        return;
-      }
+      if (expiryDate != null) {
+        // حساب الفارق بين تاريخ اليوم وتاريخ الانتهاء
+        final today = DateTime(
+            DateTime.now().year, DateTime.now().month, DateTime.now().day);
+        final expDate =
+            DateTime(expiryDate.year, expiryDate.month, expiryDate.day);
+        final diff = expDate.difference(today).inDays;
 
-      final firstLaunch = await _storage.getFirstLaunch();
-      if (!mounted) return;
-
-      if (firstLaunch != null) {
-        final trialEnd = DateTime.parse(firstLaunch).add(const Duration(days: 3));
-        final diff = trialEnd.difference(DateTime.now()).inDays;
         setState(() => _remainingDays = diff > 0 ? diff : 0);
       } else {
-        setState(() => _remainingDays = 3);
+        setState(() => _remainingDays = 0);
       }
     } finally {
       if (mounted) {
         setState(() => _checkingRemainingDays = false);
+      }
+    }
+  }
+
+  // دالة فتح تطبيق Back to Home
+  Future<void> _launchExternalVPN() async {
+    try {
+      // 1. محاولة الفتح عبر Scheme الخاص بالتطبيق
+      final Uri appUrl = Uri.parse('bth://');
+
+      // 2. محاولة الفتح عبر الـ Intent الخاص بالاندرويد (الأكثر فعالية لفتح التطبيقات المثبتة)
+      final Uri intentUrl =
+          Uri.parse('intent://#Intent;package=com.mikrotik.bth;end');
+
+      // 3. رابط المتجر كخيار أخير
+      final Uri storeUrl = Uri.parse(
+          'https://play.google.com/store/apps/details?id=com.mikrotik.bth');
+
+      bool launched = false;
+
+      // محاولة الفتح المباشر
+      try {
+        if (await canLaunchUrl(appUrl)) {
+          launched =
+              await launchUrl(appUrl, mode: LaunchMode.externalApplication);
+        }
+      } catch (_) {}
+
+      // محاولة الفتح عبر Intent إذا فشلت الطريقة الأولى
+      if (!launched) {
+        try {
+          launched =
+              await launchUrl(intentUrl, mode: LaunchMode.externalApplication);
+        } catch (_) {}
+      }
+
+      // إذا لم يفتح، قم بتحويله للمتجر
+      if (!launched) {
+        await launchUrl(storeUrl, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('حدث خطأ أثناء محاولة فتح التطبيق')),
+        );
       }
     }
   }
@@ -319,10 +333,11 @@ class _RoutersScreenState extends State<RoutersScreen> {
   }
 
   Widget _buildSummaryCard() {
-    final remainingText = _checkingRemainingDays ? '...' : '$_remainingDays يوم';
+    final remainingText =
+        _checkingRemainingDays ? '...' : '$_remainingDays يوم';
 
     return Container(
-      margin: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: AppTheme.semiBlack,
@@ -398,6 +413,30 @@ class _RoutersScreenState extends State<RoutersScreen> {
         children: [
           if (_loading) const LinearProgressIndicator(color: AppTheme.gold),
           _buildSummaryCard(),
+
+          // زر فتح تطبيق Back to Home أسفل بطاقة الملخص
+          Padding(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.vpn_key_outlined, color: AppTheme.gold),
+                label: const Text('تشغيل Back to Home',
+                    style: TextStyle(color: AppTheme.gold)),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: AppTheme.gold.withOpacity(0.5)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: _launchExternalVPN,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+
           Expanded(
             child: _routers.isEmpty
                 ? const Center(
@@ -414,6 +453,8 @@ class _RoutersScreenState extends State<RoutersScreen> {
                       itemBuilder: (_, i) {
                         final r = _routers[i];
                         return Card(
+                          margin: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 4),
                           child: ListTile(
                             leading:
                                 const Icon(Icons.router, color: AppTheme.gold),
@@ -429,17 +470,13 @@ class _RoutersScreenState extends State<RoutersScreen> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(
-                                    Icons.edit,
-                                    color: Colors.white54,
-                                  ),
+                                  icon: const Icon(Icons.edit,
+                                      color: Colors.white54),
                                   onPressed: () => _addOrEditRouter(index: i),
                                 ),
                                 IconButton(
-                                  icon: const Icon(
-                                    Icons.delete,
-                                    color: Colors.red,
-                                  ),
+                                  icon: const Icon(Icons.delete,
+                                      color: Colors.red),
                                   onPressed: () => _deleteRouter(i),
                                 ),
                               ],
