@@ -3,7 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/services/firebase_service.dart';
-import 'package:st_manager/screens/user_manager_screen.dart';
+// تم تغيير الاستيراد هنا ليتعرف على شاشة الفايروول الجديدة
+import 'package:st_manager/screens/firewall_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 class SideDrawer extends StatefulWidget {
@@ -1466,16 +1467,17 @@ class _SideDrawerState extends State<SideDrawer> {
                       _showRouterInfo();
                     },
                   ),
-                  _sectionHeader('إدارة المستخدمين'),
+                  // تم تعديل هذا القسم واسم الشاشة الموجهة إليها
+                  _sectionHeader('إدارة الجدار الناري'),
                   _buildTile(
-                    icon: Icons.manage_accounts,
-                    label: 'User Manager',
+                    icon: Icons.security,
+                    label: 'Firewall',
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.push(
                           context,
                           MaterialPageRoute(
-                              builder: (_) => UserManagerScreen(
+                              builder: (_) => FirewallScreen(
                                   routerService: widget.routerService)));
                     },
                   ),
