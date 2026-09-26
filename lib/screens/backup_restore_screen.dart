@@ -50,17 +50,18 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
     return folder.path;
   }
 
-  /// تحميل ملفات النسخ الاحتياطي من الراوتر مباشرة ومطابقتها محلياً دون خطأ
+  /// تحميل ملفات النسخ الاحتياطي من الراوتر ومن جميع المسارات المحلية المتاحة لتفادي فقدانها بعد إعادة التثبيت
   Future<void> _loadBackups() async {
     final router = widget.routerService;
     final backupsList = <Map<String, dynamic>>[];
 
+    // 1. جلب الملفات من الراوتر
     if (router != null && router.isConnected) {
       try {
         final files = await router.sendCommand('/file/print');
         for (var f in files) {
           final name = f['name']?.toString() ?? '';
-          if (name.endsWith('.backup')) {
+          if (name.toLowerCase().endsWith('.backup')) {
             backupsList.add({
               'name': name,
               'size': f['size']?.toString() ?? 'غير معروف',
@@ -75,28 +76,58 @@ class _BackupRestoreScreenState extends State<BackupRestoreScreen> {
       }
     }
 
+    // 2. البحث عن الملفات في جميع المسارات المحلية المحتملة
     try {
-      final path = await _getAppDirectory();
-      final folder = Directory(path);
-      final localFiles = folder
-          .listSync()
-          .whereType<File>()
-          .where((file) => file.path.endsWith('.backup'))
-          .toList();
+      final List<String> possiblePaths = [];
 
-      for (var file in localFiles) {
-        final fileName = file.uri.pathSegments.last;
-        if (!backupsList.any((b) => b['name'] == fileName)) {
-          backupsList.add({
-            'name': fileName,
-            'size': '${(file.lengthSync() / 1024).toStringAsFixed(1)} KB',
-            'date': _formatDate(file.lastModifiedSync()),
-            'file': file,
-            'isServer': false,
-          });
+      // إضافة المسارات العامة في الأندرويد التي قد تحتوي على نسخ قديمة
+      if (Platform.isAndroid) {
+        possiblePaths.add('/storage/emulated/0/ST_Backup');
+        possiblePaths.add('/storage/emulated/0/Download/ST_Backup');
+      }
+
+      // إضافة المسار الخاص بالتطبيق (المسار الافتراضي الاحتياطي)
+      final appDocDir = await getApplicationDocumentsDirectory();
+      possiblePaths.add('${appDocDir.path}/ST_Backup');
+
+      // ضمان إضافة المسار الأساسي الذي يتم الحفظ فيه حالياً
+      final currentWritePath = await _getAppDirectory();
+      if (!possiblePaths.contains(currentWritePath)) {
+        possiblePaths.add(currentWritePath);
+      }
+
+      for (var path in possiblePaths) {
+        try {
+          final folder = Directory(path);
+          if (folder.existsSync()) {
+            final localFiles = folder
+                .listSync()
+                .whereType<File>()
+                .where((file) => file.path.toLowerCase().endsWith('.backup'))
+                .toList();
+
+            for (var file in localFiles) {
+              final fileName = file.uri.pathSegments.last;
+              // التحقق من عدم التكرار (لتفادي عرض نفس النسخة مرتين إذا تطابقت المسارات)
+              if (!backupsList.any((b) => b['name'] == fileName)) {
+                backupsList.add({
+                  'name': fileName,
+                  'size': '${(file.lengthSync() / 1024).toStringAsFixed(1)} KB',
+                  'date': _formatDate(file.lastModifiedSync()),
+                  'file': file,
+                  'isServer': false,
+                });
+              }
+            }
+          }
+        } catch (e) {
+          // يتم تجاهل الخطأ في مسار معين واستكمال البحث في المسارات الأخرى
+          debugPrint("تعذر قراءة المسار: $path - $e");
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint("خطأ أثناء جلب الملفات المحلية: $e");
+    }
 
     if (mounted) {
       setState(() {

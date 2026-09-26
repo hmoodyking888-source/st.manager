@@ -4,6 +4,8 @@ import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
 /// اسم قائمة WAN الافتراضية.
+/// سيتم تحميل قوائم Interface Lists من الراوتر تلقائيًا.
+/// إذا لم توجد قوائم، سيبقى هذا الاسم كقيمة افتراضية.
 const String _defaultWanInterfaceList = 'WAN';
 const String _defaultLanInterfaceList = 'LAN';
 
@@ -31,7 +33,10 @@ class AppPriorityConfig {
   String burstUploadThreshold;
   String burstTime;
 
+  /// قائمة LAN التي يدخل منها ترافيك العملاء.
   String lanInterfaceList;
+
+  /// قائمة WAN التي يصل إليها/يأتي منها ترافيك الإنترنت.
   String wanInterfaceList;
 
   String downloadParent;
@@ -57,6 +62,10 @@ class AppPriorityConfig {
     this.burstDownloadThreshold = '70M',
     this.burstUploadThreshold = '15M',
     this.burstTime = '20s',
+
+    /// الافتراضي الصحيح:
+    /// Download = WAN -> LAN
+    /// Upload   = LAN -> WAN
     this.lanInterfaceList = _defaultLanInterfaceList,
     this.wanInterfaceList = _defaultWanInterfaceList,
     this.downloadParent = 'global',
@@ -64,6 +73,7 @@ class AppPriorityConfig {
   });
 }
 
+// تم استبدال openSpeed بـ fixLoop بناء على طلبك
 enum ExtraMenu { fixLoop, telegramBot }
 
 class AppPriorityScreen extends StatefulWidget {
@@ -89,6 +99,7 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   int? _subscriptionDaysRemaining;
   DateTime? _subscriptionExpiryDate;
+
   final SecureStorageService _secureStorage = SecureStorageService();
 
   // ---------------------------------------------------------------------------
@@ -99,11 +110,15 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   List<String> get _lanInterfaceLists {
     final values = <String>{};
+
     if (_interfaceLists.isNotEmpty) {
       for (final value in _interfaceLists) {
         final normalized = value.trim();
         if (normalized.isEmpty) continue;
+
         final lower = normalized.toLowerCase();
+
+        // نضع قوائم LAN في الأعلى، لكن نبقي كل القوائم متاحة للاختيار.
         if (lower == 'lan' ||
             lower.contains('lan') ||
             lower.contains('inside') ||
@@ -112,17 +127,22 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         }
       }
     }
+
     values.add(_defaultLanInterfaceList);
+
     return values.toList();
   }
 
   List<String> get _wanInterfaceLists {
     final values = <String>{};
+
     if (_interfaceLists.isNotEmpty) {
       for (final value in _interfaceLists) {
         final normalized = value.trim();
         if (normalized.isEmpty) continue;
+
         final lower = normalized.toLowerCase();
+
         if (lower == 'wan' ||
             lower.contains('wan') ||
             lower.contains('internet') ||
@@ -132,7 +152,9 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         }
       }
     }
+
     values.add(_defaultWanInterfaceList);
+
     return values.toList();
   }
 
@@ -209,7 +231,7 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         '*discord.com*',
         '*discord.gg*',
         '*discordapp.com*',
-        '*discordapp.net*'
+        '*discordapp.net*',
       ],
     ),
     AppPriorityConfig(
@@ -229,11 +251,13 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   ];
 
   RouterService? get _router => widget.routerService;
+
   bool get _hasRouter => _router != null;
 
   @override
   void initState() {
     super.initState();
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshAll();
     });
@@ -244,18 +268,27 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // ---------------------------------------------------------------------------
 
   String _commentFor(AppPriorityConfig app) => 'AppManager_${app.id}';
+
   String _connMarkFor(AppPriorityConfig app) => 'conn_${app.id}';
+
   String _downPackMarkFor(AppPriorityConfig app) => 'pack_${app.id}_down';
+
   String _upPackMarkFor(AppPriorityConfig app) => 'pack_${app.id}_up';
+
   String _downQueueNameFor(AppPriorityConfig app) => 'Priority_${app.id}_down';
+
   String _upQueueNameFor(AppPriorityConfig app) => 'Priority_${app.id}_up';
 
   // ---------------------------------------------------------------------------
   // Snackbar
   // ---------------------------------------------------------------------------
 
-  void _showSnack(String message, {Color backgroundColor = Colors.black87}) {
+  void _showSnack(
+    String message, {
+    Color backgroundColor = Colors.black87,
+  }) {
     if (!mounted) return;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -271,25 +304,36 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   List<Map<String, dynamic>> _asMapList(dynamic response) {
     if (response is List) {
       return response.whereType<Map>().map((item) {
-        return item.map((key, value) => MapEntry(key.toString(), value));
+        return item.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
       }).toList();
     }
+
     if (response is Map && response['data'] is List) {
       final data = response['data'] as List;
+
       return data.whereType<Map>().map((item) {
-        return item.map((key, value) => MapEntry(key.toString(), value));
+        return item.map(
+          (key, value) => MapEntry(key.toString(), value),
+        );
       }).toList();
     }
+
     return [];
   }
 
   Map<String, dynamic>? _findByField(
-      List<Map<String, dynamic>> items, String field, String value) {
+    List<Map<String, dynamic>> items,
+    String field,
+    String value,
+  ) {
     for (final item in items) {
       if (item[field]?.toString() == value) {
         return item;
       }
     }
+
     return null;
   }
 
@@ -299,12 +343,18 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   bool _isValidRateLimit(String value) {
     final cleaned = value.replaceAll(' ', '').trim();
-    return RegExp(r'^\d+(\.\d+)?[KkMmGg]?$').hasMatch(cleaned);
+
+    return RegExp(
+      r'^\d+(\.\d+)?[KkMmGg]?(?:/\d+(\.\d+)?[KkMmGg]?)?$',
+    ).hasMatch(cleaned);
   }
 
   bool _isValidBurstTime(String value) {
     final cleaned = value.replaceAll(' ', '').trim();
-    return RegExp(r'^\d+(ms|s|m|h)$').hasMatch(cleaned);
+
+    return RegExp(
+      r'^\d+(ms|s|m|h)$',
+    ).hasMatch(cleaned);
   }
 
   String _normalizeRateLimit(String value) {
@@ -313,34 +363,69 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   String? _validateRateLimitField(String? value) {
     final v = (value ?? '').trim();
-    if (v.isEmpty) return 'هذا الحقل مطلوب';
-    if (!_isValidRateLimit(v)) return 'صيغة غير صحيحة (مثال: 100M)';
+
+    if (v.isEmpty) {
+      return 'هذا الحقل مطلوب';
+    }
+
+    if (!_isValidRateLimit(v)) {
+      return 'صيغة غير صحيحة';
+    }
+
     return null;
   }
 
   String? _validatePriorityField(String? value) {
     final v = int.tryParse((value ?? '').trim());
-    if (v == null) return 'أدخل رقمًا من 1 إلى 8';
-    if (v < 1 || v > 8) return 'الأولوية يجب أن تكون من 1 إلى 8';
+
+    if (v == null) {
+      return 'أدخل رقمًا من 1 إلى 8';
+    }
+
+    if (v < 1 || v > 8) {
+      return 'الأولوية يجب أن تكون من 1 إلى 8';
+    }
+
     return null;
   }
 
   String? _validateBurstTimeField(String? value) {
     final v = (value ?? '').trim();
-    if (v.isEmpty) return 'هذا الحقل مطلوب';
-    if (!_isValidBurstTime(v)) return 'مثال: 20s أو 500ms';
+
+    if (v.isEmpty) {
+      return 'هذا الحقل مطلوب';
+    }
+
+    if (!_isValidBurstTime(v)) {
+      return 'مثال: 20s أو 500ms';
+    }
+
     return null;
   }
 
   String? _validateNonEmptyField(String? value) {
-    if ((value ?? '').trim().isEmpty) return 'هذا الحقل مطلوب';
+    if ((value ?? '').trim().isEmpty) {
+      return 'هذا الحقل مطلوب';
+    }
+
     return null;
   }
 
-  String? _validateInterfaceList(String? value, List<String> values) {
+  String? _validateInterfaceList(
+    String? value,
+    List<String> values,
+  ) {
     final v = (value ?? '').trim();
-    if (v.isEmpty) return 'اختر قائمة';
-    return null; // تم إزالة قيد الإجبار على قائمة موجودة مسبقاً لمرونة أعلى
+
+    if (v.isEmpty) {
+      return 'اختر قائمة';
+    }
+
+    if (!values.contains(v)) {
+      return 'القائمة غير موجودة';
+    }
+
+    return null;
   }
 
   // ---------------------------------------------------------------------------
@@ -348,7 +433,9 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _refreshAll() async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() => _loading = true);
+    }
 
     await Future.wait([
       _loadInterfaceLists(),
@@ -357,7 +444,9 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
       _checkFastTrackWarning(),
     ]);
 
-    if (mounted) setState(() => _loading = false);
+    if (mounted) {
+      setState(() => _loading = false);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -366,27 +455,53 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   Future<void> _loadInterfaceLists() async {
     final router = _router;
-    if (router == null) return;
+
+    if (router == null) {
+      return;
+    }
+
     try {
-      final response = await router.sendCommand('/interface/list/print');
+      final response = await router.sendCommand(
+        '/interface/list/print',
+      );
+
       final items = _asMapList(response);
+
       final names = <String>[];
 
       for (final item in items) {
         final name = item['name']?.toString().trim();
+
         if (name != null && name.isNotEmpty) {
           names.add(name);
         }
       }
-      names.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+      names.sort(
+        (a, b) => a.toLowerCase().compareTo(
+              b.toLowerCase(),
+            ),
+      );
 
       if (!mounted) return;
+
       setState(() {
         _interfaceLists = names;
       });
-      // تم إزالة عملية الـ Override التي كانت تدمر الإعدادات المحفوظة
+
+      // تحديث القيم القديمة إلى قيم صحيحة موجودة على الراوتر
+      for (final app in _apps) {
+        if (!_lanInterfaceLists.contains(app.lanInterfaceList)) {
+          app.lanInterfaceList = _lanInterfaceLists.first;
+        }
+
+        if (!_wanInterfaceLists.contains(app.wanInterfaceList)) {
+          app.wanInterfaceList = _wanInterfaceLists.first;
+        }
+      }
     } catch (_) {
       if (!mounted) return;
+
       setState(() {
         _interfaceLists = [];
       });
@@ -400,36 +515,62 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   Future<void> _loadSubscriptionCounter() async {
     try {
       final rawExpiry = await _secureStorage.read('license_expiry_date');
+
       if (rawExpiry == null || rawExpiry.trim().isEmpty) {
         if (!mounted) return;
+
         setState(() {
           _subscriptionExpiryDate = null;
           _subscriptionDaysRemaining = null;
         });
+
         return;
       }
-      final parsed = DateTime.tryParse(rawExpiry.trim());
+
+      final parsed = DateTime.tryParse(
+        rawExpiry.trim(),
+      );
+
       if (parsed == null) {
         if (!mounted) return;
+
         setState(() {
           _subscriptionExpiryDate = null;
           _subscriptionDaysRemaining = null;
         });
+
         return;
       }
+
       final now = DateTime.now();
-      final today = DateTime(now.year, now.month, now.day);
-      final expiryDate = DateTime(parsed.year, parsed.month, parsed.day);
+
+      final today = DateTime(
+        now.year,
+        now.month,
+        now.day,
+      );
+
+      final expiryDate = DateTime(
+        parsed.year,
+        parsed.month,
+        parsed.day,
+      );
+
       int daysRemaining = expiryDate.difference(today).inDays;
-      if (daysRemaining < 0) daysRemaining = 0;
+
+      if (daysRemaining < 0) {
+        daysRemaining = 0;
+      }
 
       if (!mounted) return;
+
       setState(() {
         _subscriptionExpiryDate = expiryDate;
         _subscriptionDaysRemaining = daysRemaining;
       });
     } catch (_) {
       if (!mounted) return;
+
       setState(() {
         _subscriptionExpiryDate = null;
         _subscriptionDaysRemaining = null;
@@ -439,27 +580,55 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   String _subscriptionText() {
     final days = _subscriptionDaysRemaining;
-    if (days == null) return 'اشتراك: غير متوفر';
-    if (days == 0) return 'الاشتراك منتهي';
-    if (days == 1) return 'متبقي يوم واحد';
-    if (days == 2) return 'متبقي يومان';
+
+    if (days == null) {
+      return 'اشتراك: غير متوفر';
+    }
+
+    if (days == 0) {
+      return 'الاشتراك منتهي';
+    }
+
+    if (days == 1) {
+      return 'متبقي يوم واحد';
+    }
+
+    if (days == 2) {
+      return 'متبقي يومان';
+    }
+
     return 'متبقي $days يوم';
   }
 
   Color _subscriptionColor() {
     final days = _subscriptionDaysRemaining;
-    if (days == null) return Colors.white54;
-    if (days <= 0) return Colors.redAccent;
-    if (days <= 3) return Colors.orangeAccent;
+
+    if (days == null) {
+      return Colors.white54;
+    }
+
+    if (days <= 0) {
+      return Colors.redAccent;
+    }
+
+    if (days <= 3) {
+      return Colors.orangeAccent;
+    }
+
     return Colors.greenAccent;
   }
 
   String _formatSubscriptionDate() {
     final date = _subscriptionExpiryDate;
-    if (date == null) return 'تاريخ الانتهاء غير متوفر';
+
+    if (date == null) {
+      return 'تاريخ الانتهاء غير متوفر';
+    }
+
     final day = date.day.toString().padLeft(2, '0');
     final month = date.month.toString().padLeft(2, '0');
     final year = date.year.toString();
+
     return '$day/$month/$year';
   }
 
@@ -469,25 +638,41 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   Future<void> _checkFastTrackWarning() async {
     final router = _router;
-    if (router == null) return;
+
+    if (router == null) {
+      return;
+    }
+
     try {
-      final response = await router.sendCommand('/ip/firewall/filter/print');
+      final response = await router.sendCommand(
+        '/ip/firewall/filter/print',
+      );
+
       final rules = _asMapList(response);
+
       int count = 0;
+
       for (final rule in rules) {
         final action = rule['action']?.toString().trim();
         final disabled = rule['disabled']?.toString().toLowerCase();
+
         final isDisabled =
             disabled == 'true' || disabled == 'yes' || disabled == '1';
-        if (action == 'fasttrack-connection' && !isDisabled) count++;
+
+        if (action == 'fasttrack-connection' && !isDisabled) {
+          count++;
+        }
       }
+
       if (!mounted) return;
+
       setState(() {
         _fastTrackDetected = count > 0;
         _fastTrackRulesCount = count;
       });
     } catch (_) {
       if (!mounted) return;
+
       setState(() {
         _fastTrackDetected = false;
         _fastTrackRulesCount = 0;
@@ -499,15 +684,25 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // Check active configurations
   // ---------------------------------------------------------------------------
 
-  Future<void> _checkActivePriorities({bool showLoader = true}) async {
+  Future<void> _checkActivePriorities({
+    bool showLoader = true,
+  }) async {
     final router = _router;
-    if (router == null) return;
-    if (showLoader && mounted) setState(() => _loading = true);
+
+    if (router == null) {
+      return;
+    }
+
+    if (showLoader && mounted) {
+      setState(() => _loading = true);
+    }
 
     try {
       final queueResponse = await router.sendCommand('/queue/tree/print');
+
       final mangleResponse =
           await router.sendCommand('/ip/firewall/mangle/print');
+
       final queues = _asMapList(queueResponse);
       final mangleRules = _asMapList(mangleResponse);
 
@@ -516,40 +711,60 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
       setState(() {
         for (final app in _apps) {
           final comment = _commentFor(app);
-          final downQueue =
-              _findByField(queues, 'name', _downQueueNameFor(app));
-          final upQueue = _findByField(queues, 'name', _upQueueNameFor(app));
 
-          final connExists = mangleRules.any((rule) =>
-              rule['comment']?.toString() == comment &&
-              rule['action']?.toString() == 'mark-connection');
+          final downQueue = _findByField(
+            queues,
+            'name',
+            _downQueueNameFor(app),
+          );
 
-          final downPackExists = mangleRules.any((rule) =>
-              rule['comment']?.toString() == comment &&
-              rule['action']?.toString() == 'mark-packet' &&
-              rule['new-packet-mark']?.toString() == _downPackMarkFor(app));
+          final upQueue = _findByField(
+            queues,
+            'name',
+            _upQueueNameFor(app),
+          );
 
-          final upPackExists = mangleRules.any((rule) =>
-              rule['comment']?.toString() == comment &&
-              rule['action']?.toString() == 'mark-packet' &&
-              rule['new-packet-mark']?.toString() == _upPackMarkFor(app));
+          final connExists = mangleRules.any(
+            (rule) =>
+                rule['comment']?.toString() == comment &&
+                rule['action']?.toString() == 'mark-connection',
+          );
+
+          final downPackExists = mangleRules.any(
+            (rule) =>
+                rule['comment']?.toString() == comment &&
+                rule['action']?.toString() == 'mark-packet' &&
+                rule['new-packet-mark']?.toString() == _downPackMarkFor(app),
+          );
+
+          final upPackExists = mangleRules.any(
+            (rule) =>
+                rule['comment']?.toString() == comment &&
+                rule['action']?.toString() == 'mark-packet' &&
+                rule['new-packet-mark']?.toString() == _upPackMarkFor(app),
+          );
 
           app.isEnabled = connExists &&
               downPackExists &&
               upPackExists &&
               downQueue != null &&
               upQueue != null;
+
           app.currentDownloadLimit = downQueue?['max-limit']?.toString() ?? '';
+
           app.currentUploadLimit = upQueue?['max-limit']?.toString() ?? '';
 
           if (downQueue != null) {
             final parent = downQueue['parent']?.toString();
+
             if (parent != null && parent.isNotEmpty) {
               app.downloadParent = parent;
             }
           }
+
           if (upQueue != null) {
             final parent = upQueue['parent']?.toString();
+
             if (parent != null && parent.isNotEmpty) {
               app.uploadParent = parent;
             }
@@ -557,8 +772,11 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         }
       });
     } catch (_) {
+      // تجاهل الخطأ حتى لا تتأثر الشاشة
     } finally {
-      if (mounted && showLoader) setState(() => _loading = false);
+      if (mounted && showLoader) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -567,7 +785,10 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // ---------------------------------------------------------------------------
 
   Future<bool> _showFastTrackWarningDialog() async {
-    if (!_fastTrackDetected) return true;
+    if (!_fastTrackDetected) {
+      return true;
+    }
+
     final result = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -589,6 +810,7 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         ],
       ),
     );
+
     return result ?? false;
   }
 
@@ -615,19 +837,33 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
     required String uploadParent,
   }) {
     app.downloadMaxLimit = downloadMaxLimit;
+
     app.uploadMaxLimit = uploadMaxLimit;
+
     app.downloadLimitAt = downloadLimitAt;
+
     app.uploadLimitAt = uploadLimitAt;
+
     app.priority = priority;
+
     app.burstEnabled = burstEnabled;
+
     app.burstDownloadLimit = burstDownloadLimit;
+
     app.burstUploadLimit = burstUploadLimit;
+
     app.burstDownloadThreshold = burstDownloadThreshold;
+
     app.burstUploadThreshold = burstUploadThreshold;
+
     app.burstTime = burstTime;
+
     app.lanInterfaceList = lanInterfaceList;
+
     app.wanInterfaceList = wanInterfaceList;
+
     app.downloadParent = downloadParent;
+
     app.uploadParent = uploadParent;
   }
 
@@ -636,60 +872,76 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // ---------------------------------------------------------------------------
 
   Future<void> _removeExistingRulesForApp(
-      RouterService router, AppPriorityConfig app) async {
+    RouterService router,
+    AppPriorityConfig app,
+  ) async {
     final comment = _commentFor(app);
-    final queueNames = <String>{_downQueueNameFor(app), _upQueueNameFor(app)};
 
-    final mangleResp = await router.sendCommand('/ip/firewall/mangle/print');
+    final queueNames = <String>{
+      _downQueueNameFor(app),
+      _upQueueNameFor(app),
+    };
+
+    // -----------------------------
+    // Remove Mangle
+    // -----------------------------
+
+    final mangleResp = await router.sendCommand(
+      '/ip/firewall/mangle/print',
+    );
+
     final mangleRules = _asMapList(mangleResp);
+
     for (final rule in mangleRules) {
       final ruleComment = rule['comment']?.toString();
+
       if (ruleComment == comment) {
         final id = rule['.id']?.toString();
+
         if (id != null && id.isNotEmpty) {
-          await router.sendCommand('/ip/firewall/mangle/remove',
-              params: {'numbers': id});
+          await router.sendCommand(
+            '/ip/firewall/mangle/remove',
+            params: {
+              'numbers': id,
+            },
+          );
         }
       }
     }
 
-    final queueResp = await router.sendCommand('/queue/tree/print');
+    // -----------------------------
+    // Remove Queue Tree
+    // -----------------------------
+
+    final queueResp = await router.sendCommand(
+      '/queue/tree/print',
+    );
+
     final queueRules = _asMapList(queueResp);
+
     for (final queue in queueRules) {
       final name = queue['name']?.toString();
+
       final queueComment = queue['comment']?.toString();
+
       if (queueComment == comment || queueNames.contains(name)) {
         final id = queue['.id']?.toString();
+
         if (id != null && id.isNotEmpty) {
-          await router
-              .sendCommand('/queue/tree/remove', params: {'numbers': id});
+          await router.sendCommand(
+            '/queue/tree/remove',
+            params: {
+              'numbers': id,
+            },
+          );
         }
       }
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Queue Builder & Parent Check
+  // Queue Builder
   // ---------------------------------------------------------------------------
-
-  Future<void> _ensureParentQueueExists(
-      RouterService router, String parentName) async {
-    if (parentName.isEmpty || parentName.toLowerCase() == 'global') return;
-
-    final resp = await router
-        .sendCommand('/queue/tree/print', params: {'?name': parentName});
-    final list = _asMapList(resp);
-
-    // إذا لم يكن الـ Parent موجوداً، قم بإنشائه تجنباً للخطأ
-    if (list.isEmpty) {
-      await router.sendCommand('/queue/tree/add', params: {
-        'name': parentName,
-        'parent': 'global',
-        'max-limit': '1000M',
-        'comment': 'Auto-created parent by AppManager'
-      });
-    }
-  }
 
   Map<String, String> _buildQueueParams({
     required String name,
@@ -713,13 +965,21 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
       'priority': priority.toString(),
       'comment': comment,
     };
+
     if (burstEnabled) {
-      if (burstLimit.trim().isNotEmpty)
+      if (burstLimit.trim().isNotEmpty) {
         params['burst-limit'] = burstLimit.trim();
-      if (burstThreshold.trim().isNotEmpty)
+      }
+
+      if (burstThreshold.trim().isNotEmpty) {
         params['burst-threshold'] = burstThreshold.trim();
-      if (burstTime.trim().isNotEmpty) params['burst-time'] = burstTime.trim();
+      }
+
+      if (burstTime.trim().isNotEmpty) {
+        params['burst-time'] = burstTime.trim();
+      }
     }
+
     return params;
   }
 
@@ -727,31 +987,65 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // Enable App Priority
   // ---------------------------------------------------------------------------
 
-  Future<void> _enableAppPriority(AppPriorityConfig app) async {
+  Future<void> _enableAppPriority(
+    AppPriorityConfig app,
+  ) async {
     final router = _router;
+
     if (router == null) {
-      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      _showSnack(
+        'لا يوجد اتصال بالراوتر',
+        backgroundColor: Colors.red,
+      );
       return;
     }
 
-    final downMax = _normalizeRateLimit(app.downloadMaxLimit);
-    final upMax = _normalizeRateLimit(app.uploadMaxLimit);
-    final downAt = _normalizeRateLimit(app.downloadLimitAt);
-    final upAt = _normalizeRateLimit(app.uploadLimitAt);
-    final downBurstLimit = _normalizeRateLimit(app.burstDownloadLimit);
-    final upBurstLimit = _normalizeRateLimit(app.burstUploadLimit);
-    final downBurstThreshold = _normalizeRateLimit(app.burstDownloadThreshold);
-    final upBurstThreshold = _normalizeRateLimit(app.burstUploadThreshold);
+    final downMax = _normalizeRateLimit(
+      app.downloadMaxLimit,
+    );
+
+    final upMax = _normalizeRateLimit(
+      app.uploadMaxLimit,
+    );
+
+    final downAt = _normalizeRateLimit(
+      app.downloadLimitAt,
+    );
+
+    final upAt = _normalizeRateLimit(
+      app.uploadLimitAt,
+    );
+
+    final downBurstLimit = _normalizeRateLimit(
+      app.burstDownloadLimit,
+    );
+
+    final upBurstLimit = _normalizeRateLimit(
+      app.burstUploadLimit,
+    );
+
+    final downBurstThreshold = _normalizeRateLimit(
+      app.burstDownloadThreshold,
+    );
+
+    final upBurstThreshold = _normalizeRateLimit(
+      app.burstUploadThreshold,
+    );
+
     final burstTime = app.burstTime.trim();
+
     final lanList = app.lanInterfaceList.trim().isEmpty
         ? _defaultLanInterfaceList
         : app.lanInterfaceList.trim();
+
     final wanList = app.wanInterfaceList.trim().isEmpty
         ? _defaultWanInterfaceList
         : app.wanInterfaceList.trim();
+
     final downloadParent = app.downloadParent.trim().isEmpty
         ? 'global'
         : app.downloadParent.trim();
+
     final uploadParent =
         app.uploadParent.trim().isEmpty ? 'global' : app.uploadParent.trim();
 
@@ -763,7 +1057,10 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         app.priority > 8 ||
         lanList.isEmpty ||
         wanList.isEmpty) {
-      _showSnack('بعض الحقول المطلوبة فارغة', backgroundColor: Colors.red);
+      _showSnack(
+        'بعض الحقول المطلوبة فارغة',
+        backgroundColor: Colors.red,
+      );
       return;
     }
 
@@ -771,39 +1068,107 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         !_isValidRateLimit(upMax) ||
         !_isValidRateLimit(downAt) ||
         !_isValidRateLimit(upAt)) {
-      _showSnack('صيغة السرعات غير صحيحة. مثال: 50M أو 100M',
-          backgroundColor: Colors.red);
+      _showSnack(
+        'صيغة السرعات غير صحيحة. مثال: 50M أو 100M/20M',
+        backgroundColor: Colors.red,
+      );
       return;
     }
 
-    final proceed = await _showFastTrackWarningDialog();
-    if (!proceed) return;
+    if (app.burstEnabled) {
+      if (!_isValidRateLimit(
+            downBurstLimit,
+          ) ||
+          !_isValidRateLimit(
+            upBurstLimit,
+          ) ||
+          !_isValidRateLimit(
+            downBurstThreshold,
+          ) ||
+          !_isValidRateLimit(
+            upBurstThreshold,
+          ) ||
+          !_isValidBurstTime(
+            burstTime,
+          )) {
+        _showSnack(
+          'إعدادات Burst غير صحيحة',
+          backgroundColor: Colors.red,
+        );
+        return;
+      }
+    }
 
-    if (mounted) setState(() => _loading = true);
-
-    try {
-      // التحقق من وجود Parent للتحميل والرفع لتفادي المشاكل
-      await _ensureParentQueueExists(router, downloadParent);
-      if (downloadParent != uploadParent) {
-        await _ensureParentQueueExists(router, uploadParent);
+    // التأكد من وجود القوائم في الراوتر.
+    if (_interfaceLists.isNotEmpty) {
+      if (!_interfaceLists.contains(lanList)) {
+        _showSnack(
+          'قائمة LAN المحددة غير موجودة في الراوتر',
+          backgroundColor: Colors.red,
+        );
+        return;
       }
 
-      await _removeExistingRulesForApp(router, app);
+      if (!_interfaceLists.contains(wanList)) {
+        _showSnack(
+          'قائمة WAN المحددة غير موجودة في الراوتر',
+          backgroundColor: Colors.red,
+        );
+        return;
+      }
+    }
+
+    final proceed = await _showFastTrackWarningDialog();
+
+    if (!proceed) {
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _loading = true);
+    }
+
+    try {
+      // ---------------------------------------
+      // 1. إزالة القواعد السابقة
+      // ---------------------------------------
+
+      await _removeExistingRulesForApp(
+        router,
+        app,
+      );
 
       final comment = _commentFor(app);
+
       final connMark = _connMarkFor(app);
+
       final downPackMark = _downPackMarkFor(app);
+
       final upPackMark = _upPackMarkFor(app);
 
-      // استبدال tls-host بـ content لدعم UDP/TCP سوياً (لحل مشكلة ببجي والألعاب)
+      // ---------------------------------------
+      // 2. Mark Connection
+      // ---------------------------------------
+      //
+      // يتم اكتشاف TLS SNI من أول اتصال TCP
+      // ثم يتم تعليم الاتصال بالكامل.
+      //
+      // لا نستخدم connection-state=new هنا
+      // حتى لا نفقد المطابقة عند تفاوت حالة
+      // أول حزمة TLS.
+      //
+      // connection-mark=no-mark يقلل إعادة الفحص
+      // للاتصالات التي تم تعليمها مسبقًا.
+      //
+
       for (final host in app.hosts) {
-        final cleanHost = host.replaceAll('*', '');
         await router.sendCommand(
           '/ip/firewall/mangle/add',
           params: {
             'chain': 'prerouting',
+            'protocol': 'tcp',
             'connection-mark': 'no-mark',
-            'content': cleanHost,
+            'tls-host': host,
             'action': 'mark-connection',
             'new-connection-mark': connMark,
             'passthrough': 'yes',
@@ -812,7 +1177,18 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         );
       }
 
-      // إضافة Packet Marks بالاعتماد على Connection Mark
+      // ---------------------------------------
+      // 3. Download Packet Mark
+      // ---------------------------------------
+      //
+      // الإنترنت يدخل من WAN إلى الراوتر.
+      // لذلك:
+      //
+      // in-interface-list = WAN
+      //
+      // وهذا هو اتجاه DOWNLOAD.
+      //
+
       await router.sendCommand(
         '/ip/firewall/mangle/add',
         params: {
@@ -826,6 +1202,18 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         },
       );
 
+      // ---------------------------------------
+      // 4. Upload Packet Mark
+      // ---------------------------------------
+      //
+      // العميل يرسل من LAN إلى الإنترنت.
+      // لذلك:
+      //
+      // in-interface-list = LAN
+      //
+      // وهذا هو اتجاه UPLOAD.
+      //
+
       await router.sendCommand(
         '/ip/firewall/mangle/add',
         params: {
@@ -838,6 +1226,10 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
           'comment': comment,
         },
       );
+
+      // ---------------------------------------
+      // 5. Download Queue Tree
+      // ---------------------------------------
 
       final downQueueParams = _buildQueueParams(
         name: _downQueueNameFor(app),
@@ -853,6 +1245,10 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         burstTime: burstTime,
       );
 
+      // ---------------------------------------
+      // 6. Upload Queue Tree
+      // ---------------------------------------
+
       final upQueueParams = _buildQueueParams(
         name: _upQueueNameFor(app),
         parent: uploadParent,
@@ -867,21 +1263,43 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         burstTime: burstTime,
       );
 
-      await router.sendCommand('/queue/tree/add', params: downQueueParams);
-      await router.sendCommand('/queue/tree/add', params: upQueueParams);
+      // ---------------------------------------
+      // 7. إنشاء Queue Tree
+      // ---------------------------------------
+
+      await router.sendCommand(
+        '/queue/tree/add',
+        params: downQueueParams,
+      );
+
+      await router.sendCommand(
+        '/queue/tree/add',
+        params: upQueueParams,
+      );
 
       if (mounted) {
-        _showSnack('تم تفعيل وتسريع ${app.name} بنجاح',
-            backgroundColor: Colors.green);
+        _showSnack(
+          'تم تفعيل وتسريع ${app.name} بنجاح',
+          backgroundColor: Colors.green,
+        );
       }
     } catch (e) {
       if (mounted) {
-        _showSnack('حدث خطأ أثناء التفعيل: $e', backgroundColor: Colors.red);
+        _showSnack(
+          'حدث خطأ أثناء التفعيل: $e',
+          backgroundColor: Colors.red,
+        );
       }
     } finally {
-      await _checkActivePriorities(showLoader: false);
+      await _checkActivePriorities(
+        showLoader: false,
+      );
+
       await _checkFastTrackWarning();
-      if (mounted) setState(() => _loading = false);
+
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -889,27 +1307,52 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // Disable App Priority
   // ---------------------------------------------------------------------------
 
-  Future<void> _disableAppPriority(AppPriorityConfig app) async {
+  Future<void> _disableAppPriority(
+    AppPriorityConfig app,
+  ) async {
     final router = _router;
+
     if (router == null) {
-      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      _showSnack(
+        'لا يوجد اتصال بالراوتر',
+        backgroundColor: Colors.red,
+      );
       return;
     }
-    if (mounted) setState(() => _loading = true);
+
+    if (mounted) {
+      setState(() => _loading = true);
+    }
+
     try {
-      await _removeExistingRulesForApp(router, app);
+      await _removeExistingRulesForApp(
+        router,
+        app,
+      );
+
       if (mounted) {
-        _showSnack('تم إيقاف تسريع ${app.name} وإزالة الرولات',
-            backgroundColor: Colors.orange);
+        _showSnack(
+          'تم إيقاف تسريع ${app.name} وإزالة الرولات',
+          backgroundColor: Colors.orange,
+        );
       }
     } catch (e) {
       if (mounted) {
-        _showSnack('حدث خطأ أثناء الإيقاف: $e', backgroundColor: Colors.red);
+        _showSnack(
+          'حدث خطأ أثناء الإيقاف: $e',
+          backgroundColor: Colors.red,
+        );
       }
     } finally {
-      await _checkActivePriorities(showLoader: false);
+      await _checkActivePriorities(
+        showLoader: false,
+      );
+
       await _checkFastTrackWarning();
-      if (mounted) setState(() => _loading = false);
+
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -921,7 +1364,9 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('حماية الشبكة من اللوب (Loop Protect)'),
+        title: const Text(
+          'حماية الشبكة من اللوب (Loop Protect)',
+        ),
         content: const Text(
           'هل أنت متأكد من تفعيل بروتوكول الحماية (RSTP) على جميع الجسور (Bridges) وتفعيل حماية المنافذ (Loop-Protect) لجميع كروت الشبكة؟\n'
           'هذا سيقوم بفصل أي راوتر يسبب لوب أوتوماتيكياً.',
@@ -932,43 +1377,72 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
             child: const Text('إلغاء'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.gold,
+            ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text(
               'تأكيد وتنفيذ',
-              style:
-                  TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
       ),
     );
-    if (confirm == true) await _fixLoop();
+
+    if (confirm == true) {
+      await _fixLoop();
+    }
   }
 
   Future<void> _fixLoop() async {
     final router = _router;
+
     if (router == null) {
-      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      _showSnack(
+        'لا يوجد اتصال بالراوتر',
+        backgroundColor: Colors.red,
+      );
       return;
     }
-    if (mounted) setState(() => _loading = true);
+
+    if (mounted) {
+      setState(() => _loading = true);
+    }
+
     try {
       await router.sendCommand(
         '/interface/bridge/set',
-        params: {'numbers': '[find]', 'protocol-mode': 'rstp'},
+        params: {
+          'numbers': '[find]',
+          'protocol-mode': 'rstp',
+        },
       );
+
       await router.sendCommand(
         '/interface/ethernet/set',
-        params: {'numbers': '[find]', 'loop-protect': 'on'},
+        params: {
+          'numbers': '[find]',
+          'loop-protect': 'on',
+        },
       );
-      _showSnack('تم تفعيل حماية اللوب (RSTP & Loop-Protect) بنجاح',
-          backgroundColor: Colors.green);
+
+      _showSnack(
+        'تم تفعيل حماية اللوب (RSTP & Loop-Protect) بنجاح',
+        backgroundColor: Colors.green,
+      );
     } catch (e) {
-      _showSnack('حدث خطأ أثناء تفعيل الحماية: $e',
-          backgroundColor: Colors.red);
+      _showSnack(
+        'حدث خطأ أثناء تفعيل الحماية: $e',
+        backgroundColor: Colors.red,
+      );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -978,27 +1452,39 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
 
   Future<void> _showTelegramBotDialog() async {
     final nameCtrl = TextEditingController();
+
     final ipCtrl = TextEditingController();
+
     final tokenCtrl = TextEditingController();
+
     final chatCtrl = TextEditingController();
 
     await showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('إعداد إشعارات البوت للقطع (Netwatch)'),
+        title: const Text(
+          'إعداد إشعارات البوت للقطع (Netwatch)',
+        ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               _buildField(
-                  controller: nameCtrl,
-                  label: 'اسم القطعة (مثال: مطعم اليمني)'),
+                controller: nameCtrl,
+                label: 'اسم القطعة (مثال: مطعم اليمني)',
+              ),
               _buildField(
-                  controller: ipCtrl, label: 'IP القطعة (مثال: 192.168.1.10)'),
+                controller: ipCtrl,
+                label: 'IP القطعة (مثال: 192.168.1.10)',
+              ),
               _buildField(
-                  controller: tokenCtrl, label: 'توكن البوت (Bot Token)'),
+                controller: tokenCtrl,
+                label: 'توكن البوت (Bot Token)',
+              ),
               _buildField(
-                  controller: chatCtrl, label: 'معرف المحادثة (Chat ID)'),
+                controller: chatCtrl,
+                label: 'معرف المحادثة (Chat ID)',
+              ),
             ],
           ),
         ),
@@ -1008,9 +1494,12 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
             child: const Text('إلغاء'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.gold,
+            ),
             onPressed: () async {
               Navigator.pop(ctx);
+
               await _injectTelegramScript(
                 nameCtrl.text.trim(),
                 ipCtrl.text.trim(),
@@ -1020,13 +1509,16 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
             },
             child: const Text(
               'حقن السكربت',
-              style:
-                  TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+              style: TextStyle(
+                color: Colors.black,
+                fontWeight: FontWeight.bold,
+              ),
             ),
           ),
         ],
       ),
     );
+
     nameCtrl.dispose();
     ipCtrl.dispose();
     tokenCtrl.dispose();
@@ -1034,22 +1526,45 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   }
 
   Future<void> _injectTelegramScript(
-      String name, String ip, String token, String chat) async {
+    String name,
+    String ip,
+    String token,
+    String chat,
+  ) async {
     final router = _router;
+
     if (router == null) {
-      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      _showSnack(
+        'لا يوجد اتصال بالراوتر',
+        backgroundColor: Colors.red,
+      );
       return;
     }
+
     if (name.isEmpty || ip.isEmpty || token.isEmpty || chat.isEmpty) {
-      _showSnack('الرجاء تعبئة جميع الحقول', backgroundColor: Colors.red);
+      _showSnack(
+        'الرجاء تعبئة جميع الحقول',
+        backgroundColor: Colors.red,
+      );
       return;
     }
-    if (mounted) setState(() => _loading = true);
+
+    if (mounted) {
+      setState(() => _loading = true);
+    }
+
     try {
-      final upMsg = Uri.encodeComponent('✅ القطعة $name عادت إلى العمل.');
-      final downMsg = Uri.encodeComponent('❌ القطعة $name توقفت عن العمل.');
+      final upMsg = Uri.encodeComponent(
+        '✅ القطعة $name عادت إلى العمل.',
+      );
+
+      final downMsg = Uri.encodeComponent(
+        '❌ القطعة $name توقفت عن العمل.',
+      );
+
       final upScript =
           '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$upMsg" keep-result=no';
+
       final downScript =
           '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$downMsg" keep-result=no';
 
@@ -1062,13 +1577,20 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
           'down-script': downScript,
         },
       );
-      _showSnack('تم إضافة السكربت إلى Netwatch بنجاح',
-          backgroundColor: Colors.green);
+
+      _showSnack(
+        'تم إضافة السكربت إلى Netwatch بنجاح',
+        backgroundColor: Colors.green,
+      );
     } catch (e) {
-      _showSnack('حدث خطأ أثناء إضافة السكربت: $e',
-          backgroundColor: Colors.red);
+      _showSnack(
+        'حدث خطأ أثناء إضافة السكربت: $e',
+        backgroundColor: Colors.red,
+      );
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -1085,7 +1607,9 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
     int maxLines = 1,
   }) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(
+        bottom: 10,
+      ),
       child: TextFormField(
         controller: controller,
         keyboardType: keyboardType,
@@ -1111,21 +1635,28 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
     required ValueChanged<String?> onChanged,
     String? Function(String?)? validator,
   }) {
-    final safeItems =
-        <String>{...items, if (value.trim().isNotEmpty) value}.toList();
+    final safeItems = <String>{
+      ...items,
+      if (value.trim().isNotEmpty) value,
+    }.toList();
+
     final safeValue = safeItems.contains(value)
         ? value
         : (safeItems.isNotEmpty ? safeItems.first : null);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.only(
+        bottom: 10,
+      ),
       child: DropdownButtonFormField<String>(
         value: safeValue,
         isExpanded: true,
         decoration: InputDecoration(
           labelText: label,
           border: const OutlineInputBorder(),
-          prefixIcon: const Icon(Icons.account_tree_outlined),
+          prefixIcon: const Icon(
+            Icons.account_tree_outlined,
+          ),
         ),
         items: safeItems.map((item) {
           return DropdownMenuItem<String>(
@@ -1143,42 +1674,69 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // Settings Dialog
   // ---------------------------------------------------------------------------
 
-  Future<bool> _showAppSettingsDialog(AppPriorityConfig app) async {
+  Future<bool> _showAppSettingsDialog(
+    AppPriorityConfig app,
+  ) async {
     final formKey = GlobalKey<FormState>();
-    final downloadMaxCtrl = TextEditingController(text: app.downloadMaxLimit);
-    final uploadMaxCtrl = TextEditingController(text: app.uploadMaxLimit);
-    final downloadLimitAtCtrl =
-        TextEditingController(text: app.downloadLimitAt);
-    final uploadLimitAtCtrl = TextEditingController(text: app.uploadLimitAt);
-    final priorityCtrl = TextEditingController(text: app.priority.toString());
-    final downloadParentCtrl = TextEditingController(text: app.downloadParent);
-    final uploadParentCtrl = TextEditingController(text: app.uploadParent);
-    final burstDownloadLimitCtrl =
-        TextEditingController(text: app.burstDownloadLimit);
-    final burstUploadLimitCtrl =
-        TextEditingController(text: app.burstUploadLimit);
-    final burstDownloadThresholdCtrl =
-        TextEditingController(text: app.burstDownloadThreshold);
-    final burstUploadThresholdCtrl =
-        TextEditingController(text: app.burstUploadThreshold);
-    final burstTimeCtrl = TextEditingController(text: app.burstTime);
 
-    String selectedLan = app.lanInterfaceList;
-    String selectedWan = app.wanInterfaceList;
+    final downloadMaxCtrl = TextEditingController(
+      text: app.downloadMaxLimit,
+    );
 
-    // تأمين القوائم إذا كانت فارغة
-    if (selectedLan.isEmpty) {
-      selectedLan = _lanInterfaceLists.isNotEmpty
-          ? _lanInterfaceLists.first
-          : _defaultLanInterfaceList;
-    }
-    if (selectedWan.isEmpty) {
-      selectedWan = _wanInterfaceLists.isNotEmpty
-          ? _wanInterfaceLists.first
-          : _defaultWanInterfaceList;
-    }
+    final uploadMaxCtrl = TextEditingController(
+      text: app.uploadMaxLimit,
+    );
+
+    final downloadLimitAtCtrl = TextEditingController(
+      text: app.downloadLimitAt,
+    );
+
+    final uploadLimitAtCtrl = TextEditingController(
+      text: app.uploadLimitAt,
+    );
+
+    final priorityCtrl = TextEditingController(
+      text: app.priority.toString(),
+    );
+
+    final downloadParentCtrl = TextEditingController(
+      text: app.downloadParent,
+    );
+
+    final uploadParentCtrl = TextEditingController(
+      text: app.uploadParent,
+    );
+
+    final burstDownloadLimitCtrl = TextEditingController(
+      text: app.burstDownloadLimit,
+    );
+
+    final burstUploadLimitCtrl = TextEditingController(
+      text: app.burstUploadLimit,
+    );
+
+    final burstDownloadThresholdCtrl = TextEditingController(
+      text: app.burstDownloadThreshold,
+    );
+
+    final burstUploadThresholdCtrl = TextEditingController(
+      text: app.burstUploadThreshold,
+    );
+
+    final burstTimeCtrl = TextEditingController(
+      text: app.burstTime,
+    );
+
+    String selectedLan = _lanInterfaceLists.contains(app.lanInterfaceList)
+        ? app.lanInterfaceList
+        : _lanInterfaceLists.first;
+
+    String selectedWan = _wanInterfaceLists.contains(app.wanInterfaceList)
+        ? app.wanInterfaceList
+        : _wanInterfaceLists.first;
 
     bool burstEnabled = app.burstEnabled;
+
     bool applyNow = false;
 
     try {
@@ -1187,9 +1745,16 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         barrierDismissible: false,
         builder: (dialogContext) {
           return StatefulBuilder(
-            builder: (context, setDialogState) {
+            builder: (
+              context,
+              setDialogState,
+            ) {
               void commitValues() {
-                final priority = int.tryParse(priorityCtrl.text.trim()) ?? 1;
+                final priority = int.tryParse(
+                      priorityCtrl.text.trim(),
+                    ) ??
+                    1;
+
                 _applySettingsToApp(
                   app,
                   downloadMaxLimit: downloadMaxCtrl.text.trim(),
@@ -1209,11 +1774,16 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
                   downloadParent: downloadParentCtrl.text.trim(),
                   uploadParent: uploadParentCtrl.text.trim(),
                 );
-                if (mounted) setState(() {});
+
+                if (mounted) {
+                  setState(() {});
+                }
               }
 
               return AlertDialog(
-                title: Text('إعدادات ${app.name}'),
+                title: Text(
+                  'إعدادات ${app.name}',
+                ),
                 content: SizedBox(
                   width: double.maxFinite,
                   child: SingleChildScrollView(
@@ -1223,54 +1793,84 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('السرعات الأساسية',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 8),
-                          _buildField(
-                              controller: downloadMaxCtrl,
-                              label: 'تحميل Max Limit',
-                              hint: 'مثال: 100M',
-                              validator: _validateRateLimitField),
-                          _buildField(
-                              controller: uploadMaxCtrl,
-                              label: 'رفع Max Limit',
-                              hint: 'مثال: 20M',
-                              validator: _validateRateLimitField),
-                          _buildField(
-                              controller: downloadLimitAtCtrl,
-                              label: 'تحميل Limit At',
-                              hint: 'مثال: 10M',
-                              validator: _validateRateLimitField),
-                          _buildField(
-                              controller: uploadLimitAtCtrl,
-                              label: 'رفع Limit At',
-                              hint: 'مثال: 2M',
-                              validator: _validateRateLimitField),
-                          _buildField(
-                              controller: priorityCtrl,
-                              label: 'الأولوية',
-                              hint: '1 إلى 8',
-                              keyboardType: TextInputType.number,
-                              validator: _validatePriorityField),
-                          const SizedBox(height: 8),
-                          const Text('اتجاهات الشبكة',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 6),
                           const Text(
-                            'اختر قائمة LAN الخاصة بالعملاء وقائمة WAN الخاصة بالإنترنت.',
-                            style:
-                                TextStyle(fontSize: 12, color: Colors.white54),
+                            'السرعات الأساسية',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                          const SizedBox(height: 8),
+                          const SizedBox(
+                            height: 8,
+                          ),
+                          _buildField(
+                            controller: downloadMaxCtrl,
+                            label: 'تحميل Max Limit',
+                            hint: 'مثال: 100M',
+                            validator: _validateRateLimitField,
+                          ),
+                          _buildField(
+                            controller: uploadMaxCtrl,
+                            label: 'رفع Max Limit',
+                            hint: 'مثال: 20M',
+                            validator: _validateRateLimitField,
+                          ),
+                          _buildField(
+                            controller: downloadLimitAtCtrl,
+                            label: 'تحميل Limit At',
+                            hint: 'مثال: 10M',
+                            validator: _validateRateLimitField,
+                          ),
+                          _buildField(
+                            controller: uploadLimitAtCtrl,
+                            label: 'رفع Limit At',
+                            hint: 'مثال: 2M',
+                            validator: _validateRateLimitField,
+                          ),
+                          _buildField(
+                            controller: priorityCtrl,
+                            label: 'الأولوية',
+                            hint: '1 إلى 8',
+                            keyboardType: TextInputType.number,
+                            validator: _validatePriorityField,
+                          ),
+                          const SizedBox(
+                            height: 8,
+                          ),
+                          const Text(
+                            'اتجاهات الشبكة',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(
+                            height: 6,
+                          ),
+                          const Text(
+                            'اختر قائمة LAN الخاصة بالعملاء وقائمة WAN الخاصة بالإنترنت. لا تكتب الاسم يدويًا.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
+                          ),
+                          const SizedBox(
+                            height: 8,
+                          ),
                           _buildInterfaceDropdown(
                             label: 'قائمة LAN',
                             value: selectedLan,
                             items: _lanInterfaceLists,
                             validator: (value) => _validateInterfaceList(
-                                value, _lanInterfaceLists),
+                              value,
+                              _lanInterfaceLists,
+                            ),
                             onChanged: (value) {
-                              if (value == null) return;
-                              setDialogState(() => selectedLan = value);
+                              if (value == null) {
+                                return;
+                              }
+
+                              setDialogState(() {
+                                selectedLan = value;
+                              });
                             },
                           ),
                           _buildInterfaceDropdown(
@@ -1278,73 +1878,115 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
                             value: selectedWan,
                             items: _wanInterfaceLists,
                             validator: (value) => _validateInterfaceList(
-                                value, _wanInterfaceLists),
+                              value,
+                              _wanInterfaceLists,
+                            ),
                             onChanged: (value) {
-                              if (value == null) return;
-                              setDialogState(() => selectedWan = value);
+                              if (value == null) {
+                                return;
+                              }
+
+                              setDialogState(() {
+                                selectedWan = value;
+                              });
                             },
                           ),
-                          const SizedBox(height: 8),
-                          const Text('الـ Queue Tree',
-                              style: TextStyle(fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 8),
+                          const SizedBox(
+                            height: 8,
+                          ),
+                          const Text(
+                            'الـQueue Tree',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(
+                            height: 8,
+                          ),
                           _buildField(
-                              controller: downloadParentCtrl,
-                              label: 'Parent للتحميل',
-                              hint: 'مثال: global',
-                              validator: _validateNonEmptyField),
+                            controller: downloadParentCtrl,
+                            label: 'Parent للتحميل',
+                            hint: 'مثال: global',
+                            validator: _validateNonEmptyField,
+                          ),
                           _buildField(
-                              controller: uploadParentCtrl,
-                              label: 'Parent للرفع',
-                              hint: 'مثال: global',
-                              validator: _validateNonEmptyField),
-                          const SizedBox(height: 8),
+                            controller: uploadParentCtrl,
+                            label: 'Parent للرفع',
+                            hint: 'مثال: global',
+                            validator: _validateNonEmptyField,
+                          ),
+                          const SizedBox(
+                            height: 8,
+                          ),
                           CheckboxListTile(
                             contentPadding: EdgeInsets.zero,
                             value: burstEnabled,
-                            onChanged: (value) => setDialogState(
-                                () => burstEnabled = value ?? false),
-                            title: const Text('تفعيل Burst'),
+                            onChanged: (value) {
+                              setDialogState(() {
+                                burstEnabled = value ?? false;
+                              });
+                            },
+                            title: const Text(
+                              'تفعيل Burst',
+                            ),
                             subtitle: const Text(
-                                'يعطي دفعة سرعة مؤقتة فوق الحد الأساسي إذا كان هناك هامش متاح'),
+                              'يعطي دفعة سرعة مؤقتة فوق الحد الأساسي إذا كان هناك هامش متاح',
+                            ),
                             controlAffinity: ListTileControlAffinity.leading,
                           ),
                           if (burstEnabled) ...[
-                            const SizedBox(height: 8),
-                            const Text('إعدادات Burst',
-                                style: TextStyle(fontWeight: FontWeight.bold)),
-                            const SizedBox(height: 8),
+                            const SizedBox(
+                              height: 8,
+                            ),
+                            const Text(
+                              'إعدادات Burst',
+                              style: TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(
+                              height: 8,
+                            ),
                             _buildField(
-                                controller: burstDownloadLimitCtrl,
-                                label: 'Burst Limit للتحميل',
-                                hint: 'مثال: 120M',
-                                validator: _validateRateLimitField),
+                              controller: burstDownloadLimitCtrl,
+                              label: 'Burst Limit للتحميل',
+                              hint: 'مثال: 120M',
+                              validator: _validateRateLimitField,
+                            ),
                             _buildField(
-                                controller: burstUploadLimitCtrl,
-                                label: 'Burst Limit للرفع',
-                                hint: 'مثال: 25M',
-                                validator: _validateRateLimitField),
+                              controller: burstUploadLimitCtrl,
+                              label: 'Burst Limit للرفع',
+                              hint: 'مثال: 25M',
+                              validator: _validateRateLimitField,
+                            ),
                             _buildField(
-                                controller: burstDownloadThresholdCtrl,
-                                label: 'Burst Threshold للتحميل',
-                                hint: 'مثال: 70M',
-                                validator: _validateRateLimitField),
+                              controller: burstDownloadThresholdCtrl,
+                              label: 'Burst Threshold للتحميل',
+                              hint: 'مثال: 70M',
+                              validator: _validateRateLimitField,
+                            ),
                             _buildField(
-                                controller: burstUploadThresholdCtrl,
-                                label: 'Burst Threshold للرفع',
-                                hint: 'مثال: 15M',
-                                validator: _validateRateLimitField),
+                              controller: burstUploadThresholdCtrl,
+                              label: 'Burst Threshold للرفع',
+                              hint: 'مثال: 15M',
+                              validator: _validateRateLimitField,
+                            ),
                             _buildField(
-                                controller: burstTimeCtrl,
-                                label: 'Burst Time',
-                                hint: 'مثال: 20s أو 500ms',
-                                validator: _validateBurstTimeField),
+                              controller: burstTimeCtrl,
+                              label: 'Burst Time',
+                              hint: 'مثال: 20s أو 500ms',
+                              validator: _validateBurstTimeField,
+                            ),
                           ],
-                          const SizedBox(height: 8),
+                          const SizedBox(
+                            height: 8,
+                          ),
                           const Text(
-                            'ملاحظة: تم استخدام "content" بدلاً من "tls-host" لضمان دعم بروتوكول UDP (الذي تعتمد عليه الألعاب).',
-                            style:
-                                TextStyle(fontSize: 12, color: Colors.white54),
+                            'ملاحظة: التسريع يعتمد على تطابق النطاقات مع الترافيك الفعلي. بعض التطبيقات تستخدم UDP/QUIC أو IPs متغيرة، لذلك قد لا تتأثر جميع الاتصالات عبر tls-host.',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white54,
+                            ),
                           ),
                         ],
                       ),
@@ -1353,33 +1995,53 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
                 ),
                 actions: [
                   TextButton(
-                    onPressed: () => Navigator.pop(dialogContext, false),
-                    child: const Text('إلغاء'),
+                    onPressed: () => Navigator.pop(
+                      dialogContext,
+                      false,
+                    ),
+                    child: const Text(
+                      'إلغاء',
+                    ),
                   ),
                   OutlinedButton(
                     onPressed: () {
                       if (formKey.currentState?.validate() ?? false) {
                         commitValues();
+
                         applyNow = false;
-                        Navigator.pop(dialogContext, false);
+
+                        Navigator.pop(
+                          dialogContext,
+                          false,
+                        );
                       }
                     },
-                    child: const Text('حفظ فقط'),
+                    child: const Text(
+                      'حفظ فقط',
+                    ),
                   ),
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.gold),
+                      backgroundColor: AppTheme.gold,
+                    ),
                     onPressed: () {
                       if (formKey.currentState?.validate() ?? false) {
                         commitValues();
+
                         applyNow = true;
-                        Navigator.pop(dialogContext, true);
+
+                        Navigator.pop(
+                          dialogContext,
+                          true,
+                        );
                       }
                     },
                     child: const Text(
                       'حفظ وتطبيق',
                       style: TextStyle(
-                          color: Colors.black, fontWeight: FontWeight.bold),
+                        color: Colors.black,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -1389,7 +2051,10 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
         },
       );
 
-      if (result == null) return false;
+      if (result == null) {
+        return false;
+      }
+
       return applyNow || result;
     } finally {
       downloadMaxCtrl.dispose();
@@ -1411,17 +2076,29 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // Settings Open
   // ---------------------------------------------------------------------------
 
-  Future<void> _openSettingsForApp(AppPriorityConfig app) async {
-    final apply = await _showAppSettingsDialog(app);
+  Future<void> _openSettingsForApp(
+    AppPriorityConfig app,
+  ) async {
+    final apply = await _showAppSettingsDialog(
+      app,
+    );
+
     if (!mounted) return;
+
     if (apply && app.isEnabled) {
       await _enableAppPriority(app);
     }
   }
 
-  Future<void> _showEnableFlow(AppPriorityConfig app) async {
-    final apply = await _showAppSettingsDialog(app);
+  Future<void> _showEnableFlow(
+    AppPriorityConfig app,
+  ) async {
+    final apply = await _showAppSettingsDialog(
+      app,
+    );
+
     if (!mounted) return;
+
     if (apply) {
       await _enableAppPriority(app);
     }
@@ -1431,32 +2108,50 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // Disable Confirmation
   // ---------------------------------------------------------------------------
 
-  Future<void> _showDisableConfirmDialog(AppPriorityConfig app) async {
+  Future<void> _showDisableConfirmDialog(
+    AppPriorityConfig app,
+  ) async {
     final result = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('تأكيد الإيقاف'),
+        title: const Text(
+          'تأكيد الإيقاف',
+        ),
         content: Text(
           'هل أنت متأكد من إيقاف تسريع ${app.name}؟\n'
           'سيتم حذف جميع رولات الـ Mangle والـ Queue Tree المرتبطة به تلقائياً.',
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              false,
+            ),
             child: const Text('إلغاء'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child:
-                const Text('إيقاف وحذف', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            onPressed: () => Navigator.pop(
+              dialogContext,
+              true,
+            ),
+            child: const Text(
+              'إيقاف وحذف',
+              style: TextStyle(
+                color: Colors.white,
+              ),
+            ),
           ),
         ],
       ),
     );
 
     if (result == true) {
-      await _disableAppPriority(app);
+      await _disableAppPriority(
+        app,
+      );
     }
   }
 
@@ -1467,15 +2162,25 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   Widget _buildInfoCard() {
     return Card(
       elevation: 1,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.only(
+        bottom: 12,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(
+          12,
+        ),
+      ),
       child: const Padding(
         padding: EdgeInsets.all(12.0),
         child: Text(
           'هذه الصفحة تضبط أولوية المرور للتطبيقات عبر قواعد Mangle و Queue Tree.\n'
           'يتم تعليم الاتصال أولًا ثم تعليم الحزم حسب اتجاه LAN/WAN، وبعدها يتم تمرير packet-mark إلى Queue Tree.\n'
-          'تم تفعيل نمط الاستماع للمحتوى ليعمل بسلاسة مع TCP و UDP (للألعاب).',
-          style: TextStyle(fontSize: 13, color: Colors.white70, height: 1.4),
+          'إذا كان الراوتر يستخدم FastTrack فراجع التحذير أعلى الصفحة.',
+          style: TextStyle(
+            fontSize: 13,
+            color: Colors.white70,
+            height: 1.4,
+          ),
         ),
       ),
     );
@@ -1488,41 +2193,66 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   Widget _buildSubscriptionCard() {
     return Card(
       elevation: 1,
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(
+        bottom: 12,
+      ),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: _subscriptionColor().withOpacity(0.35)),
+        borderRadius: BorderRadius.circular(
+          12,
+        ),
+        side: BorderSide(
+          color: _subscriptionColor().withOpacity(0.35),
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(
+          12,
+        ),
         child: Row(
           children: [
             CircleAvatar(
-              backgroundColor: _subscriptionColor().withOpacity(0.15),
-              child: Icon(Icons.calendar_month_rounded,
-                  color: _subscriptionColor()),
+              backgroundColor: _subscriptionColor().withOpacity(
+                0.15,
+              ),
+              child: Icon(
+                Icons.calendar_month_rounded,
+                color: _subscriptionColor(),
+              ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(
+              width: 10,
+            ),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('حالة الاشتراك',
-                      style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 3),
+                  const Text(
+                    'حالة الاشتراك',
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(
+                    height: 3,
+                  ),
                   Text(
                     _subscriptionText(),
                     style: TextStyle(
-                        color: _subscriptionColor(),
-                        fontWeight: FontWeight.bold),
+                      color: _subscriptionColor(),
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   if (_subscriptionExpiryDate != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 3),
+                      padding: const EdgeInsets.only(
+                        top: 3,
+                      ),
                       child: Text(
                         'ينتهي بتاريخ ${_formatSubscriptionDate()}',
                         style: const TextStyle(
-                            fontSize: 12, color: Colors.white54),
+                          fontSize: 12,
+                          color: Colors.white54,
+                        ),
                       ),
                     ),
                 ],
@@ -1531,7 +2261,9 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
             IconButton(
               tooltip: 'تحديث الاشتراك',
               onPressed: _loading ? null : _loadSubscriptionCounter,
-              icon: const Icon(Icons.refresh),
+              icon: const Icon(
+                Icons.refresh,
+              ),
             ),
           ],
         ),
@@ -1546,23 +2278,39 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   Widget _buildFastTrackCard() {
     return Card(
       elevation: 1,
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(
+        bottom: 12,
+      ),
       shape: RoundedRectangleBorder(
-        side: const BorderSide(color: Colors.orangeAccent, width: 1),
-        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(
+          color: Colors.orangeAccent,
+          width: 1,
+        ),
+        borderRadius: BorderRadius.circular(
+          12,
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12.0),
+        padding: const EdgeInsets.all(
+          12.0,
+        ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.orangeAccent),
-            const SizedBox(width: 10),
+            const Icon(
+              Icons.warning_amber_rounded,
+              color: Colors.orangeAccent,
+            ),
+            const SizedBox(
+              width: 10,
+            ),
             Expanded(
               child: Text(
                 'تم اكتشاف FastTrack مفعلًا ($_fastTrackRulesCount).\n'
                 'قد يؤدي ذلك إلى تجاوز بعض قواعد Queue Tree أو تقليل أثر الأولوية.',
-                style: const TextStyle(color: Colors.orangeAccent),
+                style: const TextStyle(
+                  color: Colors.orangeAccent,
+                ),
               ),
             ),
             TextButton(
@@ -1579,8 +2327,11 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // Application Card
   // ---------------------------------------------------------------------------
 
-  Widget _buildAppCard(AppPriorityConfig app) {
+  Widget _buildAppCard(
+    AppPriorityConfig app,
+  ) {
     final routerAvailable = _hasRouter;
+
     final switchEnabled = routerAvailable && !_loading;
 
     return Card(
@@ -1590,45 +2341,76 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
           color: app.isEnabled ? app.color : Colors.transparent,
           width: 1.5,
         ),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(
+          12,
+        ),
       ),
-      margin: const EdgeInsets.symmetric(vertical: 8),
+      margin: const EdgeInsets.symmetric(
+        vertical: 8,
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(8.0),
+        padding: const EdgeInsets.all(
+          8.0,
+        ),
         child: ListTile(
           leading: CircleAvatar(
-            backgroundColor: app.color.withOpacity(0.2),
-            child: Icon(app.icon, color: app.color),
+            backgroundColor: app.color.withOpacity(
+              0.2,
+            ),
+            child: Icon(
+              app.icon,
+              color: app.color,
+            ),
           ),
           title: Text(
             app.name,
             style: const TextStyle(
-                fontWeight: FontWeight.bold, color: Colors.white),
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
           ),
           subtitle: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const SizedBox(height: 4),
+              const SizedBox(
+                height: 4,
+              ),
               Text(
                 app.isEnabled ? 'الحالة: مفعل ونشط' : 'الحالة: معطل',
                 style: TextStyle(
-                    color: app.isEnabled ? Colors.greenAccent : Colors.white54),
+                  color: app.isEnabled ? Colors.greenAccent : Colors.white54,
+                ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(
+                height: 4,
+              ),
               Text(
                 'الإعداد: DL ${app.downloadMaxLimit} | UL ${app.uploadMaxLimit} | LimitAt ${app.downloadLimitAt}/${app.uploadLimitAt} | Priority ${app.priority}',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                ),
               ),
-              const SizedBox(height: 4),
+              const SizedBox(
+                height: 4,
+              ),
               Text(
                 'LAN: ${app.lanInterfaceList} | WAN: ${app.wanInterfaceList}',
-                style: const TextStyle(color: Colors.white54, fontSize: 12),
+                style: const TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                ),
               ),
               if (app.isEnabled) ...[
-                const SizedBox(height: 4),
+                const SizedBox(
+                  height: 4,
+                ),
                 Text(
                   'السرعة الفعلية: DL ${app.currentDownloadLimit.isEmpty ? 'غير محدد' : app.currentDownloadLimit} | UL ${app.currentUploadLimit.isEmpty ? 'غير محدد' : app.currentUploadLimit}',
-                  style: const TextStyle(color: AppTheme.gold, fontSize: 12),
+                  style: const TextStyle(
+                    color: AppTheme.gold,
+                    fontSize: 12,
+                  ),
                 ),
               ],
             ],
@@ -1641,8 +2423,14 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
                 IconButton(
                   visualDensity: VisualDensity.compact,
                   tooltip: 'الإعدادات',
-                  onPressed: _loading ? null : () => _openSettingsForApp(app),
-                  icon: const Icon(Icons.tune),
+                  onPressed: _loading
+                      ? null
+                      : () => _openSettingsForApp(
+                            app,
+                          ),
+                  icon: const Icon(
+                    Icons.tune,
+                  ),
                 ),
                 Switch(
                   value: app.isEnabled,
@@ -1650,9 +2438,13 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
                   onChanged: switchEnabled
                       ? (bool val) {
                           if (val) {
-                            _showEnableFlow(app);
+                            _showEnableFlow(
+                              app,
+                            );
                           } else {
-                            _showDisableConfirmDialog(app);
+                            _showDisableConfirmDialog(
+                              app,
+                            );
                           }
                         }
                       : null,
@@ -1670,25 +2462,36 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
   // ---------------------------------------------------------------------------
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(
+    BuildContext context,
+  ) {
     final children = <Widget>[
       _buildSubscriptionCard(),
       _buildInfoCard(),
       if (_fastTrackDetected) _buildFastTrackCard(),
-      ..._apps.map(_buildAppCard),
+      ..._apps.map(
+        _buildAppCard,
+      ),
     ];
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('أولوية وتسريع التطبيقات'),
+        title: const Text(
+          'أولوية وتسريع التطبيقات',
+        ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: AppTheme.gold),
+            icon: const Icon(
+              Icons.refresh,
+              color: AppTheme.gold,
+            ),
             onPressed: _loading ? null : _refreshAll,
             tooltip: 'تحديث الحالة',
           ),
           PopupMenuButton<ExtraMenu>(
-            icon: const Icon(Icons.more_vert),
+            icon: const Icon(
+              Icons.more_vert,
+            ),
             onSelected: (value) {
               if (value == ExtraMenu.fixLoop) {
                 _confirmFixLoop();
@@ -1699,11 +2502,15 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
             itemBuilder: (context) => [
               const PopupMenuItem(
                 value: ExtraMenu.fixLoop,
-                child: Text('حماية الشبكة من اللوب (Loop Protect)'),
+                child: Text(
+                  'حماية الشبكة من اللوب (Loop Protect)',
+                ),
               ),
               const PopupMenuItem(
                 value: ExtraMenu.telegramBot,
-                child: Text('إضافة بوت تيليجرام (إشعارات الأجهزة)'),
+                child: Text(
+                  'إضافة بوت تيليجرام (إشعارات الأجهزة)',
+                ),
               ),
             ],
           ),
@@ -1711,10 +2518,14 @@ class _AppPriorityScreenState extends State<AppPriorityScreen> {
       ),
       body: _loading
           ? const Center(
-              child: CircularProgressIndicator(color: AppTheme.gold),
+              child: CircularProgressIndicator(
+                color: AppTheme.gold,
+              ),
             )
           : ListView(
-              padding: const EdgeInsets.all(8.0),
+              padding: const EdgeInsets.all(
+                8.0,
+              ),
               children: children,
             ),
     );
