@@ -177,71 +177,6 @@ class _SideDrawerState extends State<SideDrawer> {
     return true;
   }
 
-  String _normalizeLower(Object? value) =>
-      (value?.toString() ?? '').trim().toLowerCase();
-
-  bool _isAutomaticNetwatchCandidate(Map<String, dynamic> device) {
-    final ip = _cleanText(device['address']?.toString() ?? '');
-    if (!_isValidIpv4(ip)) return false;
-    if (ip == '127.0.0.1' || ip == '0.0.0.0') return false;
-
-    final text = [
-      device['identity'],
-      device['board'],
-      device['platform'],
-      device['version'],
-      device['software-version'],
-      device['system-description'],
-      device['type'],
-    ].map(_normalizeLower).join(' ');
-
-    const ubntTerms = [
-      'ubiquiti',
-      'ubnt',
-      'litebeam',
-      'powerbeam',
-      'nanobeam',
-      'nanostation',
-      'loco',
-      'rocket',
-      'bullet',
-      'airmax',
-      'aircube',
-      'unifi',
-      'uap',
-      'u6-',
-      'uap-ac',
-      'edgeswitch',
-      'edgerouter',
-    ];
-
-    const mikrotikApRouterTerms = [
-      'mikrotik',
-      'routeros',
-      'routerboard',
-      'access point',
-      'basebox',
-      'omnitik',
-      'netmetal',
-      'mantbox',
-      'hap',
-      'cap ',
-      'wap',
-      'audience',
-      'groove',
-      'sxt',
-      'lhg',
-      'disc',
-      'hex',
-      'crs',
-      'ccr',
-      'rb-',
-    ];
-
-    return ubntTerms.any(text.contains) ||
-        mikrotikApRouterTerms.any(text.contains);
-  }
-
   String _automaticDisplayName(Map<String, dynamic> device, int index) {
     final identity = _cleanText(device['identity']?.toString() ?? '');
     final board = _cleanText(device['board']?.toString() ?? '');
@@ -283,6 +218,7 @@ class _SideDrawerState extends State<SideDrawer> {
     return '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$encoded" keep-result=no';
   }
 
+  // الإصلاح الثاني: جلب القطع تلقائياً من Neighbors وإضافتها في Netwatch لمنع التكرار وحقنها بالسكربتات
   Future<void> _syncAutomaticNetwatchDevices({
     required String token,
     required String chat,
@@ -291,7 +227,6 @@ class _SideDrawerState extends State<SideDrawer> {
   }) async {
     final router = widget.routerService;
     if (router == null || token.trim().isEmpty || chat.trim().isEmpty) return;
-    if (!notifyUp && !notifyDown) return;
 
     try {
       final neighborResponse = await router.sendCommand('/ip/neighbor/print');
@@ -300,38 +235,49 @@ class _SideDrawerState extends State<SideDrawer> {
       final netwatchResponse = await router.sendCommand('/tool/netwatch/print');
       final entries = netwatchResponse is List ? netwatchResponse : <dynamic>[];
 
-      final managedEntries = <String, Map<String, dynamic>>{};
-      final managedByHost = <String, Map<String, dynamic>>{};
+      // بناء خريطة لجميع عناصر Netwatch الموجودة بالراوتر لمنع التكرار
+      final netwatchByHost = <String, Map<String, dynamic>>{};
+      final netwatchByMac = <String, Map<String, dynamic>>{};
 
       for (final raw in entries) {
         if (raw is! Map) continue;
         final item = Map<String, dynamic>.from(raw);
-        final comment = item['comment']?.toString() ?? '';
-        if (!comment.startsWith(_telegramCommentPrefix)) continue;
-
-        final mac = _extractMacFromTelegramComment(comment).toLowerCase();
         final host = item['host']?.toString().trim().toLowerCase() ?? '';
-        if (mac.isNotEmpty) managedEntries[mac] = item;
-        if (host.isNotEmpty) managedByHost[host] = item;
+        final comment = item['comment']?.toString() ?? '';
+        final mac = _extractMacFromTelegramComment(comment).toLowerCase();
+
+        if (host.isNotEmpty) netwatchByHost[host] = item;
+        if (mac.isNotEmpty) netwatchByMac[mac] = item;
       }
 
       int added = 0;
       int updated = 0;
       int index = 0;
+      final Set<String> processedIps = {};
 
       for (final raw in neighbors) {
         if (raw is! Map) continue;
         final device = Map<String, dynamic>.from(raw);
-        if (!_isAutomaticNetwatchCandidate(device)) continue;
 
-        final ip = _cleanText(device['address']?.toString() ?? '');
-        final mac = _cleanText(device['mac-address']?.toString() ?? '');
+        final ip = _cleanText(device['address']?.toString() ??
+            device['ip-address']?.toString() ??
+            '');
+        if (!_isValidIpv4(ip) || ip == '127.0.0.1' || ip == '0.0.0.0') continue;
+
+        final normalizedIp = ip.toLowerCase();
+        if (processedIps.contains(normalizedIp)) continue;
+        processedIps.add(normalizedIp);
+
+        final mac = _cleanText(device['mac-address']?.toString() ??
+            device['mac']?.toString() ??
+            '');
         final name = _automaticDisplayName(device, index++);
         final normalizedMac = mac.toLowerCase();
 
-        Map<String, dynamic>? existing =
-            normalizedMac.isNotEmpty ? managedEntries[normalizedMac] : null;
-        existing ??= managedByHost[ip.toLowerCase()];
+        Map<String, dynamic>? existing = netwatchByHost[normalizedIp];
+        if (existing == null && normalizedMac.isNotEmpty) {
+          existing = netwatchByMac[normalizedMac];
+        }
 
         final upMessage = '✅ القطعة $name ($ip) عادت إلى العمل.';
         final downMessage = '❌ القطعة $name ($ip) توقفت عن العمل.';
@@ -347,10 +293,12 @@ class _SideDrawerState extends State<SideDrawer> {
           if (id.isNotEmpty) {
             final oldComment = existing['comment']?.toString() ?? '';
             final savedName = _telegramNameFromComment(oldComment);
-            final displayName = savedName.isNotEmpty && savedName != oldComment
-                ? savedName
-                : name;
+            final displayName =
+                (savedName.isNotEmpty && savedName != oldComment)
+                    ? savedName
+                    : name;
             final comment = _buildTelegramComment(displayName, mac);
+
             await router.sendCommand('/tool/netwatch/set', params: {
               'numbers': id,
               'host': ip,
@@ -360,21 +308,20 @@ class _SideDrawerState extends State<SideDrawer> {
             });
             updated++;
           }
-          continue;
+        } else {
+          await router.sendCommand('/tool/netwatch/add', params: {
+            'host': ip,
+            'comment': _buildTelegramComment(name, mac),
+            'up-script': upScript,
+            'down-script': downScript,
+          });
+          added++;
         }
-
-        await router.sendCommand('/tool/netwatch/add', params: {
-          'host': ip,
-          'comment': _buildTelegramComment(name, mac),
-          'up-script': upScript,
-          'down-script': downScript,
-        });
-        added++;
       }
 
       if (added > 0 || updated > 0) {
         _showSnack(
-            '✅ تمت مزامنة قطع UBNT وراوترات/AP تلقائياً: أضيف $added، حُدّث $updated',
+            '✅ تمت مزامنة قطع الشبكة من Neighbors تلقائياً: أضيف $added، حُدّث $updated',
             backgroundColor: Colors.green);
       }
     } catch (e) {
@@ -480,7 +427,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   onChanged: (v) => setDialogState(() => notifyRestart = v),
                 ),
                 const Divider(color: Colors.white24, height: 20),
-                const Text('إضافة قطع متعددة إلى Netwatch:',
+                const Text('إضافة قطع متعددة يدوياً إلى Netwatch:',
                     style: TextStyle(
                         color: AppTheme.gold,
                         fontSize: 12,
@@ -498,7 +445,7 @@ class _SideDrawerState extends State<SideDrawer> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                    'ملاحظة: سيتم اكتشاف أجهزة UBNT وراوترات/AP تلقائياً عند تفعيل إشعار Up أو Down.',
+                    'ملاحظة: سيتم استجلاب جميع قطع الأجهزة تلقائياً من Neighbors ومزامنتها مع Netwatch بدقة.',
                     style: TextStyle(color: Colors.white38, fontSize: 11)),
               ],
             ),
@@ -574,20 +521,17 @@ class _SideDrawerState extends State<SideDrawer> {
                   notifyDown,
                 );
 
-                if (notifyUp || notifyDown) {
-                  await _syncAutomaticNetwatchDevices(
-                    token: token,
-                    chat: chat,
-                    notifyUp: notifyUp,
-                    notifyDown: notifyDown,
-                  );
-                }
+                // استدعاء جلب وتحديث القطع من Neighbors تلقائياً
+                await _syncAutomaticNetwatchDevices(
+                  token: token,
+                  chat: chat,
+                  notifyUp: notifyUp,
+                  notifyDown: notifyDown,
+                );
 
                 Navigator.pop(ctx);
                 _showSnack(
-                  notifyUp || notifyDown
-                      ? '✅ تم حفظ الإعدادات ومزامنة جميع قطع UBNT وراوترات/AP'
-                      : '✅ تم حفظ الإعدادات وتحديث جميع القطع',
+                  '✅ تم حفظ الإعدادات ومزامنة جميع قطع الشبكة من Neighbors بنجاح',
                   backgroundColor: Colors.green,
                 );
               },
@@ -769,7 +713,7 @@ class _SideDrawerState extends State<SideDrawer> {
       return;
     }
     if (token.isEmpty || chat.isEmpty) {
-      _showSnack('⚠️ أدخل التوكن والـ Chat ID أولاً',
+      _showSnack('⚠️️ أدخل التوكن والـ Chat ID أولاً',
           backgroundColor: Colors.orange);
       return;
     }
@@ -828,288 +772,213 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  Future<void> _showSpeedBoostDialog() async {
-    TimeOfDay fromTime = const TimeOfDay(hour: 0, minute: 0);
-    TimeOfDay toTime = const TimeOfDay(hour: 1, minute: 0);
-
-    await showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppTheme.semiBlack,
-          title: const Text('فتح السرعات الشامل المؤقت',
-              style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('حدد وقت البداية والنهاية لفتح السرعات:',
-                  style: TextStyle(color: Colors.white70)),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  Column(
-                    children: [
-                      const Text('من الساعة:',
-                          style: TextStyle(color: Colors.white70)),
-                      TextButton(
-                        onPressed: () async {
-                          final t = await showTimePicker(
-                              context: ctx, initialTime: fromTime);
-                          if (t != null) setDialogState(() => fromTime = t);
-                        },
-                        child: Text(fromTime.format(ctx),
-                            style: const TextStyle(
-                                color: AppTheme.gold, fontSize: 18)),
-                      ),
-                    ],
-                  ),
-                  const Icon(Icons.arrow_forward, color: Colors.white38),
-                  Column(
-                    children: [
-                      const Text('إلى الساعة:',
-                          style: TextStyle(color: Colors.white70)),
-                      TextButton(
-                        onPressed: () async {
-                          final t = await showTimePicker(
-                              context: ctx, initialTime: toTime);
-                          if (t != null) setDialogState(() => toTime = t);
-                        },
-                        child: Text(toTime.format(ctx),
-                            style: const TextStyle(
-                                color: AppTheme.gold, fontSize: 18)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child:
-                  const Text('إلغاء', style: TextStyle(color: Colors.white54)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-              onPressed: () {
-                Navigator.pop(ctx);
-                _cancelSpeedBoost();
-              },
-              child: const Text('إلغاء وإيقاف الفتح',
-                  style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
-              onPressed: () {
-                Navigator.pop(ctx);
-                _applySpeedBoost(fromTime, toTime);
-              },
-              child: const Text('تطبيق', style: TextStyle(color: Colors.black)),
-            ),
-          ],
-        ),
-      ),
-    );
+  // الإصلاح الأول: فحص حالة قواعد Fasttrack
+  Future<bool> _checkFasttrackStatus() async {
+    final router = widget.routerService;
+    if (router == null) return false;
+    try {
+      final filters = await router.sendCommand('/ip/firewall/filter/print');
+      if (filters is List) {
+        for (final rule in filters) {
+          if (rule is Map) {
+            final action = rule['action']?.toString() ?? '';
+            final comment = rule['comment']?.toString() ?? '';
+            final disabled = rule['disabled']?.toString() == 'true';
+            if ((action == 'fasttrack-connection' ||
+                    comment.contains('ST_Manager_Fasttrack')) &&
+                !disabled) {
+              return true;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return false;
   }
 
-  Future<void> _cancelSpeedBoost() async {
+  // الإصلاح الأول: تفعيل أو إيقاف قواعد Fasttrack وإعطائها الأولوية في الفايروول
+  Future<void> _toggleFasttrack(bool enable) async {
     final router = widget.routerService;
-    if (router == null) return;
+    if (router == null) {
+      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      return;
+    }
+
     try {
-      _showSnack('⏳ جاري إلغاء وإيقاف الفتح وإرجاع السرعات...',
-          backgroundColor: Colors.orange);
+      final filtersResp = await router.sendCommand('/ip/firewall/filter/print');
+      final filters = filtersResp is List ? filtersResp : [];
 
-      // تنظيف المجدولات والسكربتات المحفوظة بالمايكروتك
-      await _cleanUpMikrotikScripts(router);
-
-      // استرجاع السرعات المحفوظة في التعليقات من الهوتسبوت
-      final hsProfiles = await router.getHotspotProfiles();
-      for (var profile in hsProfiles) {
-        final id = profile['.id']?.toString() ?? '';
-        final comment = profile['comment']?.toString() ?? '';
-        if (id.isNotEmpty && comment.contains('ORIG_LIMIT:')) {
-          final idx = comment.indexOf('ORIG_LIMIT:');
-          final rest = comment.substring(idx + 11);
-          final spaceIdx = rest.indexOf(' ');
-          final rateLimit = spaceIdx != -1 ? rest.substring(0, spaceIdx) : rest;
-          final newComment = spaceIdx != -1 ? rest.substring(spaceIdx + 1) : '';
-
-          await router.sendCommand('/ip/hotspot/user/profile/set', params: {
-            'numbers': id,
-            'rate-limit': rateLimit,
-            'comment': newComment.trim(),
-          });
+      final List<Map<String, dynamic>> fasttrackRules = [];
+      for (final rule in filters) {
+        if (rule is Map) {
+          final item = Map<String, dynamic>.from(rule);
+          final action = item['action']?.toString() ?? '';
+          final comment = item['comment']?.toString() ?? '';
+          if (action == 'fasttrack-connection' ||
+              comment.contains('ST_Manager_Fasttrack')) {
+            fasttrackRules.add(item);
+          }
         }
       }
 
-      // استرجاع السرعات المحفوظة في التعليقات من البرودباند
-      final pppProfiles = await router.getPppProfiles();
-      for (var profile in pppProfiles) {
-        final id = profile['.id']?.toString() ?? '';
-        final comment = profile['comment']?.toString() ?? '';
-        if (id.isNotEmpty && comment.contains('ORIG_LIMIT:')) {
-          final idx = comment.indexOf('ORIG_LIMIT:');
-          final rest = comment.substring(idx + 11);
-          final spaceIdx = rest.indexOf(' ');
-          final rateLimit = spaceIdx != -1 ? rest.substring(0, spaceIdx) : rest;
-          final newComment = spaceIdx != -1 ? rest.substring(spaceIdx + 1) : '';
-
-          await router.sendCommand('/ppp/profile/set', params: {
-            'numbers': id,
-            'rate-limit': rateLimit,
-            'comment': newComment.trim(),
+      if (enable) {
+        if (fasttrackRules.isNotEmpty) {
+          // في حال وجود قواعد Fasttrack: تفعيلها ونقلها لأول الفايروول
+          for (final rule in fasttrackRules) {
+            final id = rule['.id']?.toString() ?? '';
+            if (id.isNotEmpty) {
+              await router.sendCommand('/ip/firewall/filter/set', params: {
+                'numbers': id,
+                'disabled': 'no',
+              });
+              try {
+                await router.sendCommand('/ip/firewall/filter/move', params: {
+                  'numbers': id,
+                  'destination': '0',
+                });
+              } catch (_) {}
+            }
+          }
+        } else {
+          // في حال عدم وجودها: إنشاء قاعدة جديدة بأولوية قصوى
+          await router.sendCommand('/ip/firewall/filter/add', params: {
+            'chain': 'forward',
+            'action': 'fasttrack-connection',
+            'connection-state': 'established,related',
+            'comment': 'ST_Manager_Fasttrack',
+            'place-before': '0',
           });
         }
+        _showSnack('✅ تم تفعيل فتح السرعة للجميع (Fasttrack) بنجاح',
+            backgroundColor: Colors.green);
+      } else {
+        // عند إيقاف فتح السرعة: تعطيل قواعد Fasttrack
+        if (fasttrackRules.isNotEmpty) {
+          for (final rule in fasttrackRules) {
+            final id = rule['.id']?.toString() ?? '';
+            if (id.isNotEmpty) {
+              await router.sendCommand('/ip/firewall/filter/set', params: {
+                'numbers': id,
+                'disabled': 'yes',
+              });
+            }
+          }
+        }
+        _showSnack('🛑 تم إيقاف فتح السرعة (تعطيل قواعد Fasttrack)',
+            backgroundColor: Colors.orange);
       }
-
-      // طرد المتصلين لتطبيق السرعات الجديدة (المرجعة)
-      final hsActive = await router.getHotspotActive();
-      for (var user in hsActive) {
-        final id = user['.id']?.toString() ?? '';
-        if (id.isNotEmpty)
-          await router.sendCommand('/ip/hotspot/active/remove',
-              params: {'numbers': id});
-      }
-      final pppActive = await router.getPppActive();
-      for (var user in pppActive) {
-        final id = user['.id']?.toString() ?? '';
-        if (id.isNotEmpty)
-          await router
-              .sendCommand('/ppp/active/remove', params: {'numbers': id});
-      }
-
-      _showSnack('✅ تم إيقاف الفتح واسترجاع جميع السرعات القديمة بنجاح',
-          backgroundColor: Colors.green);
     } catch (e) {
-      _showSnack('❌ حدث خطأ أثناء إيقاف فتح السرعات: $e',
+      _showSnack('❌ حدث خطأ أثناء تغيير حالة السرعة: $e',
           backgroundColor: Colors.red);
     }
   }
 
-  Future<void> _cleanUpMikrotikScripts(RouterService router) async {
-    try {
-      final scheds = await router.sendCommand('/system/scheduler/print');
-      for (var s in scheds) {
-        final name = s['name']?.toString() ?? '';
-        if (name == 'start_speed_sched' || name == 'stop_speed_sched') {
-          await router.sendCommand('/system/scheduler/remove',
-              params: {'numbers': s['.id']});
-        }
-      }
-      final scripts = await router.sendCommand('/system/script/print');
-      for (var sc in scripts) {
-        final name = sc['name']?.toString() ?? '';
-        if (name == 'start_speed_boost' || name == 'stop_speed_boost') {
-          await router.sendCommand('/system/script/remove',
-              params: {'numbers': sc['.id']});
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _applySpeedBoost(TimeOfDay from, TimeOfDay to) async {
+  // الإصلاح الأول: نافذة زر تشغيل وإيقاف السرعة للجميع بدل الساعة والمؤقت
+  Future<void> _showSpeedBoostDialog() async {
     final router = widget.routerService;
-    if (router == null) return;
-    try {
-      final startTimeStr =
-          '${from.hour.toString().padLeft(2, '0')}:${from.minute.toString().padLeft(2, '0')}:00';
-      final endTimeStr =
-          '${to.hour.toString().padLeft(2, '0')}:${to.minute.toString().padLeft(2, '0')}:00';
-
-      // 1. تنظيف أي سكربتات أو مجدولات سابقة لتفادي التكرار
-      await _cleanUpMikrotikScripts(router);
-
-      // 2. سكربت البداية (إزالة السرعات وحفظها بالتعليقات ثم طرد المتصلين)
-      const startScript = ':foreach p in=[/ip/hotspot/user/profile find] do={'
-          ':local rl [/ip/hotspot/user/profile get \$p rate-limit];'
-          ':local c [/ip/hotspot/user/profile get \$p comment];'
-          ':if (\$rl != "") do={'
-          '/ip/hotspot/user/profile set \$p rate-limit="" comment=("ORIG_LIMIT:" . \$rl . " " . \$c);'
-          '}'
-          '};'
-          ':foreach p in=[/ppp/profile find] do={'
-          ':local rl [/ppp/profile get \$p rate-limit];'
-          ':local c [/ppp/profile get \$p comment];'
-          ':if (\$rl != "") do={'
-          '/ppp/profile set \$p rate-limit="" comment=("ORIG_LIMIT:" . \$rl . " " . \$c);'
-          '}'
-          '};'
-          '/ip/hotspot/active/remove [find];'
-          '/ppp/active/remove [find];';
-
-      // 3. سكربت النهاية (استرجاع السرعات من التعليقات، طرد المتصلين، وحذف نفسه)
-      const stopScript = ':foreach p in=[/ip/hotspot/user/profile find] do={'
-          ':local c [/ip/hotspot/user/profile get \$p comment];'
-          ':if ([:typeof [:find \$c "ORIG_LIMIT:"]] != "nil") do={'
-          ':local start ([:find \$c "ORIG_LIMIT:"] + 11);'
-          ':local space [:find \$c " " \$start];'
-          ':local rl "";'
-          ':local newC "";'
-          ':if ([:typeof \$space] != "nil") do={'
-          ':set rl [:pick \$c \$start \$space];'
-          ':set newC [:pick \$c (\$space + 1) [:len \$c]];'
-          '} else={'
-          ':set rl [:pick \$c \$start [:len \$c]];'
-          '}'
-          '/ip/hotspot/user/profile set \$p rate-limit=\$rl comment=\$newC;'
-          '}'
-          '};'
-          ':foreach p in=[/ppp/profile find] do={'
-          ':local c [/ppp/profile get \$p comment];'
-          ':if ([:typeof [:find \$c "ORIG_LIMIT:"]] != "nil") do={'
-          ':local start ([:find \$c "ORIG_LIMIT:"] + 11);'
-          ':local space [:find \$c " " \$start];'
-          ':local rl "";'
-          ':local newC "";'
-          ':if ([:typeof \$space] != "nil") do={'
-          ':set rl [:pick \$c \$start \$space];'
-          ':set newC [:pick \$c (\$space + 1) [:len \$c]];'
-          '} else={'
-          ':set rl [:pick \$c \$start [:len \$c]];'
-          '}'
-          '/ppp/profile set \$p rate-limit=\$rl comment=\$newC;'
-          '}'
-          '};'
-          '/ip/hotspot/active/remove [find];'
-          '/ppp/active/remove [find];'
-          '/system/scheduler remove [find name="start_speed_sched"];'
-          '/system/scheduler remove [find name="stop_speed_sched"];'
-          '/system/script remove [find name="start_speed_boost"];'
-          '/system/script remove [find name="stop_speed_boost"];';
-
-      // 4. إضافة السكربتات للمايكروتك
-      await router.sendCommand('/system/script/add', params: {
-        'name': 'start_speed_boost',
-        'source': startScript,
-      });
-
-      await router.sendCommand('/system/script/add', params: {
-        'name': 'stop_speed_boost',
-        'source': stopScript,
-      });
-
-      // 5. إضافة المجدولات (Schedulers)
-      await router.sendCommand('/system/scheduler/add', params: {
-        'name': 'start_speed_sched',
-        'start-time': startTimeStr,
-        'on-event': 'start_speed_boost',
-      });
-
-      await router.sendCommand('/system/scheduler/add', params: {
-        'name': 'stop_speed_sched',
-        'start-time': endTimeStr,
-        'on-event': 'stop_speed_boost',
-      });
-
-      _showSnack(
-          '🚀 تمت جدولة فتح السرعات بنجاح. ستبدأ الساعة $startTimeStr وتنتهي $endTimeStr.',
-          backgroundColor: Colors.green);
-    } catch (e) {
-      _showSnack('❌ فشل إعداد جدولة السرعات: $e', backgroundColor: Colors.red);
+    if (router == null) {
+      _showSnack('لا يوجد اتصال بالراوتر', backgroundColor: Colors.red);
+      return;
     }
+
+    bool isEnabled = await _checkFasttrackStatus();
+    bool isProcessing = false;
+
+    if (!mounted) return;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          return AlertDialog(
+            backgroundColor: AppTheme.semiBlack,
+            title: const Row(
+              children: [
+                Icon(Icons.rocket_launch, color: AppTheme.gold),
+                SizedBox(width: 8),
+                Text('فتح السرعة للجميع',
+                    style: TextStyle(color: Colors.white, fontSize: 16)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'عند تشغيل فتح السرعة للجميع، سيتم التأكد من وجود قواعد Fasttrack وتفعيلها وإعطائها الأولوية في جدار الحماية. وعند الإيقاف يتم تعطيلها.',
+                  style: TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white10,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            isEnabled ? Icons.flash_on : Icons.flash_off,
+                            color:
+                                isEnabled ? Colors.greenAccent : Colors.white38,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            isEnabled ? 'مفعل (سرعة مفتوحة)' : 'معطل',
+                            style: TextStyle(
+                              color: isEnabled
+                                  ? Colors.greenAccent
+                                  : Colors.white70,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                      isProcessing
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppTheme.gold,
+                              ),
+                            )
+                          : Switch(
+                              value: isEnabled,
+                              activeColor: AppTheme.gold,
+                              onChanged: (val) async {
+                                setDialogState(() => isProcessing = true);
+                                await _toggleFasttrack(val);
+                                final status = await _checkFasttrackStatus();
+                                if (ctx.mounted) {
+                                  setDialogState(() {
+                                    isEnabled = status;
+                                    isProcessing = false;
+                                  });
+                                }
+                              },
+                            ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('إغلاق',
+                    style: TextStyle(color: Colors.white54)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _showOpenUserSpeedDialog() async {
@@ -1467,7 +1336,6 @@ class _SideDrawerState extends State<SideDrawer> {
                       _showRouterInfo();
                     },
                   ),
-                  // تم تعديل هذا القسم واسم الشاشة الموجهة إليها
                   _sectionHeader('إدارة الجدار الناري'),
                   _buildTile(
                     icon: Icons.security,
@@ -1499,7 +1367,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   ),
                   _buildTile(
                     icon: Icons.rocket_launch,
-                    label: 'فتح سرعات شامل مؤقت',
+                    label: 'فتح السرعة للجميع',
                     onTap: () {
                       Navigator.pop(context);
                       _showSpeedBoostDialog();
