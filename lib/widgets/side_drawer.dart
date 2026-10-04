@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import 'package:st_manager/services/router_service.dart';
 import 'package:st_manager/services/secure_storage_service.dart';
 import 'package:st_manager/services/firebase_service.dart';
-// تم تغيير الاستيراد هنا ليتعرف على شاشة الفايروول الجديدة
 import 'package:st_manager/screens/firewall_screen.dart';
 import 'package:st_manager/theme/app_theme.dart';
 
@@ -218,7 +217,6 @@ class _SideDrawerState extends State<SideDrawer> {
     return '/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=$encoded" keep-result=no';
   }
 
-  // الإصلاح الثاني: جلب القطع تلقائياً من Neighbors وإضافتها في Netwatch لمنع التكرار وحقنها بالسكربتات
   Future<void> _syncAutomaticNetwatchDevices({
     required String token,
     required String chat,
@@ -235,7 +233,6 @@ class _SideDrawerState extends State<SideDrawer> {
       final netwatchResponse = await router.sendCommand('/tool/netwatch/print');
       final entries = netwatchResponse is List ? netwatchResponse : <dynamic>[];
 
-      // بناء خريطة لجميع عناصر Netwatch الموجودة بالراوتر لمنع التكرار
       final netwatchByHost = <String, Map<String, dynamic>>{};
       final netwatchByMac = <String, Map<String, dynamic>>{};
 
@@ -330,6 +327,180 @@ class _SideDrawerState extends State<SideDrawer> {
     }
   }
 
+  // إضافة سكريبتات متقدمة للراوتر
+  Future<void> _injectRouterScripts(String token, String chat, bool notifyUp,
+      bool notifyDown, bool notifyLogin, bool notifyPeriodic) async {
+    final router = widget.routerService;
+    if (router == null) return;
+
+    String enc(String s) => Uri.encodeComponent(s);
+
+    // 1. سكربت مزامنة أجهزة Neighbors بشكل تلقائي (يعمل كل 5 دقائق في الراوتر)
+    String autoSyncScript = '''
+:foreach n in=[/ip neighbor find] do={
+  :local nIp [/ip neighbor get \$n address];
+  :local nMac [/ip neighbor get \$n mac-address];
+  :local nName [/ip neighbor get \$n identity];
+  :if ([:len \$nIp] > 0) do={
+    :local exists [/tool netwatch find host=\$nIp];
+    :if ([:len \$exists] = 0) do={
+      :local upMsg ("${enc('✅ عادت للعمل: ')}" . \$nName . " (" . \$nIp . ")");
+      :local downMsg ("${enc('❌ توقفت عن العمل: ')}" . \$nName . " (" . \$nIp . ")");
+      :local uScript ""; :local dScript "";
+      ${notifyUp ? ':set uScript "/tool fetch url=\\"https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=\$upMsg\\" keep-result=no;";' : ''}
+      ${notifyDown ? ':set dScript "/tool fetch url=\\"https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=\$downMsg\\" keep-result=no;";' : ''}
+      /tool netwatch add host=\$nIp comment=("$_telegramCommentPrefix" . \$nName . " [MAC:" . \$nMac . "]") up-script=\$uScript down-script=\$dScript;
+    }
+  }
+}
+''';
+    try {
+      await router.sendCommand('/system/scheduler/remove',
+          params: {'numbers': '[find name="ST_Manager_AutoSync"]'});
+    } catch (_) {}
+    await router.sendCommand('/system/scheduler/add', params: {
+      'name': 'ST_Manager_AutoSync',
+      'interval': '00:05:00',
+      'on-event': autoSyncScript,
+      'start-time': 'startup'
+    });
+
+    // 2. إشعار حالة السيرفر الدوري
+    if (notifyPeriodic) {
+      String periodicScript = '''
+:local temp "N/A";
+:do { :set temp [/system health get [find name="temperature"] value] } on-error={};
+:local hsTotal [:len [/ip hotspot user find]];
+:local hsActive [:len [/ip hotspot active find]];
+:local pppTotal [:len [/ppp secret find]];
+:local pppActive [:len [/ppp active find]];
+:local netwatchTotal [:len [/tool netwatch find]];
+:local neighborsTotal [:len [/ip neighbor find]];
+
+:local msg ("${enc('📊 حالة السيرفر الدورية')}%0A");
+:set msg (\$msg . "${enc('🌡️ الحرارة: ')}" . \$temp . "C%0A");
+:set msg (\$msg . "${enc('👥 عدد الهوتسبوت الكامل: ')}" . \$hsTotal . "%0A");
+:set msg (\$msg . "${enc('🟢 اكتف هوتسبوت: ')}" . \$hsActive . "%0A");
+:set msg (\$msg . "${enc('🔌 عدد البرودباند الكامل: ')}" . \$pppTotal . "%0A");
+:set msg (\$msg . "${enc('🔵 المتصلين برودباند: ')}" . \$pppActive . "%0A");
+:set msg (\$msg . "${enc('📡 أجهزة البث (Netwatch): ')}" . \$netwatchTotal . "%0A");
+:set msg (\$msg . "${enc('📱 المتصل حاليا (Neighbors): ')}" . \$neighborsTotal);
+
+/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=\$msg" keep-result=no;
+''';
+      try {
+        await router.sendCommand('/system/scheduler/remove',
+            params: {'numbers': '[find name="ST_Manager_Periodic"]'});
+      } catch (_) {}
+      await router.sendCommand('/system/scheduler/add', params: {
+        'name': 'ST_Manager_Periodic',
+        'interval': '04:00:00',
+        'on-event': periodicScript,
+        'start-time': 'startup'
+      });
+    } else {
+      try {
+        await router.sendCommand('/system/scheduler/remove',
+            params: {'numbers': '[find name="ST_Manager_Periodic"]'});
+      } catch (_) {}
+    }
+
+    // 3. سكربت إشعار دخول بطاقة هوتسبوت جديدة
+    if (notifyLogin) {
+      String loginScript = '''
+:local hostName "Unknown";
+:do { :set hostName [/ip dhcp-server lease get [find mac-address=\$"mac-address"] host-name] } on-error={};
+:local msg ("${enc('✅ تسجيل دخول بطاقة جديدة')}%0A");
+:set msg (\$msg . "${enc('🎟️ رقم البطاقة: ')}" . \$user . "%0A");
+:set msg (\$msg . "${enc('🖥️ الماك ادرس: ')}" . \$"mac-address" . "%0A");
+:set msg (\$msg . "${enc('📱 اسم الجهاز: ')}" . \$hostName . "%0A");
+:set msg (\$msg . "${enc('🔌 الايثر: ')}" . \$interface);
+
+/tool fetch url="https://api.telegram.org/bot$token/sendMessage?chat_id=$chat&text=\$msg" keep-result=no;
+''';
+      try {
+        final profiles = await router.sendCommand('/ip/hotspot/profile/print');
+        for (final p in (profiles is List ? profiles : [])) {
+          if (p is Map) {
+            await router.sendCommand('/ip/hotspot/profile/set',
+                params: {'numbers': p['.id'], 'on-login': loginScript});
+          }
+        }
+      } catch (_) {}
+    } else {
+      try {
+        final profiles = await router.sendCommand('/ip/hotspot/profile/print');
+        for (final p in (profiles is List ? profiles : [])) {
+          if (p is Map) {
+            final onLogin = p['on-login']?.toString() ?? '';
+            if (onLogin.contains('api.telegram.org/bot')) {
+              await router.sendCommand('/ip/hotspot/profile/set',
+                  params: {'numbers': p['.id'], 'on-login': ''});
+            }
+          }
+        }
+      } catch (_) {}
+    }
+  }
+
+  // إيقاف البوت وحذف كل ما تم بناؤه
+  Future<void> _stopAndDeleteTelegramBot() async {
+    final router = widget.routerService;
+    if (router == null) return;
+    try {
+      final response = await router.sendCommand('/tool/netwatch/print');
+      final entries = response is List ? response : [];
+      for (final raw in entries) {
+        if (raw is! Map) continue;
+        final comment = raw['comment']?.toString() ?? '';
+        if (comment.startsWith(_telegramCommentPrefix)) {
+          final id = raw['.id']?.toString() ?? '';
+          if (id.isNotEmpty) {
+            await router
+                .sendCommand('/tool/netwatch/remove', params: {'numbers': id});
+          }
+        }
+      }
+
+      final schedulers = await router.sendCommand('/system/scheduler/print');
+      for (final s in (schedulers is List ? schedulers : [])) {
+        if (s is Map) {
+          final name = s['name']?.toString() ?? '';
+          if (name == 'ST_Manager_AutoSync' || name == 'ST_Manager_Periodic') {
+            await router.sendCommand('/system/scheduler/remove',
+                params: {'numbers': s['.id']});
+          }
+        }
+      }
+
+      final profiles = await router.sendCommand('/ip/hotspot/profile/print');
+      for (final p in (profiles is List ? profiles : [])) {
+        if (p is Map) {
+          final onLogin = p['on-login']?.toString() ?? '';
+          if (onLogin.contains('api.telegram.org')) {
+            await router.sendCommand('/ip/hotspot/profile/set',
+                params: {'numbers': p['.id'], 'on-login': ''});
+          }
+        }
+      }
+
+      await _storage.delete('telegram_bot_token');
+      await _storage.delete('telegram_chat_id');
+      await _storage.delete('tg_notify_up');
+      await _storage.delete('tg_notify_down');
+      await _storage.delete('tg_notify_expiry');
+      await _storage.delete('tg_notify_high_usage');
+      await _storage.delete('tg_notify_restart');
+      await _storage.delete('tg_notify_login');
+      await _storage.delete('tg_notify_periodic');
+
+      _showSnack('🗑️ تم إيقاف البوت وحذف جميع الإعدادات والسكربتات بنجاح',
+          backgroundColor: Colors.redAccent);
+    } catch (e) {
+      _showSnack('❌ فشل الحذف: $e', backgroundColor: Colors.red);
+    }
+  }
+
   Future<void> _showTelegramBotDialog() async {
     final savedToken = await _storage.read('telegram_bot_token') ?? '';
     final savedChatId = await _storage.read('telegram_chat_id') ?? '';
@@ -340,6 +511,8 @@ class _SideDrawerState extends State<SideDrawer> {
     bool notifyHighUsage =
         await _storage.read('tg_notify_high_usage') == 'true';
     bool notifyRestart = await _storage.read('tg_notify_restart') == 'true';
+    bool notifyLogin = await _storage.read('tg_notify_login') == 'true';
+    bool notifyPeriodic = await _storage.read('tg_notify_periodic') == 'true';
 
     final ipsController = TextEditingController();
     final namesController = TextEditingController();
@@ -402,6 +575,24 @@ class _SideDrawerState extends State<SideDrawer> {
                 _buildNotifToggle(
                   ctx,
                   setDialogState,
+                  icon: Icons.login,
+                  iconColor: Colors.blueAccent,
+                  label: 'إشعار دخول بطاقة هوتسبوت جديدة',
+                  value: notifyLogin,
+                  onChanged: (v) => setDialogState(() => notifyLogin = v),
+                ),
+                _buildNotifToggle(
+                  ctx,
+                  setDialogState,
+                  icon: Icons.update,
+                  iconColor: Colors.amber,
+                  label: 'إشعار حالة السيرفر الدوري (كل 4 ساعات)',
+                  value: notifyPeriodic,
+                  onChanged: (v) => setDialogState(() => notifyPeriodic = v),
+                ),
+                _buildNotifToggle(
+                  ctx,
+                  setDialogState,
                   icon: Icons.timer_off,
                   iconColor: Colors.orange,
                   label: 'إشعار انتهاء صلاحية (عام)',
@@ -427,6 +618,22 @@ class _SideDrawerState extends State<SideDrawer> {
                   onChanged: (v) => setDialogState(() => notifyRestart = v),
                 ),
                 const Divider(color: Colors.white24, height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.redAccent.withOpacity(0.8)),
+                    onPressed: () async {
+                      await _stopAndDeleteTelegramBot();
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                    icon: const Icon(Icons.delete_forever,
+                        color: Colors.white, size: 20),
+                    label: const Text('إيقاف البوت وحذف الإعدادات',
+                        style: TextStyle(color: Colors.white)),
+                  ),
+                ),
+                const Divider(color: Colors.white24, height: 20),
                 const Text('إضافة قطع متعددة يدوياً إلى Netwatch:',
                     style: TextStyle(
                         color: AppTheme.gold,
@@ -445,7 +652,7 @@ class _SideDrawerState extends State<SideDrawer> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                    'ملاحظة: سيتم استجلاب جميع قطع الأجهزة تلقائياً من Neighbors ومزامنتها مع Netwatch بدقة.',
+                    'ملاحظة: سيتم حقن سكريبت بالراوتر لاستجلاب جميع قطع الأجهزة تلقائياً من Neighbors ومزامنتها مع Netwatch بدقة.',
                     style: TextStyle(color: Colors.white38, fontSize: 11)),
               ],
             ),
@@ -465,7 +672,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   chatCtrl.text.trim(),
                 );
               },
-              icon: const Icon(Icons.send, color: Colors.white),
+              icon: const Icon(Icons.send, color: Colors.white, size: 18),
               label:
                   const Text('اختبار', style: TextStyle(color: Colors.white)),
             ),
@@ -485,6 +692,9 @@ class _SideDrawerState extends State<SideDrawer> {
                     'tg_notify_high_usage', notifyHighUsage.toString());
                 await _storage.write(
                     'tg_notify_restart', notifyRestart.toString());
+                await _storage.write('tg_notify_login', notifyLogin.toString());
+                await _storage.write(
+                    'tg_notify_periodic', notifyPeriodic.toString());
 
                 final ips = ipsController.text
                     .split(',')
@@ -521,7 +731,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   notifyDown,
                 );
 
-                // استدعاء جلب وتحديث القطع من Neighbors تلقائياً
+                // استدعاء جلب وتحديث القطع من Neighbors يدوياً في التطبيق
                 await _syncAutomaticNetwatchDevices(
                   token: token,
                   chat: chat,
@@ -529,9 +739,13 @@ class _SideDrawerState extends State<SideDrawer> {
                   notifyDown: notifyDown,
                 );
 
+                // حقن سكريبتات الأتمتة في الراوتر (Neighbors Auto-Sync + Periodic + Hotspot)
+                await _injectRouterScripts(token, chat, notifyUp, notifyDown,
+                    notifyLogin, notifyPeriodic);
+
                 Navigator.pop(ctx);
                 _showSnack(
-                  '✅ تم حفظ الإعدادات ومزامنة جميع قطع الشبكة من Neighbors بنجاح',
+                  '✅ تم حفظ الإعدادات وحقن السكريبتات التلقائية ومزامنة قطع الشبكة بنجاح',
                   backgroundColor: Colors.green,
                 );
               },
@@ -713,7 +927,7 @@ class _SideDrawerState extends State<SideDrawer> {
       return;
     }
     if (token.isEmpty || chat.isEmpty) {
-      _showSnack('⚠️️ أدخل التوكن والـ Chat ID أولاً',
+      _showSnack('⚠ أدخل التوكن والـ Chat ID أولاً',
           backgroundColor: Colors.orange);
       return;
     }
@@ -772,7 +986,7 @@ class _SideDrawerState extends State<SideDrawer> {
     );
   }
 
-  // الإصلاح الأول: فحص حالة قواعد Fasttrack
+  // فحص حالة قواعد فتح السرعة
   Future<bool> _checkFasttrackStatus() async {
     final router = widget.routerService;
     if (router == null) return false;
@@ -781,12 +995,9 @@ class _SideDrawerState extends State<SideDrawer> {
       if (filters is List) {
         for (final rule in filters) {
           if (rule is Map) {
-            final action = rule['action']?.toString() ?? '';
             final comment = rule['comment']?.toString() ?? '';
             final disabled = rule['disabled']?.toString() == 'true';
-            if ((action == 'fasttrack-connection' ||
-                    comment.contains('ST_Manager_Fasttrack')) &&
-                !disabled) {
+            if (comment.contains('ST_Manager_Fasttrack') && !disabled) {
               return true;
             }
           }
@@ -796,7 +1007,7 @@ class _SideDrawerState extends State<SideDrawer> {
     return false;
   }
 
-  // الإصلاح الأول: تفعيل أو إيقاف قواعد Fasttrack وإعطائها الأولوية في الفايروول
+  // تفعيل أو إيقاف فتح السرعة بإنشاء/تعديل القاعدتين اللازمتين
   Future<void> _toggleFasttrack(bool enable) async {
     final router = widget.routerService;
     if (router == null) {
@@ -812,10 +1023,8 @@ class _SideDrawerState extends State<SideDrawer> {
       for (final rule in filters) {
         if (rule is Map) {
           final item = Map<String, dynamic>.from(rule);
-          final action = item['action']?.toString() ?? '';
           final comment = item['comment']?.toString() ?? '';
-          if (action == 'fasttrack-connection' ||
-              comment.contains('ST_Manager_Fasttrack')) {
+          if (comment.contains('ST_Manager_Fasttrack')) {
             fasttrackRules.add(item);
           }
         }
@@ -823,7 +1032,7 @@ class _SideDrawerState extends State<SideDrawer> {
 
       if (enable) {
         if (fasttrackRules.isNotEmpty) {
-          // في حال وجود قواعد Fasttrack: تفعيلها ونقلها لأول الفايروول
+          // تفعيل القواعد ونقلها لأول الفايروول
           for (final rule in fasttrackRules) {
             final id = rule['.id']?.toString() ?? '';
             if (id.isNotEmpty) {
@@ -840,7 +1049,7 @@ class _SideDrawerState extends State<SideDrawer> {
             }
           }
         } else {
-          // في حال عدم وجودها: إنشاء قاعدة جديدة بأولوية قصوى
+          // القاعدة الأولى: Fasttrack
           await router.sendCommand('/ip/firewall/filter/add', params: {
             'chain': 'forward',
             'action': 'fasttrack-connection',
@@ -848,11 +1057,19 @@ class _SideDrawerState extends State<SideDrawer> {
             'comment': 'ST_Manager_Fasttrack',
             'place-before': '0',
           });
+          // القاعدة الثانية: Accept
+          await router.sendCommand('/ip/firewall/filter/add', params: {
+            'chain': 'forward',
+            'action': 'accept',
+            'connection-state': 'established,related',
+            'comment': 'ST_Manager_Fasttrack_Accept',
+            'place-before': '1',
+          });
         }
-        _showSnack('✅ تم تفعيل فتح السرعة للجميع (Fasttrack) بنجاح',
+        _showSnack('✅ تم تفعيل فتح السرعة للجميع بنجاح',
             backgroundColor: Colors.green);
       } else {
-        // عند إيقاف فتح السرعة: تعطيل قواعد Fasttrack
+        // عند إيقاف فتح السرعة يتم تعطيل جميع القواعد
         if (fasttrackRules.isNotEmpty) {
           for (final rule in fasttrackRules) {
             final id = rule['.id']?.toString() ?? '';
@@ -864,7 +1081,7 @@ class _SideDrawerState extends State<SideDrawer> {
             }
           }
         }
-        _showSnack('🛑 تم إيقاف فتح السرعة (تعطيل قواعد Fasttrack)',
+        _showSnack('🛑 تم إيقاف فتح السرعة للجميع',
             backgroundColor: Colors.orange);
       }
     } catch (e) {
@@ -873,7 +1090,7 @@ class _SideDrawerState extends State<SideDrawer> {
     }
   }
 
-  // الإصلاح الأول: نافذة زر تشغيل وإيقاف السرعة للجميع بدل الساعة والمؤقت
+  // نافذة زر تشغيل وإيقاف السرعة للجميع
   Future<void> _showSpeedBoostDialog() async {
     final router = widget.routerService;
     if (router == null) {
@@ -905,7 +1122,7 @@ class _SideDrawerState extends State<SideDrawer> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'عند تشغيل فتح السرعة للجميع، سيتم التأكد من وجود قواعد Fasttrack وتفعيلها وإعطائها الأولوية في جدار الحماية. وعند الإيقاف يتم تعطيلها.',
+                  'عند تشغيل فتح السرعة للجميع، سيتم التأكد من وجود القواعد اللازمة وتفعيلها وإعطائها الأولوية في جدار الحماية. وعند الإيقاف يتم تعطيلها.',
                   style: TextStyle(color: Colors.white70, fontSize: 12),
                 ),
                 const SizedBox(height: 16),
