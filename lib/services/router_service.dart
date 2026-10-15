@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:routeros_api/routeros_api.dart';
 
 /// خدمة للتواصل مع جهاز RouterOS عبر واجهة API.
@@ -7,6 +8,29 @@ class RouterService {
   final int port;
   final String username;
   final String password;
+
+  // حفظ الجلسات المفتوحة لضمان عدم فتح جلسة جديدة عند الانتقال بين الصفحات
+  static final Map<String, RouterService> _instances = {};
+
+  factory RouterService({
+    required String host,
+    int port = 8728,
+    required String username,
+    required String password,
+  }) {
+    final key = '$host:$port:$username';
+    if (_instances.containsKey(key)) {
+      return _instances[key]!; // إرجاع نفس الجلسة المفتوحة مسبقاً
+    }
+    final instance = RouterService._internal(
+      host: host,
+      port: port,
+      username: username,
+      password: password,
+    );
+    _instances[key] = instance;
+    return instance;
+  }
 
   bool _connected = false;
   RouterOSClient? _client;
@@ -35,7 +59,8 @@ class RouterService {
   final Map<String, Completer<Map<String, double>>> _trafficFetchCompleters =
       {};
 
-  RouterService({
+  // المُنشئ الداخلي
+  RouterService._internal({
     required this.host,
     this.port = 8728,
     required this.username,
@@ -235,14 +260,30 @@ class RouterService {
           }
 
           return converted;
-        } catch (_) {
-          _connected = false;
+        } catch (e) {
+          final errStr = e.toString().toLowerCase();
+          // نعيد فتح الاتصال فقط إذا كان الخطأ متعلقاً بالانقطاع الفعلي للشبكة وليس خطأ أمر API عادي
+          bool isConnectionError = e is TimeoutException ||
+              e is SocketException ||
+              errStr.contains('socket') ||
+              errStr.contains('connection') ||
+              errStr.contains('closed') ||
+              errStr.contains('broken');
 
-          if (i < 2) {
-            _releaseLock();
-            await connect(forceReconnect: true);
-            await Future.delayed(Duration(milliseconds: 300 * (i + 1)));
-            await _acquireLock();
+          if (isConnectionError) {
+            _connected = false;
+
+            if (i < 2) {
+              _releaseLock();
+              await connect(forceReconnect: true);
+              await Future.delayed(Duration(milliseconds: 300 * (i + 1)));
+              await _acquireLock();
+            } else {
+              throw Exception('Failed after retries: $command ($e)');
+            }
+          } else {
+            // خطأ عادي من المايكروتك، لا حاجة لقطع الجلسة
+            return [];
           }
         }
       }
@@ -492,6 +533,10 @@ class RouterService {
   void disconnect() {
     _safeCloseClient();
     _connected = false;
+
+    // حذف الجلسة من التخزين لتتمكن من إنشاء واحدة جديدة في المرة القادمة
+    final key = '$host:$port:$username';
+    _instances.remove(key);
 
     for (final c in _commandQueue) {
       if (!c.isCompleted) c.completeError(Exception('Disconnected'));
