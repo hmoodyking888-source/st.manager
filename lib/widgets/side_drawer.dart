@@ -111,7 +111,7 @@ class _SideDrawerState extends State<SideDrawer> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.semiBlack,
+        backgroundColor: AppTheme.activePalette.surface,
         title: const Row(
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.orange),
@@ -131,7 +131,7 @@ class _SideDrawerState extends State<SideDrawer> {
             child: const Text('إلغاء', style: TextStyle(color: Colors.white54)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.activePalette.accent),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('تأكيد وتنفيذ',
                 style: TextStyle(
@@ -523,7 +523,7 @@ class _SideDrawerState extends State<SideDrawer> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppTheme.semiBlack,
+          backgroundColor: AppTheme.activePalette.surface,
           title: const Row(
             children: [
               Icon(Icons.telegram, color: Color(0xFF29B6F6)),
@@ -548,9 +548,9 @@ class _SideDrawerState extends State<SideDrawer> {
                   hint: 'سيتم حفظه تلقائياً',
                 ),
                 const SizedBox(height: 12),
-                const Text('خيارات الإشعارات:',
+                Text('خيارات الإشعارات:',
                     style: TextStyle(
-                        color: AppTheme.gold,
+                        color: AppTheme.activePalette.accent,
                         fontSize: 12,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
@@ -634,9 +634,9 @@ class _SideDrawerState extends State<SideDrawer> {
                   ),
                 ),
                 const Divider(color: Colors.white24, height: 20),
-                const Text('إضافة قطع متعددة يدوياً إلى Netwatch:',
+                Text('إضافة قطع متعددة يدوياً إلى Netwatch:',
                     style: TextStyle(
-                        color: AppTheme.gold,
+                        color: AppTheme.activePalette.accent,
                         fontSize: 12,
                         fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
@@ -677,7 +677,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   const Text('اختبار', style: TextStyle(color: Colors.white)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.activePalette.accent),
               onPressed: () async {
                 final token = tokenCtrl.text.trim();
                 final chat = chatCtrl.text.trim();
@@ -785,7 +785,7 @@ class _SideDrawerState extends State<SideDrawer> {
           Switch(
             value: value,
             onChanged: onChanged,
-            activeColor: AppTheme.gold,
+            activeColor: AppTheme.activePalette.accent,
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ],
@@ -804,14 +804,14 @@ class _SideDrawerState extends State<SideDrawer> {
       child: TextFormField(
         controller: controller,
         keyboardType: keyboardType,
-        style: const TextStyle(color: Colors.white),
+        style: TextStyle(color: AppTheme.activePalette.text),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(color: AppTheme.gold, fontSize: 12),
+          labelStyle: TextStyle(color: AppTheme.activePalette.accent, fontSize: 12),
           hintText: hint,
           hintStyle: const TextStyle(color: Colors.white30),
           filled: true,
-          fillColor: Colors.white10,
+          fillColor: AppTheme.activePalette.surfaceAlt,
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(8),
             borderSide: BorderSide.none,
@@ -1108,10 +1108,10 @@ class _SideDrawerState extends State<SideDrawer> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) {
           return AlertDialog(
-            backgroundColor: AppTheme.semiBlack,
-            title: const Row(
+            backgroundColor: AppTheme.activePalette.surface,
+            title: Row(
               children: [
-                Icon(Icons.rocket_launch, color: AppTheme.gold),
+                Icon(Icons.rocket_launch, color: AppTheme.activePalette.accent),
                 SizedBox(width: 8),
                 Text('فتح السرعة للجميع',
                     style: TextStyle(color: Colors.white, fontSize: 16)),
@@ -1157,17 +1157,17 @@ class _SideDrawerState extends State<SideDrawer> {
                         ],
                       ),
                       isProcessing
-                          ? const SizedBox(
+                          ? SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2,
-                                color: AppTheme.gold,
+                                color: AppTheme.activePalette.accent,
                               ),
                             )
                           : Switch(
                               value: isEnabled,
-                              activeColor: AppTheme.gold,
+                              activeColor: AppTheme.activePalette.accent,
                               onChanged: (val) async {
                                 setDialogState(() => isProcessing = true);
                                 await _toggleFasttrack(val);
@@ -1204,7 +1204,7 @@ class _SideDrawerState extends State<SideDrawer> {
       await showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: AppTheme.semiBlack,
+          backgroundColor: AppTheme.activePalette.surface,
           title: const Text('فتح سرعة مستخدم',
               style: TextStyle(color: Colors.white)),
           content: Column(
@@ -1236,7 +1236,7 @@ class _SideDrawerState extends State<SideDrawer> {
                   const Text('إلغاء', style: TextStyle(color: Colors.white54)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.gold),
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.activePalette.accent),
               onPressed: () {
                 Navigator.pop(ctx);
                 _applyUserSpeedBoost(nameController.text.trim());
@@ -1306,11 +1306,11 @@ class _SideDrawerState extends State<SideDrawer> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        backgroundColor: AppTheme.semiBlack,
+      builder: (_) => AlertDialog(
+        backgroundColor: AppTheme.activePalette.surface,
         content: Row(
           children: [
-            CircularProgressIndicator(color: AppTheme.gold),
+            CircularProgressIndicator(color: AppTheme.activePalette.accent),
             SizedBox(width: 16),
             Text('جاري التحميل...', style: TextStyle(color: Colors.white70)),
           ],
@@ -1328,10 +1328,10 @@ class _SideDrawerState extends State<SideDrawer> {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: AppTheme.semiBlack,
-          title: const Row(
+          backgroundColor: AppTheme.activePalette.surface,
+          title: Row(
             children: [
-              Icon(Icons.router, color: AppTheme.gold),
+              Icon(Icons.router, color: AppTheme.activePalette.accent),
               SizedBox(width: 8),
               Text('معلومات الراوتر', style: TextStyle(color: Colors.white)),
             ],
@@ -1366,7 +1366,7 @@ class _SideDrawerState extends State<SideDrawer> {
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child:
-                  const Text('إغلاق', style: TextStyle(color: AppTheme.gold)),
+                  Text('إغلاق', style: TextStyle(color: AppTheme.activePalette.accent)),
             ),
           ],
         ),
@@ -1385,8 +1385,8 @@ class _SideDrawerState extends State<SideDrawer> {
       child: Row(
         children: [
           Text('$label: ',
-              style: const TextStyle(
-                  color: AppTheme.gold,
+              style: TextStyle(
+                  color: AppTheme.activePalette.accent,
                   fontSize: 12,
                   fontWeight: FontWeight.bold)),
           Expanded(
@@ -1411,16 +1411,179 @@ class _SideDrawerState extends State<SideDrawer> {
     Navigator.pushNamed(context, '/settings');
   }
 
+  Future<void> _showThemePicker() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        final current = AppTheme.currentPreset.value;
+        final palette = AppTheme.activePalette;
+
+        return AlertDialog(
+          backgroundColor: palette.surface,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: palette.border, width: 1),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.palette_outlined, color: palette.accent),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'اختيار ثيم التطبيق',
+                  style: TextStyle(
+                    color: palette.accent,
+                    fontFamily: 'Cairo',
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: AppTheme.availablePresets.map((preset) {
+                final colors = AppTheme.paletteFor(preset);
+                final selected = preset == current;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 9),
+                  child: Material(
+                    color: colors.surfaceAlt,
+                    borderRadius: BorderRadius.circular(13),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(13),
+                      onTap: () async {
+                        AppTheme.setCurrentPreset(preset);
+                        Navigator.of(dialogContext).pop();
+                        try {
+                          await _storage.write(
+                            'app_theme_id',
+                            AppTheme.presetId(preset),
+                          );
+                          await _storage.write(
+                            'theme_mode',
+                            AppTheme.isLightPreset(preset) ? 'light' : 'dark',
+                          );
+                          if (mounted) {
+                            _showSnack(
+                              'تم تطبيق ثيم ${AppTheme.presetName(preset)}',
+                              backgroundColor: colors.accent,
+                            );
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            _showSnack(
+                              'تم تغيير الثيم، تعذر حفظ الاختيار: $e',
+                              backgroundColor: Colors.orange,
+                            );
+                          }
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 13,
+                        ),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(13),
+                          border: Border.all(
+                            color: selected ? colors.accent : colors.border,
+                            width: selected ? 1.8 : 0.8,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                color: colors.background,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: colors.border,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Center(
+                                child: Container(
+                                  width: 13,
+                                  height: 13,
+                                  decoration: BoxDecoration(
+                                    color: colors.accent,
+                                    shape: BoxShape.circle,
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: colors.accent.withOpacity(0.45),
+                                        blurRadius: 8,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    AppTheme.presetName(preset),
+                                    style: TextStyle(
+                                      color: colors.text,
+                                      fontFamily: 'Cairo',
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    AppTheme.presetDescription(preset),
+                                    style: TextStyle(
+                                      color: colors.mutedText,
+                                      fontFamily: 'Cairo',
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            if (selected)
+                              Icon(Icons.check_circle, color: colors.accent),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('إغلاق'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _buildTile({
     required IconData icon,
     required String label,
     required VoidCallback onTap,
-    Color iconColor = AppTheme.gold,
+    Color? iconColor,
     Color? labelColor,
   }) {
     return ListTile(
       dense: true,
-      leading: Icon(icon, color: iconColor, size: 20),
+      leading: Icon(
+        icon,
+        color: iconColor ?? AppTheme.activePalette.accent,
+        size: 20,
+      ),
       title: Text(label,
           style: TextStyle(color: labelColor ?? Colors.white, fontSize: 13)),
       onTap: onTap,
@@ -1431,8 +1594,8 @@ class _SideDrawerState extends State<SideDrawer> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Text(title,
-          style: const TextStyle(
-              color: AppTheme.gold,
+          style: TextStyle(
+              color: AppTheme.activePalette.accent,
               fontSize: 11,
               fontWeight: FontWeight.bold,
               letterSpacing: 0.5)),
@@ -1451,7 +1614,7 @@ class _SideDrawerState extends State<SideDrawer> {
         children: [
           Text('ST Manager',
               style: TextStyle(
-                  color: AppTheme.gold.withOpacity(0.95),
+                  color: AppTheme.activePalette.accent.withOpacity(0.95),
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 0.6)),
@@ -1475,13 +1638,13 @@ class _SideDrawerState extends State<SideDrawer> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Row(
+        Row(
           children: [
-            Icon(Icons.router, color: AppTheme.gold, size: 28),
+            Icon(Icons.router, color: AppTheme.activePalette.accent, size: 28),
             SizedBox(width: 10),
             Text('ST Manager',
                 style: TextStyle(
-                    color: AppTheme.gold,
+                    color: AppTheme.activePalette.accent,
                     fontSize: 18,
                     fontWeight: FontWeight.bold)),
           ],
@@ -1502,11 +1665,11 @@ class _SideDrawerState extends State<SideDrawer> {
             ),
             const SizedBox(width: 6),
             _loadingDays
-                ? const SizedBox(
+                ? SizedBox(
                     width: 14,
                     height: 14,
                     child: CircularProgressIndicator(
-                        strokeWidth: 2, color: AppTheme.gold))
+                        strokeWidth: 2, color: AppTheme.activePalette.accent))
                 : Text(text, style: TextStyle(color: color, fontSize: 12)),
           ],
         ),
@@ -1529,7 +1692,7 @@ class _SideDrawerState extends State<SideDrawer> {
   @override
   Widget build(BuildContext context) {
     return Drawer(
-      backgroundColor: AppTheme.black,
+      backgroundColor: AppTheme.activePalette.background,
       width: MediaQuery.of(context).size.width * 0.75,
       child: SafeArea(
         child: Column(
@@ -1537,7 +1700,7 @@ class _SideDrawerState extends State<SideDrawer> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
-              color: AppTheme.semiBlack,
+              color: AppTheme.activePalette.surface,
               child: _buildSubscriptionHeader(),
             ),
             Expanded(
@@ -1613,6 +1776,11 @@ class _SideDrawerState extends State<SideDrawer> {
                   _buildTile(
                     icon: Icons.palette,
                     label: 'تغيير الثيم',
+                    onTap: _showThemePicker,
+                  ),
+                  _buildTile(
+                    icon: Icons.settings_outlined,
+                    label: 'الإعدادات العامة',
                     onTap: () {
                       Navigator.pop(context);
                       _openSettings();
@@ -1632,7 +1800,7 @@ class _SideDrawerState extends State<SideDrawer> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: AppTheme.semiBlack,
+        backgroundColor: AppTheme.activePalette.surface,
         title: const Row(
           children: [
             Icon(Icons.warning_amber_rounded, color: Colors.orange),

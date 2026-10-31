@@ -43,6 +43,10 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
+  // نحتفظ بأحدث 35 إشعاراً فقط لتقليل استهلاك الذاكرة.
+  static const int _maxRouterNotifications = 35;
+  static const Duration _logsRefreshInterval = Duration(seconds: 40);
+
   RouterService? _routerService;
 
   double _cpuLoad = 0;
@@ -130,7 +134,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _loadRouterLogs();
     _logsTimer?.cancel();
     _logsTimer = Timer.periodic(
-      const Duration(seconds: 12),
+      _logsRefreshInterval,
       (_) => _loadRouterLogs(),
     );
 
@@ -250,8 +254,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         }
 
         total++;
-        final status =
-            device['status']?.toString().toLowerCase().trim() ?? '';
+        final status = device['status']?.toString().toLowerCase().trim() ?? '';
         if (status == 'up') connected++;
       }
 
@@ -373,7 +376,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       RegExp(r'^\s*([^\s(:,;]+)\s*\(', caseSensitive: false),
       RegExp(r'^\s*([^\s:,;]+)\s+(?:logged in|logged out)',
           caseSensitive: false),
-      RegExp(r'^\s*([^\s:,;]+)\s*:\s*(?:connected|disconnected|authenticated|logged)',
+      RegExp(
+          r'^\s*([^\s:,;]+)\s*:\s*(?:connected|disconnected|authenticated|logged)',
           caseSensitive: false),
     ];
 
@@ -573,7 +577,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
     } else if (topicLower.contains('dhcp') ||
         lower.contains('dhcp') ||
-        (lower.contains('lease') && (lower.contains('bound') || lower.contains('assigned')))) {
+        (lower.contains('lease') &&
+            (lower.contains('bound') || lower.contains('assigned')))) {
       category = 'IP';
       icon = Icons.lan_rounded;
       final returnedIp = RegExp(
@@ -663,9 +668,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     final time = _formatRouterLogTime(row['time'] ?? row['datetime']);
     final id = row['.id']?.toString().trim() ?? '';
-    final key = id.isNotEmpty
-        ? '$id|$topics|$message'
-        : '$time|$topics|$message';
+    final key =
+        id.isNotEmpty ? '$id|$topics|$message' : '$time|$topics|$message';
 
     return _RouterLogNotification(
       key: key,
@@ -703,7 +707,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }
 
       final freshEvents = <_RouterLogNotification>[];
-      for (final row in rows.reversed) {
+      // /log/print يعيد السجلات من الأقدم إلى الأحدث؛ نعكس الترتيب
+      // ونفحص أحدث 35 سجلاً فقط، حتى لا نعالج السجلات القديمة كل مرة.
+      for (final row in rows.reversed.take(_maxRouterNotifications)) {
         final event = _translateRouterLog(row);
         if (event == null || _seenLogKeys.contains(event.key)) continue;
         _seenLogKeys.add(event.key);
@@ -714,8 +720,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() {
         if (freshEvents.isNotEmpty) {
           _routerNotifications.insertAll(0, freshEvents);
-          if (_routerNotifications.length > 200) {
-            _routerNotifications.removeRange(200, _routerNotifications.length);
+          if (_routerNotifications.length > _maxRouterNotifications) {
+            _routerNotifications.removeRange(
+              _maxRouterNotifications,
+              _routerNotifications.length,
+            );
           }
         }
         _lastLogsRefresh = DateTime.now();
@@ -730,7 +739,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     } catch (_) {
       if (mounted) {
         setState(() {
-          _logsError = 'تعذرت قراءة سجل الراوتر. تحقق من صلاحية قراءة Log للمستخدم.';
+          _logsError =
+              'تعذرت قراءة سجل الراوتر. تحقق من صلاحية قراءة Log للمستخدم.';
         });
       }
     } finally {
@@ -983,8 +993,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final onSurface = Theme.of(context).colorScheme.onSurface;
     final events = _filteredRouterNotifications;
     final lastRefresh = _lastLogsRefresh == null
-        ? 'لم يتم التحديث بعد'
-        : 'آخر تحديث ${_lastLogsRefresh!.hour.toString().padLeft(2, '0')}:${_lastLogsRefresh!.minute.toString().padLeft(2, '0')}';
+        ? 'التحديث التلقائي كل 40 ثانية'
+        : 'آخر تحديث ${_lastLogsRefresh!.hour.toString().padLeft(2, '0')}:${_lastLogsRefresh!.minute.toString().padLeft(2, '0')} • تلقائياً كل 40 ثانية';
 
     return Column(
       children: [
@@ -1304,8 +1314,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           child: Row(
             children: [
-              const Icon(Icons.telegram,
-                  color: Color(0xFF29B6F6), size: 19),
+              const Icon(Icons.telegram, color: Color(0xFF29B6F6), size: 19),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
